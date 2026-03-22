@@ -1,0 +1,378 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  PASTOR
+  COORDENADOR
+  LIDER
+  APOIO
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum Gender {
+  MASCULINO
+  FEMININO
+  OUTRO
+}
+
+enum ServantStatus {
+  RECRUTAMENTO
+  RECICLAGEM
+  ATIVO
+  INATIVO
+  AFASTADO
+}
+
+enum TrainingStatus {
+  PENDING
+  COMPLETED
+}
+
+enum Aptitude {
+  SOCIAL
+  OPERACIONAL
+  TECNICO
+  APOIO
+  LIDERANCA
+}
+
+enum WorshipServiceType {
+  DOMINGO
+  QUINTA
+  ESPECIAL
+  CEIA
+  VIGILIA
+  CONGRESSO
+}
+
+enum WorshipServiceStatus {
+  PLANEJADO
+  CONFIRMADO
+  FINALIZADO
+  CANCELADO
+}
+
+enum ScheduleStatus {
+  ASSIGNED
+  CONFIRMED
+  SWAPPED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENTE
+  FALTA
+  FALTA_JUSTIFICADA
+}
+
+enum PastoralVisitStatus {
+  ABERTA
+  EM_ANDAMENTO
+  RESOLVIDA
+}
+
+enum TalentStage {
+  RECRUTA
+  EM_TREINAMENTO
+  EM_AVALIACAO
+  APROVADO
+  REPROVADO
+}
+
+enum AlertStatus {
+  OPEN
+  RESOLVED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  STATUS_CHANGE
+  VISIT_RESOLVED
+  SCHEDULE_SWAP
+  DELETE
+}
+
+model User {
+  id                     String              @id @default(cuid())
+  name                   String
+  email                  String              @unique
+  passwordHash           String
+  role                   Role
+  status                 UserStatus          @default(ACTIVE)
+  phone                  String?
+  lastLoginAt            DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  refreshTokens          RefreshToken[]
+  passwordResetTokens    PasswordResetToken[]
+  coordinatedSectors     Sector[]
+  assignedSchedules      Schedule[]          @relation("AssignedSchedules")
+  scheduleSwapHistory    ScheduleSwapHistory[] @relation("SwappedByUser")
+  registeredAttendances  Attendance[]        @relation("RegisteredAttendances")
+  createdPastoralVisits  PastoralVisit[]     @relation("CreatedPastoralVisits")
+  resolvedPastoralVisits PastoralVisit[]     @relation("ResolvedPastoralVisits")
+  createdAlerts          PastoralAlert[]     @relation("AlertCreatedBy")
+  resolvedAlerts         PastoralAlert[]     @relation("AlertResolvedBy")
+  auditLogs              AuditLog[]
+
+  @@index([role])
+  @@index([status])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Sector {
+  id                String    @id @default(cuid())
+  name              String    @unique
+  description       String?
+  color             String?
+  icon              String?
+  popText           String?
+  coordinatorUserId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  coordinator       User?     @relation(fields: [coordinatorUserId], references: [id])
+  servants          Servant[]
+  servantSectors    ServantSector[]
+  schedules         Schedule[]
+
+  @@index([coordinatorUserId])
+}
+
+model Servant {
+  id                String               @id @default(cuid())
+  name              String
+  phone             String?
+  gender            Gender?
+  birthDate         DateTime?
+  status            ServantStatus        @default(RECRUTAMENTO)
+  trainingStatus    TrainingStatus       @default(PENDING)
+  aptitude          Aptitude?
+  classGroup        String?
+  mainSectorId      String?
+  notes             String?
+  joinedAt          DateTime?
+  consecutiveAbsences Int                @default(0)
+  monthlyAbsences   Int                  @default(0)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  mainSector        Sector?              @relation(fields: [mainSectorId], references: [id])
+  servantSectors    ServantSector[]
+  schedules         Schedule[]
+  attendances       Attendance[]
+  pastoralVisits    PastoralVisit[]
+  pastoralAlerts    PastoralAlert[]
+  talents           Talent[]
+  statusHistory     ServantStatusHistory[]
+
+  @@index([name])
+  @@index([status])
+  @@index([trainingStatus])
+  @@index([mainSectorId])
+}
+
+model ServantSector {
+  id        String   @id @default(cuid())
+  servantId String
+  sectorId  String
+  createdAt DateTime @default(now())
+  servant   Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, sectorId])
+  @@index([sectorId])
+}
+
+model ServantStatusHistory {
+  id          String       @id @default(cuid())
+  servantId   String
+  fromStatus  ServantStatus?
+  toStatus    ServantStatus
+  reason      String?
+  createdAt   DateTime     @default(now())
+  servant     Servant      @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@index([servantId, createdAt])
+}
+
+model WorshipService {
+  id          String               @id @default(cuid())
+  type        WorshipServiceType
+  title       String
+  serviceDate DateTime
+  startTime   String
+  notes       String?
+  status      WorshipServiceStatus @default(PLANEJADO)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  schedules   Schedule[]
+  attendances Attendance[]
+
+  @@index([serviceDate])
+  @@index([type])
+  @@unique([serviceDate, startTime, title])
+}
+
+model Schedule {
+  id               String         @id @default(cuid())
+  serviceId        String
+  servantId        String
+  sectorId         String
+  classGroup       String?
+  assignedByUserId String
+  status           ScheduleStatus @default(ASSIGNED)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  service          WorshipService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  servant          Servant        @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  sector           Sector         @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  assignedBy       User           @relation("AssignedSchedules", fields: [assignedByUserId], references: [id])
+  swapHistoryFrom  ScheduleSwapHistory[] @relation("SwapFromSchedule")
+  swapHistoryTo    ScheduleSwapHistory[] @relation("SwapToSchedule")
+
+  @@index([serviceId])
+  @@index([servantId])
+  @@index([sectorId])
+  @@index([status])
+  @@unique([serviceId, servantId, sectorId])
+}
+
+model ScheduleSwapHistory {
+  id                String   @id @default(cuid())
+  fromScheduleId    String
+  toScheduleId      String
+  reason            String?
+  swappedByUserId   String
+  createdAt         DateTime @default(now())
+  fromSchedule      Schedule @relation("SwapFromSchedule", fields: [fromScheduleId], references: [id], onDelete: Cascade)
+  toSchedule        Schedule @relation("SwapToSchedule", fields: [toScheduleId], references: [id], onDelete: Cascade)
+  swappedBy         User     @relation("SwappedByUser", fields: [swappedByUserId], references: [id])
+
+  @@index([createdAt])
+  @@index([swappedByUserId])
+}
+
+model Attendance {
+  id                 String           @id @default(cuid())
+  serviceId          String
+  servantId          String
+  status             AttendanceStatus
+  justification      String?
+  notes              String?
+  registeredByUserId String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  service            WorshipService   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  servant            Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  registeredBy       User             @relation("RegisteredAttendances", fields: [registeredByUserId], references: [id])
+
+  @@index([serviceId])
+  @@index([servantId])
+  @@index([status])
+  @@unique([serviceId, servantId])
+}
+
+model PastoralVisit {
+  id               String             @id @default(cuid())
+  servantId        String
+  reason           String
+  status           PastoralVisitStatus @default(ABERTA)
+  openedAt         DateTime           @default(now())
+  resolvedAt       DateTime?
+  notes            String?
+  createdByUserId  String
+  resolvedByUserId String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  servant          Servant            @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  createdBy        User               @relation("CreatedPastoralVisits", fields: [createdByUserId], references: [id])
+  resolvedBy       User?              @relation("ResolvedPastoralVisits", fields: [resolvedByUserId], references: [id])
+
+  @@index([servantId])
+  @@index([status])
+  @@index([openedAt])
+}
+
+model PastoralAlert {
+  id               String      @id @default(cuid())
+  servantId        String
+  message          String
+  status           AlertStatus @default(OPEN)
+  trigger          String
+  createdAt        DateTime    @default(now())
+  resolvedAt       DateTime?
+  createdByUserId  String?
+  resolvedByUserId String?
+  servant          Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  createdBy        User?       @relation("AlertCreatedBy", fields: [createdByUserId], references: [id])
+  resolvedBy       User?       @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id])
+
+  @@index([servantId])
+  @@index([status])
+}
+
+model Talent {
+  id         String      @id @default(cuid())
+  servantId  String
+  stage      TalentStage
+  notes      String?
+  approvedAt DateTime?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  servant    Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@index([servantId])
+  @@index([stage])
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  action     AuditAction
+  entity     String
+  entityId   String
+  metadata   Json?
+  userId     String?
+  createdAt  DateTime    @default(now())
+  user       User?       @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt])
+}

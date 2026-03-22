@@ -16,14 +16,14 @@ export class PastoralVisitsController {
   constructor(private readonly pastoralVisitsService: PastoralVisitsService) {}
 
   @Get()
-  findAll(@Query() query: ListPastoralVisitsQueryDto) {
-    return this.pastoralVisitsService.findAll(query);
+  findAll(@Query() query: ListPastoralVisitsQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.pastoralVisitsService.findAll(query, user);
   }
 
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   create(@Body() dto: CreatePastoralVisitDto, @CurrentUser() user: JwtPayload) {
-    return this.pastoralVisitsService.create(dto, user.sub);
+    return this.pastoralVisitsService.create(dto, user);
   }
 
   @Patch(':id/resolve')
@@ -33,11 +33,11 @@ export class PastoralVisitsController {
     @Body() dto: ResolvePastoralVisitDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.pastoralVisitsService.resolve(id, dto, user.sub);
+    return this.pastoralVisitsService.resolve(id, dto, user);
   }
 
   @Get('servant/:servantId/history')
-  historyByServant(@Param('servantId') servantId: string) {
-    return this.pastoralVisitsService.historyByServant(servantId);
+  historyByServant(@Param('servantId') servantId: string, @CurrentUser() user: JwtPayload) {
+    return this.pastoralVisitsService.historyByServant(servantId, user);
   }
 }

@@ -4,8 +4,10 @@ import { Role } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
+import { CreateServantWithUserDto } from './dto/create-servant-with-user.dto';
 import { CreateServantDto } from './dto/create-servant.dto';
 import { CompleteTrainingDto } from './dto/complete-training.dto';
+import { LinkServantUserDto } from './dto/link-servant-user.dto';
 import { ListServantsQueryDto } from './dto/list-servants-query.dto';
 import { UpdateServantStatusDto } from './dto/update-servant-status.dto';
 import { UpdateServantDto } from './dto/update-servant.dto';
@@ -18,19 +20,25 @@ export class ServantsController {
   constructor(private readonly servantsService: ServantsService) {}
 
   @Get()
-  findAll(@Query() query: ListServantsQueryDto) {
-    return this.servantsService.findAll(query);
+  findAll(@Query() query: ListServantsQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.servantsService.findAll(query, user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.servantsService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.servantsService.findOne(id, user);
   }
 
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
   create(@Body() dto: CreateServantDto, @CurrentUser() user: JwtPayload) {
-    return this.servantsService.create(dto, user.sub);
+    return this.servantsService.create(dto, user);
+  }
+
+  @Post('with-user')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  createWithUser(@Body() dto: CreateServantWithUserDto, @CurrentUser() user: JwtPayload) {
+    return this.servantsService.createWithUser(dto, user);
   }
 
   @Patch(':id')
@@ -40,7 +48,7 @@ export class ServantsController {
     @Body() dto: UpdateServantDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.servantsService.update(id, dto, user.sub);
+    return this.servantsService.update(id, dto, user);
   }
 
   @Patch(':id/status')
@@ -50,12 +58,22 @@ export class ServantsController {
     @Body() dto: UpdateServantStatusDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.servantsService.updateStatus(id, dto, user.sub);
+    return this.servantsService.updateStatus(id, dto, user);
+  }
+
+  @Patch(':id/link-user')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  linkUser(
+    @Param('id') id: string,
+    @Body() dto: LinkServantUserDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.servantsService.linkUser(id, dto, user);
   }
 
   @Get(':id/history')
-  history(@Param('id') id: string) {
-    return this.servantsService.history(id);
+  history(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.servantsService.history(id, user);
   }
 
   @Patch(':id/training/complete')
@@ -65,6 +83,6 @@ export class ServantsController {
     @Body() dto: CompleteTrainingDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.servantsService.completeTraining(id, dto, user.sub);
+    return this.servantsService.completeTraining(id, dto, user);
   }
 }

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
+import { hasRoleAccess } from '../auth/role-access';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { JwtPayload } from 'src/modules/auth/types/jwt-payload.type';
@@ -36,7 +37,7 @@ export class RolesGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
     const user = request.user;
 
-    if (!user || !requiredRoles.includes(user.role)) {
+    if (!user || !hasRoleAccess(user.role, requiredRoles)) {
       throw new ForbiddenException('You do not have permission for this action');
     }
 

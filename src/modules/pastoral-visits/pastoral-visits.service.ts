@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AlertStatus, AuditAction, PastoralVisitStatus } from '@prisma/client';
+import { AlertStatus, AuditAction, PastoralVisitStatus, Prisma } from '@prisma/client';
+import {
+  assertServantAccess,
+  getPastoralVisitAccessWhere,
+} from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { CreatePastoralVisitDto } from './dto/create-pastoral-visit.dto';
 import { ListPastoralVisitsQueryDto } from './dto/list-pastoral-visits-query.dto';
@@ -13,12 +18,17 @@ export class PastoralVisitsService {
     private readonly auditService: AuditService,
   ) {}
 
-  findAll(query: ListPastoralVisitsQueryDto) {
+  async findAll(query: ListPastoralVisitsQueryDto, actor: JwtPayload) {
+    const scopeWhere = await getPastoralVisitAccessWhere(this.prisma, actor);
+    const queryWhere: Prisma.PastoralVisitWhereInput = {
+      status: query.status,
+      servantId: query.servantId,
+    };
+    const where: Prisma.PastoralVisitWhereInput =
+      scopeWhere !== undefined ? { AND: [queryWhere, scopeWhere] } : queryWhere;
+
     return this.prisma.pastoralVisit.findMany({
-      where: {
-        status: query.status,
-        servantId: query.servantId,
-      },
+      where,
       include: {
         servant: true,
         createdBy: { select: { id: true, name: true } },
@@ -28,7 +38,9 @@ export class PastoralVisitsService {
     });
   }
 
-  async create(dto: CreatePastoralVisitDto, actorUserId: string) {
+  async create(dto: CreatePastoralVisitDto, actor: JwtPayload) {
+    await assertServantAccess(this.prisma, actor, dto.servantId);
+
     const servant = await this.prisma.servant.findUnique({
       where: { id: dto.servantId },
       select: { id: true },
@@ -43,7 +55,7 @@ export class PastoralVisitsService {
         servantId: dto.servantId,
         reason: dto.reason,
         notes: dto.notes,
-        createdByUserId: actorUserId,
+        createdByUserId: actor.sub,
       },
     });
 
@@ -51,24 +63,26 @@ export class PastoralVisitsService {
       action: AuditAction.CREATE,
       entity: 'PastoralVisit',
       entityId: visit.id,
-      userId: actorUserId,
+      userId: actor.sub,
     });
 
     return visit;
   }
 
-  async resolve(id: string, dto: ResolvePastoralVisitDto, actorUserId: string) {
+  async resolve(id: string, dto: ResolvePastoralVisitDto, actor: JwtPayload) {
     const current = await this.prisma.pastoralVisit.findUnique({ where: { id } });
     if (!current) {
       throw new NotFoundException('Pastoral visit not found');
     }
+
+    await assertServantAccess(this.prisma, actor, current.servantId);
 
     const visit = await this.prisma.pastoralVisit.update({
       where: { id },
       data: {
         status: PastoralVisitStatus.RESOLVIDA,
         resolvedAt: new Date(),
-        resolvedByUserId: actorUserId,
+        resolvedByUserId: actor.sub,
         notes: dto.notes ?? current.notes,
       },
     });
@@ -80,7 +94,7 @@ export class PastoralVisitsService {
       },
       data: {
         status: AlertStatus.RESOLVED,
-        resolvedByUserId: actorUserId,
+        resolvedByUserId: actor.sub,
         resolvedAt: new Date(),
       },
     });
@@ -89,14 +103,16 @@ export class PastoralVisitsService {
       action: AuditAction.VISIT_RESOLVED,
       entity: 'PastoralVisit',
       entityId: id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: { notes: dto.notes },
     });
 
     return visit;
   }
 
-  historyByServant(servantId: string) {
+  async historyByServant(servantId: string, actor: JwtPayload) {
+    await assertServantAccess(this.prisma, actor, servantId);
+
     return this.prisma.pastoralVisit.findMany({
       where: { servantId },
       orderBy: { openedAt: 'desc' },

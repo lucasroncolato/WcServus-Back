@@ -29,6 +29,15 @@ export class UpdateUserDto {
   @IsString()
   phone?: string;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'ID do servo para vincular. Envie null para desvincular.',
+    example: 'clx9l8w7y0000xv9d28h2i6v7',
+  })
+  @IsOptional()
+  @IsString()
+  servantId?: string | null;
+
   @ApiPropertyOptional({ enum: UserStatus })
   @IsOptional()
   @IsEnum(UserStatus)

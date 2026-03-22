@@ -1,16 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, MinLength } from 'class-validator';
 
 export class CreatePastoralVisitDto {
-  @ApiProperty()
+  @ApiProperty({ example: 'clx_servant_1' })
   @IsString()
   servantId: string;
 
-  @ApiProperty()
+  @ApiProperty({ example: 'Duas faltas consecutivas sem justificativa.' })
   @IsString()
+  @MinLength(3)
   reason: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'Agendar conversa com líder antes da visita.' })
   @IsOptional()
   @IsString()
   notes?: string;

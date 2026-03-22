@@ -25,6 +25,14 @@ export class CreateUserDto {
   @IsString()
   phone?: string;
 
+  @ApiPropertyOptional({
+    description: 'ID do servo vinculado ao usuário',
+    example: 'clx9l8w7y0000xv9d28h2i6v7',
+  })
+  @IsOptional()
+  @IsString()
+  servantId?: string;
+
   @ApiPropertyOptional({ enum: UserStatus, default: UserStatus.ACTIVE })
   @IsOptional()
   @IsEnum(UserStatus)

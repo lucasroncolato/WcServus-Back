@@ -1,31 +1,36 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PeriodQueryDto } from './dto/period-query.dto';
 import { ReportsService } from './reports.service';
 
 @ApiTags('Reports')
 @ApiBearerAuth()
 @Controller('reports')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('attendance')
-  attendance(@Query() query: PeriodQueryDto) {
-    return this.reportsService.attendanceReport(query);
+  attendance(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.attendanceReport(query, user);
   }
 
   @Get('absences')
-  absences(@Query() query: PeriodQueryDto) {
-    return this.reportsService.absencesReport(query);
+  absences(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.absencesReport(query, user);
   }
 
   @Get('pastoral-visits')
-  pastoralVisits(@Query() query: PeriodQueryDto) {
-    return this.reportsService.pastoralVisitsReport(query);
+  pastoralVisits(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.pastoralVisitsReport(query, user);
   }
 
   @Get('talents')
-  talents(@Query() query: PeriodQueryDto) {
-    return this.reportsService.talentsReport(query);
+  talents(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.talentsReport(query, user);
   }
 }

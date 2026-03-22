@@ -131,14 +131,14 @@ async function main() {
       },
     });
 
-    const apoio = await prisma.user.upsert({
+    const servo = await prisma.user.upsert({
       where: { email: 'apoio@servos.local' },
-      update: { name: 'Apoio Pedro', role: Role.APOIO, passwordHash },
+      update: { name: 'Servo Pedro', role: Role.SERVO, passwordHash },
       create: {
-        name: 'Apoio Pedro',
+        name: 'Servo Pedro',
         email: 'apoio@servos.local',
         passwordHash,
-        role: Role.APOIO,
+        role: Role.SERVO,
       },
     });
 
@@ -278,6 +278,21 @@ async function main() {
       skipDuplicates: true,
     });
 
+    await prisma.user.update({
+      where: { id: coordenador.id },
+      data: { servantId: bruna.id },
+    });
+
+    await prisma.user.update({
+      where: { id: lider.id },
+      data: { servantId: lucas.id },
+    });
+
+    await prisma.user.update({
+      where: { id: servo.id },
+      data: { servantId: carla.id },
+    });
+
     await prisma.servantStatusHistory.createMany({
       data: [lucas, carla, renato, bruna, mateus].map((servant) => ({
         servantId: servant.id,
@@ -412,12 +427,12 @@ async function main() {
           servantId: lucas.id,
         },
       },
-      update: { status: AttendanceStatus.PRESENTE, registeredByUserId: apoio.id },
+      update: { status: AttendanceStatus.PRESENTE, registeredByUserId: servo.id },
       create: {
         serviceId: cultoDomingoManha.id,
         servantId: lucas.id,
         status: AttendanceStatus.PRESENTE,
-        registeredByUserId: apoio.id,
+        registeredByUserId: servo.id,
       },
     });
 
@@ -431,14 +446,14 @@ async function main() {
       update: {
         status: AttendanceStatus.FALTA,
         justification: 'Imprevisto no trabalho',
-        registeredByUserId: apoio.id,
+        registeredByUserId: servo.id,
       },
       create: {
         serviceId: cultoQuintaNoite.id,
         servantId: carla.id,
         status: AttendanceStatus.FALTA,
         justification: 'Imprevisto no trabalho',
-        registeredByUserId: apoio.id,
+        registeredByUserId: servo.id,
       },
     });
 
@@ -452,14 +467,14 @@ async function main() {
       update: {
         status: AttendanceStatus.FALTA_JUSTIFICADA,
         justification: 'Consulta medica',
-        registeredByUserId: apoio.id,
+        registeredByUserId: servo.id,
       },
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: bruna.id,
         status: AttendanceStatus.FALTA_JUSTIFICADA,
         justification: 'Consulta medica',
-        registeredByUserId: apoio.id,
+        registeredByUserId: servo.id,
       },
     });
 
@@ -523,7 +538,7 @@ async function main() {
     console.log(`Default test password: ${DEFAULT_PASSWORD}`);
     console.log('Super admin login: superadmin@servos.local');
     console.log('Admin login: admin@servos.local');
-    console.log(`Common users: ${pastor.email}, ${coordenador.email}, ${lider.email}, ${apoio.email}`);
+    console.log(`Common users: ${pastor.email}, ${coordenador.email}, ${lider.email}, ${servo.email}`);
     console.log(`Super admin id: ${superAdmin.id}`);
   } catch (error) {
     console.error('Seed failed:', error);

@@ -1,14 +1,16 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { UserStatus } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -26,6 +28,14 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        passwordHash: true,
+        servantId: true,
+      },
     });
 
     if (!user || user.status !== UserStatus.ACTIVE) {
@@ -42,45 +52,99 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    return this.createSession(user.id, user.email, user.role);
+    return this.createSession({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      servantId: user.servantId,
+    });
   }
 
   async refresh(dto: RefreshTokenDto) {
     const payload = this.verifyRefreshToken(dto.refreshToken);
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        servantId: true,
+      },
+    });
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const tokens = await this.prisma.refreshToken.findMany({
-      where: {
-        userId: user.id,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const matchedToken = await this.findValidRefreshTokenRecord(user.id, dto.refreshToken);
 
-    let matchedTokenId: string | null = null;
-    for (const token of tokens) {
-      const valid = await bcrypt.compare(dto.refreshToken, token.tokenHash);
-      if (valid) {
-        matchedTokenId = token.id;
-        break;
-      }
-    }
-
-    if (!matchedTokenId) {
+    if (!matchedToken) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     await this.prisma.refreshToken.update({
-      where: { id: matchedTokenId },
+      where: { id: matchedToken.id },
       data: { revokedAt: new Date() },
     });
 
-    return this.createSession(user.id, user.email, user.role);
+    return this.createSession(user);
+  }
+
+  async logout(dto: RefreshTokenDto, currentUserId?: string) {
+    const payload = this.verifyRefreshToken(dto.refreshToken);
+
+    if (currentUserId && payload.sub !== currentUserId) {
+      throw new ForbiddenException('Refresh token does not belong to authenticated user');
+    }
+
+    const matchedToken = await this.findValidRefreshTokenRecord(payload.sub, dto.refreshToken);
+    if (!matchedToken) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    await this.prisma.refreshToken.update({
+      where: { id: matchedToken.id },
+      data: { revokedAt: new Date() },
+    });
+
+    return { message: 'Logged out successfully' };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, status: true, passwordHash: true },
+    });
+
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('Invalid user');
+    }
+
+    const validCurrentPassword = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!validCurrentPassword) {
+      throw new BadRequestException('Current password is invalid');
+    }
+
+    const isSamePassword = await bcrypt.compare(dto.newPassword, user.passwordHash);
+    if (isSamePassword) {
+      throw new BadRequestException('New password must be different from current password');
+    }
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: newPasswordHash },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return { message: 'Password changed successfully' };
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
@@ -115,7 +179,6 @@ export class AuthService {
       },
       include: { user: true },
       orderBy: { createdAt: 'desc' },
-      take: 30,
     });
 
     let matchedRecordId: string | null = null;
@@ -155,7 +218,7 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    return this.prisma.user.findUniqueOrThrow({
+    const account = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
         id: true,
@@ -164,10 +227,72 @@ export class AuthService {
         role: true,
         status: true,
         phone: true,
+        servantId: true,
+        servant: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            trainingStatus: true,
+            mainSectorId: true,
+            mainSector: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            servantSectors: {
+              select: {
+                sector: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        coordinatedSectors: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },
     });
+
+    const linkedSector =
+      account.servant?.mainSector ??
+      account.servant?.servantSectors[0]?.sector ??
+      account.coordinatedSectors[0] ??
+      null;
+
+    return {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      role: account.role,
+      status: account.status,
+      phone: account.phone,
+      servantId: account.servantId,
+      servant: account.servant
+        ? {
+            id: account.servant.id,
+            name: account.servant.name,
+            status: account.servant.status,
+            trainingStatus: account.servant.trainingStatus,
+            mainSectorId: account.servant.mainSectorId,
+            sectors: account.servant.servantSectors.map((x) => x.sector),
+          }
+        : null,
+      linkedSector,
+      permissions: this.resolvePermissions(account.role),
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
   }
 
   private verifyRefreshToken(token: string): JwtPayload {
@@ -180,8 +305,18 @@ export class AuthService {
     }
   }
 
-  private async createSession(userId: string, email: string, role: JwtPayload['role']) {
-    const payload: JwtPayload = { sub: userId, email, role };
+  private async createSession(user: {
+    id: string;
+    email: string;
+    role: JwtPayload['role'];
+    servantId?: string | null;
+  }) {
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      servantId: user.servantId ?? null,
+    };
 
     const accessToken = await this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('JWT_ACCESS_SECRET', 'access-secret'),
@@ -200,13 +335,81 @@ export class AuthService {
 
     await this.prisma.refreshToken.create({
       data: {
-        userId,
+        userId: user.id,
         tokenHash: refreshTokenHash,
         expiresAt: new Date(Date.now() + refreshExpiresInMs),
       },
     });
 
-    return { accessToken, refreshToken };
+    const account = await this.me(user.id);
+
+    return { accessToken, refreshToken, user: account };
+  }
+
+  private resolvePermissions(role: Role) {
+    if (role === Role.SUPER_ADMIN) {
+      return {
+        scope: 'GLOBAL',
+        canManageUsers: true,
+        canManageServants: true,
+        canManageSchedules: true,
+        canViewReports: true,
+        canViewPastoralData: true,
+      };
+    }
+
+    if (role === Role.ADMIN) {
+      return {
+        scope: 'GLOBAL',
+        canManageUsers: true,
+        canManageServants: true,
+        canManageSchedules: true,
+        canViewReports: true,
+        canViewPastoralData: true,
+      };
+    }
+
+    if (role === Role.PASTOR) {
+      return {
+        scope: 'GLOBAL_PASTORAL',
+        canManageUsers: false,
+        canManageServants: true,
+        canManageSchedules: false,
+        canViewReports: true,
+        canViewPastoralData: true,
+      };
+    }
+
+    if (role === Role.COORDENADOR) {
+      return {
+        scope: 'SECTOR',
+        canManageUsers: false,
+        canManageServants: true,
+        canManageSchedules: true,
+        canViewReports: true,
+        canViewPastoralData: true,
+      };
+    }
+
+    if (role === Role.LIDER) {
+      return {
+        scope: 'TEAM',
+        canManageUsers: false,
+        canManageServants: true,
+        canManageSchedules: true,
+        canViewReports: false,
+        canViewPastoralData: false,
+      };
+    }
+
+    return {
+      scope: 'SELF',
+      canManageUsers: false,
+      canManageServants: false,
+      canManageSchedules: false,
+      canViewReports: false,
+      canViewPastoralData: false,
+    };
   }
 
   private getRefreshExpirationMillis(raw: string): number {
@@ -227,5 +430,25 @@ export class AuthService {
       default:
         return 1000 * 60 * 60 * 24 * 7;
     }
+  }
+
+  private async findValidRefreshTokenRecord(userId: string, rawToken: string) {
+    const tokens = await this.prisma.refreshToken.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    for (const token of tokens) {
+      const valid = await bcrypt.compare(rawToken, token.tokenHash);
+      if (valid) {
+        return token;
+      }
+    }
+
+    return null;
   }
 }

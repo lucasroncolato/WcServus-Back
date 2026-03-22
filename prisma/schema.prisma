@@ -13,7 +13,7 @@ enum Role {
   PASTOR
   COORDENADOR
   LIDER
-  APOIO
+  SERVO
 }
 
 enum UserStatus {
@@ -112,10 +112,12 @@ model User {
   passwordHash           String
   role                   Role
   status                 UserStatus          @default(ACTIVE)
+  servantId              String?             @unique
   phone                  String?
   lastLoginAt            DateTime?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
+  servant                Servant?            @relation(fields: [servantId], references: [id], onDelete: SetNull)
   refreshTokens          RefreshToken[]
   passwordResetTokens    PasswordResetToken[]
   coordinatedSectors     Sector[]
@@ -130,6 +132,7 @@ model User {
 
   @@index([role])
   @@index([status])
+  @@index([servantId])
 }
 
 model RefreshToken {
@@ -201,6 +204,7 @@ model Servant {
   pastoralAlerts    PastoralAlert[]
   talents           Talent[]
   statusHistory     ServantStatusHistory[]
+  userAccount       User?
 
   @@index([name])
   @@index([status])

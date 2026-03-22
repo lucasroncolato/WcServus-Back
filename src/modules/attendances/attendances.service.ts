@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { AlertStatus, AttendanceStatus, AuditAction } from '@prisma/client';
+ï»¿import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AlertStatus, AttendanceStatus, AuditAction, Prisma, Role } from '@prisma/client';
+import { assertServantAccess, getAttendanceAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { BatchAttendanceDto } from './dto/batch-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
@@ -14,13 +16,19 @@ export class AttendancesService {
     private readonly auditService: AuditService,
   ) {}
 
-  findAll(query: ListAttendancesQueryDto) {
+  async findAll(query: ListAttendancesQueryDto, actor: JwtPayload) {
+    const scopeWhere = await getAttendanceAccessWhere(this.prisma, actor);
+    const queryWhere: Prisma.AttendanceWhereInput = {
+      serviceId: query.serviceId,
+      servantId: query.servantId,
+      status: query.status,
+    };
+
+    const where: Prisma.AttendanceWhereInput =
+      scopeWhere !== undefined ? { AND: [queryWhere, scopeWhere] } : queryWhere;
+
     return this.prisma.attendance.findMany({
-      where: {
-        serviceId: query.serviceId,
-        servantId: query.servantId,
-        status: query.status,
-      },
+      where,
       include: {
         service: true,
         servant: true,
@@ -32,7 +40,8 @@ export class AttendancesService {
     });
   }
 
-  async checkIn(dto: CheckInDto, actorUserId: string) {
+  async checkIn(dto: CheckInDto, actor: JwtPayload) {
+    await this.assertCanRegisterAttendance(actor, dto.servantId);
     await this.ensureReferences(dto.serviceId, dto.servantId);
 
     const attendance = await this.prisma.attendance.upsert({
@@ -46,7 +55,7 @@ export class AttendancesService {
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
-        registeredByUserId: actorUserId,
+        registeredByUserId: actor.sub,
       },
       create: {
         serviceId: dto.serviceId,
@@ -54,7 +63,7 @@ export class AttendancesService {
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
-        registeredByUserId: actorUserId,
+        registeredByUserId: actor.sub,
       },
       include: {
         service: true,
@@ -63,24 +72,24 @@ export class AttendancesService {
     });
 
     await this.recalculateServantAbsenceMetrics(dto.servantId);
-    await this.ensurePastoralAlertIfNeeded(dto.servantId, actorUserId);
+    await this.ensurePastoralAlertIfNeeded(dto.servantId, actor.sub);
 
     await this.auditService.log({
       action: AuditAction.UPDATE,
       entity: 'Attendance',
       entityId: attendance.id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 
     return attendance;
   }
 
-  async batch(dto: BatchAttendanceDto, actorUserId: string) {
+  async batch(dto: BatchAttendanceDto, actor: JwtPayload) {
     const results = [] as Array<{ serviceId: string; servantId: string; attendanceId: string }>;
 
     for (const record of dto.records) {
-      const attendance = await this.checkIn(record, actorUserId);
+      const attendance = await this.checkIn(record, actor);
       results.push({
         serviceId: attendance.serviceId,
         servantId: attendance.servantId,
@@ -94,11 +103,13 @@ export class AttendancesService {
     };
   }
 
-  async update(id: string, dto: UpdateAttendanceDto, actorUserId: string) {
+  async update(id: string, dto: UpdateAttendanceDto, actor: JwtPayload) {
     const current = await this.prisma.attendance.findUnique({ where: { id } });
     if (!current) {
       throw new NotFoundException('Attendance not found');
     }
+
+    await this.assertCanRegisterAttendance(actor, current.servantId);
 
     const attendance = await this.prisma.attendance.update({
       where: { id },
@@ -106,18 +117,18 @@ export class AttendancesService {
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
-        registeredByUserId: actorUserId,
+        registeredByUserId: actor.sub,
       },
     });
 
     await this.recalculateServantAbsenceMetrics(attendance.servantId);
-    await this.ensurePastoralAlertIfNeeded(attendance.servantId, actorUserId);
+    await this.ensurePastoralAlertIfNeeded(attendance.servantId, actor.sub);
 
     await this.auditService.log({
       action: AuditAction.UPDATE,
       entity: 'Attendance',
       entityId: attendance.id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 
@@ -219,9 +230,17 @@ export class AttendancesService {
         message:
           trigger === 'CONSECUTIVE_ABSENCES'
             ? 'Servo atingiu 3 faltas consecutivas. Avaliar acompanhamento pastoral.'
-            : 'Servo atingiu 4 faltas no mês. Avaliar acompanhamento pastoral.',
+            : 'Servo atingiu 4 faltas no mes. Avaliar acompanhamento pastoral.',
         createdByUserId: actorUserId,
       },
     });
+  }
+
+  private async assertCanRegisterAttendance(actor: JwtPayload, servantId: string) {
+    if (actor.role === Role.SERVO && actor.servantId !== servantId) {
+      throw new ForbiddenException('SERVO can only register own attendance');
+    }
+
+    await assertServantAccess(this.prisma, actor, servantId);
   }
 }

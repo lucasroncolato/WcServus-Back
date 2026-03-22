@@ -1,14 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { AttendanceStatus, PastoralVisitStatus } from '@prisma/client';
+import { AttendanceStatus, PastoralVisitStatus, Prisma } from '@prisma/client';
+import { getServantAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PeriodQueryDto } from './dto/period-query.dto';
 
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async attendanceReport(query: PeriodQueryDto) {
+  async attendanceReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
+    const servantWhere = await this.getScopedServantFilter(actor);
 
     const services = await this.prisma.worshipService.findMany({
       where: {
@@ -16,6 +19,7 @@ export class ReportsService {
       },
       include: {
         attendances: {
+          where: servantWhere ? { servant: servantWhere } : undefined,
           include: {
             servant: { select: { id: true, name: true } },
           },
@@ -40,13 +44,15 @@ export class ReportsService {
     });
   }
 
-  async absencesReport(query: PeriodQueryDto) {
+  async absencesReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
+    const servantWhere = await this.getScopedServantFilter(actor);
 
     const absences = await this.prisma.attendance.findMany({
       where: {
         status: { in: [AttendanceStatus.FALTA, AttendanceStatus.FALTA_JUSTIFICADA] },
         service: { serviceDate: period },
+        servant: servantWhere ?? undefined,
       },
       include: {
         servant: {
@@ -92,12 +98,14 @@ export class ReportsService {
     };
   }
 
-  async pastoralVisitsReport(query: PeriodQueryDto) {
+  async pastoralVisitsReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
+    const servantWhere = await this.getScopedServantFilter(actor);
 
     const visits = await this.prisma.pastoralVisit.findMany({
       where: {
         openedAt: period,
+        servant: servantWhere ?? undefined,
       },
       include: {
         servant: true,
@@ -116,12 +124,14 @@ export class ReportsService {
     };
   }
 
-  async talentsReport(query: PeriodQueryDto) {
+  async talentsReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
+    const servantWhere = await this.getScopedServantFilter(actor);
 
     const talents = await this.prisma.talent.findMany({
       where: {
         createdAt: period,
+        servant: servantWhere ?? undefined,
       },
       include: { servant: true },
       orderBy: { createdAt: 'desc' },
@@ -149,5 +159,9 @@ export class ReportsService {
       gte: query.startDate ? new Date(query.startDate) : defaultStart,
       lte: query.endDate ? new Date(query.endDate) : defaultEnd,
     };
+  }
+
+  private async getScopedServantFilter(actor: JwtPayload): Promise<Prisma.ServantWhereInput | undefined> {
+    return getServantAccessWhere(this.prisma, actor);
   }
 }

@@ -3,11 +3,11 @@ import { AttendanceStatus } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class CheckInDto {
-  @ApiProperty()
+  @ApiProperty({ example: 'clx_service_1' })
   @IsString()
   serviceId: string;
 
-  @ApiProperty()
+  @ApiProperty({ example: 'clx_servant_1' })
   @IsString()
   servantId: string;
 
@@ -15,12 +15,12 @@ export class CheckInDto {
   @IsEnum(AttendanceStatus)
   status: AttendanceStatus;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'Chegou atrasado por transito.' })
   @IsOptional()
   @IsString()
   justification?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'Registrado na entrada principal.' })
   @IsOptional()
   @IsString()
   notes?: string;

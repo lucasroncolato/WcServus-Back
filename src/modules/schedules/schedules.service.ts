@@ -1,16 +1,27 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { AuditAction, ScheduleStatus, ServantStatus, TrainingStatus } from '@prisma/client';
+import { AuditAction, Prisma, Role, ScheduleStatus, ServantStatus, TrainingStatus } from '@prisma/client';
+import {
+  assertSectorAccess,
+  assertServantAccess,
+  getScheduleAccessWhere,
+  resolveScopedSectorIds,
+} from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
+import { DuplicateScheduleDto } from './dto/duplicate-schedule.dto';
 import { GenerateMonthScheduleDto } from './dto/generate-month-schedule.dto';
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
+import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 
@@ -21,13 +32,18 @@ export class SchedulesService {
     private readonly auditService: AuditService,
   ) {}
 
-  findAll(query: ListSchedulesQueryDto) {
+  async findAll(query: ListSchedulesQueryDto, actor: JwtPayload) {
+    const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
+    const queryWhere: Prisma.ScheduleWhereInput = {
+      serviceId: query.serviceId,
+      sectorId: query.sectorId,
+      servantId: query.servantId,
+    };
+    const where: Prisma.ScheduleWhereInput =
+      scopeWhere !== undefined ? { AND: [queryWhere, scopeWhere] } : queryWhere;
+
     return this.prisma.schedule.findMany({
-      where: {
-        serviceId: query.serviceId,
-        sectorId: query.sectorId,
-        servantId: query.servantId,
-      },
+      where,
       include: {
         service: true,
         servant: true,
@@ -40,7 +56,10 @@ export class SchedulesService {
     });
   }
 
-  async create(dto: CreateScheduleDto, actorUserId: string) {
+  async create(dto: CreateScheduleDto, actor: JwtPayload) {
+    await this.assertCanManageSector(actor, dto.sectorId);
+    await assertServantAccess(this.prisma, actor, dto.servantId);
+
     await this.validateScheduleInput(dto.serviceId, dto.sectorId, dto.servantId);
     await this.ensureNoConflict(dto.serviceId, dto.servantId, dto.sectorId);
 
@@ -50,7 +69,7 @@ export class SchedulesService {
         sectorId: dto.sectorId,
         servantId: dto.servantId,
         classGroup: dto.classGroup,
-        assignedByUserId: actorUserId,
+        assignedByUserId: actor.sub,
       },
       include: {
         service: true,
@@ -63,28 +82,40 @@ export class SchedulesService {
       action: AuditAction.CREATE,
       entity: 'Schedule',
       entityId: schedule.id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 
     return schedule;
   }
 
-  async generateMonth(dto: GenerateMonthScheduleDto, actorUserId: string) {
+  async generateMonth(dto: GenerateMonthScheduleDto, actor: JwtPayload) {
+    if (dto.sectorIds?.length) {
+      for (const sectorId of dto.sectorIds) {
+        await this.assertCanManageSector(actor, sectorId);
+      }
+    }
+
     const start = new Date(Date.UTC(dto.year, dto.month - 1, 1, 0, 0, 0));
     const end = new Date(Date.UTC(dto.year, dto.month, 0, 23, 59, 59));
 
-    return this.generateBetween(start, end, dto.sectorIds, dto.classGroup, actorUserId);
+    return this.generateBetween(start, end, dto.sectorIds, dto.classGroup, actor);
   }
 
-  async generateYear(dto: GenerateYearScheduleDto, actorUserId: string) {
+  async generateYear(dto: GenerateYearScheduleDto, actor: JwtPayload) {
+    if (dto.sectorIds?.length) {
+      for (const sectorId of dto.sectorIds) {
+        await this.assertCanManageSector(actor, sectorId);
+      }
+    }
+
     const start = new Date(Date.UTC(dto.year, 0, 1, 0, 0, 0));
     const end = new Date(Date.UTC(dto.year, 11, 31, 23, 59, 59));
 
-    return this.generateBetween(start, end, dto.sectorIds, dto.classGroup, actorUserId);
+    return this.generateBetween(start, end, dto.sectorIds, dto.classGroup, actor);
   }
 
-  async swap(dto: SwapScheduleDto, actorUserId: string) {
+  async swap(dto: SwapScheduleDto, actor: JwtPayload) {
     if (dto.fromScheduleId === dto.toScheduleId) {
       throw new BadRequestException('Schedules must be different for swap');
     }
@@ -97,6 +128,9 @@ export class SchedulesService {
     if (!from || !to) {
       throw new NotFoundException('One or more schedules were not found');
     }
+
+    await this.assertCanManageSchedule(actor, from.id);
+    await this.assertCanManageSchedule(actor, to.id);
 
     if (from.serviceId !== to.serviceId) {
       throw new BadRequestException('Swap must happen inside the same worship service');
@@ -145,7 +179,7 @@ export class SchedulesService {
           fromScheduleId: from.id,
           toScheduleId: to.id,
           reason: dto.reason,
-          swappedByUserId: actorUserId,
+          swappedByUserId: actor.sub,
         },
       });
     });
@@ -154,7 +188,7 @@ export class SchedulesService {
       action: AuditAction.SCHEDULE_SWAP,
       entity: 'ScheduleSwap',
       entityId: from.id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: {
         fromScheduleId: from.id,
         toScheduleId: to.id,
@@ -165,7 +199,9 @@ export class SchedulesService {
     return { message: 'Swap completed successfully' };
   }
 
-  async update(id: string, dto: UpdateScheduleDto, actorUserId: string) {
+  async update(id: string, dto: UpdateScheduleDto, actor: JwtPayload) {
+    await this.assertCanManageSchedule(actor, id);
+
     const existing = await this.prisma.schedule.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Schedule not found');
@@ -176,6 +212,7 @@ export class SchedulesService {
     }
 
     if (dto.servantId) {
+      await assertServantAccess(this.prisma, actor, dto.servantId);
       await this.ensureServantEligibleForSector(dto.servantId, existing.sectorId);
 
       const conflict = await this.prisma.schedule.findFirst({
@@ -210,15 +247,100 @@ export class SchedulesService {
       action: AuditAction.UPDATE,
       entity: 'Schedule',
       entityId: id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 
     return updated;
   }
 
-  swapHistory(limit = 100) {
+  async duplicate(scheduleId: string, dto: DuplicateScheduleDto, actor: JwtPayload) {
+    const source = await this.prisma.schedule.findUnique({
+      where: { id: scheduleId },
+      include: {
+        service: true,
+      },
+    });
+
+    if (!source) {
+      throw new NotFoundException('Source schedule not found');
+    }
+
+    await this.assertCanManageSchedule(actor, source.id);
+    await this.assertCanManageSector(actor, source.sectorId);
+    await assertServantAccess(this.prisma, actor, source.servantId);
+
+    const targetService = await this.prisma.worshipService.findUnique({
+      where: { id: dto.worshipServiceId },
+      select: { id: true },
+    });
+
+    if (!targetService) {
+      throw new NotFoundException('Target worship service not found');
+    }
+
+    await this.ensureServantEligibleForSector(source.servantId, source.sectorId);
+
+    const conflict = await this.prisma.schedule.findFirst({
+      where: {
+        serviceId: dto.worshipServiceId,
+        servantId: source.servantId,
+        sectorId: source.sectorId,
+      },
+      select: { id: true },
+    });
+
+    if (conflict) {
+      throw new ConflictException('A schedule already exists for this servant and sector in target service');
+    }
+
+    const duplicated = await this.prisma.schedule.create({
+      data: {
+        serviceId: dto.worshipServiceId,
+        servantId: source.servantId,
+        sectorId: source.sectorId,
+        classGroup: source.classGroup,
+        status: ScheduleStatus.ASSIGNED,
+        assignedByUserId: actor.sub,
+      },
+      include: {
+        service: true,
+        servant: true,
+        sector: true,
+      },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.CREATE,
+      entity: 'ScheduleDuplicate',
+      entityId: duplicated.id,
+      userId: actor.sub,
+      metadata: {
+        sourceScheduleId: source.id,
+        targetWorshipServiceId: dto.worshipServiceId,
+      },
+    });
+
+    return duplicated;
+  }
+
+  async swapHistory(query: ListSwapHistoryQueryDto, actor: JwtPayload) {
+    const scopeWhere = await this.getSwapHistoryWhere(actor);
+    const filterWhere: Prisma.ScheduleSwapHistoryWhereInput = {
+      swappedByUserId: query.swappedByUserId,
+      fromSchedule:
+        query.serviceId || query.sectorId
+          ? {
+              serviceId: query.serviceId,
+              sectorId: query.sectorId,
+            }
+          : undefined,
+    };
+    const where: Prisma.ScheduleSwapHistoryWhereInput =
+      scopeWhere !== undefined ? { AND: [filterWhere, scopeWhere] } : filterWhere;
+
     return this.prisma.scheduleSwapHistory.findMany({
+      where,
       include: {
         swappedBy: {
           select: { id: true, name: true, email: true, role: true },
@@ -231,7 +353,7 @@ export class SchedulesService {
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: query.limit ?? 100,
     });
   }
 
@@ -240,8 +362,10 @@ export class SchedulesService {
     end: Date,
     sectorIds: string[] | undefined,
     classGroup: string | undefined,
-    actorUserId: string,
+    actor: JwtPayload,
   ) {
+    const scopedSectorIds = await this.resolveAllowedSectorIds(actor, sectorIds);
+
     const services = await this.prisma.worshipService.findMany({
       where: {
         serviceDate: { gte: start, lte: end },
@@ -254,9 +378,13 @@ export class SchedulesService {
     }
 
     const sectors = await this.prisma.sector.findMany({
-      where: { id: sectorIds ? { in: sectorIds } : undefined },
+      where: { id: { in: scopedSectorIds } },
       orderBy: { name: 'asc' },
     });
+
+    if (sectors.length === 0) {
+      return { created: 0, skipped: 0, reason: 'No sectors available for this profile' };
+    }
 
     const sectorServants = await this.prisma.servant.findMany({
       where: {
@@ -366,7 +494,7 @@ export class SchedulesService {
             sectorId: sector.id,
             servantId: selected.id,
             classGroup,
-            assignedByUserId: actorUserId,
+            assignedByUserId: actor.sub,
           },
         });
 
@@ -383,8 +511,8 @@ export class SchedulesService {
       action: AuditAction.CREATE,
       entity: 'ScheduleGeneration',
       entityId: `${start.toISOString()}_${end.toISOString()}`,
-      userId: actorUserId,
-      metadata: { created, skipped, classGroup, sectorIds },
+      userId: actor.sub,
+      metadata: { created, skipped, classGroup, sectorIds: scopedSectorIds },
     });
 
     return { created, skipped, services: services.length, sectors: sectors.length };
@@ -486,5 +614,71 @@ export class SchedulesService {
         },
       });
     }
+  }
+
+  private async resolveAllowedSectorIds(actor: JwtPayload, requestedSectorIds?: string[]) {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
+      if (requestedSectorIds?.length) {
+        return [...new Set(requestedSectorIds)];
+      }
+
+      const allSectors = await this.prisma.sector.findMany({ select: { id: true } });
+      return allSectors.map((sector) => sector.id);
+    }
+
+    const allowed = await resolveScopedSectorIds(this.prisma, actor);
+    if (requestedSectorIds?.length) {
+      const outOfScope = requestedSectorIds.some((id) => !allowed.includes(id));
+      if (outOfScope) {
+        throw new ForbiddenException('You can only generate schedules for your allowed sectors');
+      }
+      return [...new Set(requestedSectorIds)];
+    }
+
+    return allowed;
+  }
+
+  private async assertCanManageSector(actor: JwtPayload, sectorId: string) {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
+      return;
+    }
+
+    if (actor.role === Role.COORDENADOR || actor.role === Role.LIDER) {
+      await assertSectorAccess(this.prisma, actor, sectorId);
+      return;
+    }
+
+    throw new ForbiddenException('You do not have permission to manage schedules for this sector');
+  }
+
+  private async assertCanManageSchedule(actor: JwtPayload, scheduleId: string) {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
+      return;
+    }
+
+    const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
+    const schedule = await this.prisma.schedule.findFirst({
+      where: scopeWhere ? { AND: [{ id: scheduleId }, scopeWhere] } : { id: scheduleId },
+      select: { id: true },
+    });
+
+    if (!schedule) {
+      throw new ForbiddenException('You do not have permission for this schedule');
+    }
+  }
+
+  private async getSwapHistoryWhere(actor: JwtPayload): Promise<Prisma.ScheduleSwapHistoryWhereInput | undefined> {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
+      return undefined;
+    }
+
+    const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
+    if (!scopeWhere) {
+      return undefined;
+    }
+
+    return {
+      OR: [{ fromSchedule: scopeWhere }, { toSchedule: scopeWhere }],
+    };
   }
 }

@@ -1,20 +1,34 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { IsBoolean, IsObject, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { ScheduleGenerationWeightsDto } from './schedule-generation-weights.dto';
 
-export class GenerateMonthScheduleDto {
-  @ApiProperty({ example: 2026 })
-  @IsInt()
-  @Min(2020)
-  year: number;
+export class GeneratePeriodScheduleDto {
+  @ApiProperty({ example: '2026-03-23' })
+  @IsString()
+  startDate: string;
 
-  @ApiProperty({ example: 4 })
-  @IsInt()
-  @Min(1)
-  @Max(12)
-  month: number;
+  @ApiProperty({ example: '2026-04-21' })
+  @IsString()
+  endDate: string;
+
+  @ApiPropertyOptional({ type: [Number], description: '0=Dom ... 6=Sab' })
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  weekdays?: number[];
 
   @ApiPropertyOptional({ type: [String], example: ['clx_sector_1', 'clx_sector_2'] })
   @IsOptional()
@@ -26,6 +40,11 @@ export class GenerateMonthScheduleDto {
   @IsOptional()
   @IsString()
   classGroup?: string;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  respectFairnessRules?: boolean;
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
@@ -49,3 +68,4 @@ export class GenerateMonthScheduleDto {
   @Type(() => ScheduleGenerationWeightsDto)
   weights?: ScheduleGenerationWeightsDto;
 }
+

@@ -1,0 +1,1373 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-03-23T12:19:26.326Z",
+  "__export_source": "codex.cli",
+  "resources": [
+    {
+      "_id": "wrk_sistema_servos",
+      "_type": "workspace",
+      "name": "Sistema de Servos API",
+      "description": "Colecao gerada automaticamente com todos os endpoints do projeto"
+    },
+    {
+      "_id": "env_sistema_servos_base",
+      "_type": "environment",
+      "parentId": "wrk_sistema_servos",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:3000",
+        "access_token": "",
+        "refresh_token": ""
+      }
+    },
+    {
+      "_id": "fld_auth",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Auth",
+      "description": ""
+    },
+    {
+      "_id": "fld_users",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Users",
+      "description": ""
+    },
+    {
+      "_id": "fld_servants",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Servants",
+      "description": ""
+    },
+    {
+      "_id": "fld_sectors",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Sectors",
+      "description": ""
+    },
+    {
+      "_id": "fld_worship_services",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Worship Services",
+      "description": ""
+    },
+    {
+      "_id": "fld_schedules",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Schedules",
+      "description": ""
+    },
+    {
+      "_id": "fld_attendances",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Attendances",
+      "description": ""
+    },
+    {
+      "_id": "fld_pastoral_visits",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Pastoral Visits",
+      "description": ""
+    },
+    {
+      "_id": "fld_reports",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Reports",
+      "description": ""
+    },
+    {
+      "_id": "fld_talents",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Talents",
+      "description": ""
+    },
+    {
+      "_id": "fld_dashboard",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Dashboard",
+      "description": ""
+    },
+    {
+      "_id": "fld_audit",
+      "_type": "request_group",
+      "parentId": "wrk_sistema_servos",
+      "name": "Audit",
+      "description": ""
+    },
+    {
+      "_id": "req_001",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "POST /auth/login",
+      "method": "POST",
+      "url": "{{ _.base_url }}/auth/login",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_002",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "POST /auth/refresh",
+      "method": "POST",
+      "url": "{{ _.base_url }}/auth/refresh",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_003",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "POST /auth/logout",
+      "method": "POST",
+      "url": "{{ _.base_url }}/auth/logout",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_004",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "POST /auth/forgot-password",
+      "method": "POST",
+      "url": "{{ _.base_url }}/auth/forgot-password",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_005",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "POST /auth/reset-password",
+      "method": "POST",
+      "url": "{{ _.base_url }}/auth/reset-password",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_006",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "GET /auth/me",
+      "method": "GET",
+      "url": "{{ _.base_url }}/auth/me",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_007",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "POST /auth/change-password",
+      "method": "POST",
+      "url": "{{ _.base_url }}/auth/change-password",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_008",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "GET /users",
+      "method": "GET",
+      "url": "{{ _.base_url }}/users",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_009",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "GET /users/:id",
+      "method": "GET",
+      "url": "{{ _.base_url }}/users/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_010",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "POST /users",
+      "method": "POST",
+      "url": "{{ _.base_url }}/users",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_011",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "PATCH /users/:id",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/users/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_012",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "PATCH /users/:id/status",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/users/:id/status",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_013",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "PATCH /users/:id/role",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/users/:id/role",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_014",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "PATCH /users/:id/servant-link",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/users/:id/servant-link",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_015",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "DELETE /users/:id",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/users/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_016",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "GET /servants",
+      "method": "GET",
+      "url": "{{ _.base_url }}/servants",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_017",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "GET /servants/:id",
+      "method": "GET",
+      "url": "{{ _.base_url }}/servants/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_018",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "POST /servants",
+      "method": "POST",
+      "url": "{{ _.base_url }}/servants",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_019",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "POST /servants/with-user",
+      "method": "POST",
+      "url": "{{ _.base_url }}/servants/with-user",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_020",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "PATCH /servants/:id",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/servants/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_021",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "PATCH /servants/:id/status",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/servants/:id/status",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_022",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "PATCH /servants/:id/link-user",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/servants/:id/link-user",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_023",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "GET /servants/:id/history",
+      "method": "GET",
+      "url": "{{ _.base_url }}/servants/:id/history",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_024",
+      "_type": "request",
+      "parentId": "fld_servants",
+      "name": "PATCH /servants/:id/training/complete",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/servants/:id/training/complete",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_025",
+      "_type": "request",
+      "parentId": "fld_sectors",
+      "name": "GET /sectors",
+      "method": "GET",
+      "url": "{{ _.base_url }}/sectors",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_026",
+      "_type": "request",
+      "parentId": "fld_sectors",
+      "name": "GET /sectors/:id",
+      "method": "GET",
+      "url": "{{ _.base_url }}/sectors/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_027",
+      "_type": "request",
+      "parentId": "fld_sectors",
+      "name": "POST /sectors",
+      "method": "POST",
+      "url": "{{ _.base_url }}/sectors",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_028",
+      "_type": "request",
+      "parentId": "fld_sectors",
+      "name": "PATCH /sectors/:id",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/sectors/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_029",
+      "_type": "request",
+      "parentId": "fld_sectors",
+      "name": "GET /sectors/:id/servants",
+      "method": "GET",
+      "url": "{{ _.base_url }}/sectors/:id/servants",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_030",
+      "_type": "request",
+      "parentId": "fld_worship_services",
+      "name": "GET /worship-services",
+      "method": "GET",
+      "url": "{{ _.base_url }}/worship-services",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_031",
+      "_type": "request",
+      "parentId": "fld_worship_services",
+      "name": "GET /worship-services/:id",
+      "method": "GET",
+      "url": "{{ _.base_url }}/worship-services/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_032",
+      "_type": "request",
+      "parentId": "fld_worship_services",
+      "name": "POST /worship-services",
+      "method": "POST",
+      "url": "{{ _.base_url }}/worship-services",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_033",
+      "_type": "request",
+      "parentId": "fld_worship_services",
+      "name": "PATCH /worship-services/:id",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/worship-services/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_034",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "GET /schedules",
+      "method": "GET",
+      "url": "{{ _.base_url }}/schedules",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_035",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "POST /schedules",
+      "method": "POST",
+      "url": "{{ _.base_url }}/schedules",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_036",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "POST /schedules/generate-month",
+      "method": "POST",
+      "url": "{{ _.base_url }}/schedules/generate-month",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_037",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "POST /schedules/generate-year",
+      "method": "POST",
+      "url": "{{ _.base_url }}/schedules/generate-year",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_038",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "POST /schedules/swap",
+      "method": "POST",
+      "url": "{{ _.base_url }}/schedules/swap",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_039",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "PATCH /schedules/:id",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/schedules/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_040",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "POST /schedules/:id/duplicate",
+      "method": "POST",
+      "url": "{{ _.base_url }}/schedules/:id/duplicate",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_041",
+      "_type": "request",
+      "parentId": "fld_schedules",
+      "name": "GET /schedules/swap-history",
+      "method": "GET",
+      "url": "{{ _.base_url }}/schedules/swap-history",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_042",
+      "_type": "request",
+      "parentId": "fld_attendances",
+      "name": "GET /attendances",
+      "method": "GET",
+      "url": "{{ _.base_url }}/attendances",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_043",
+      "_type": "request",
+      "parentId": "fld_attendances",
+      "name": "POST /attendances/check-in",
+      "method": "POST",
+      "url": "{{ _.base_url }}/attendances/check-in",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_044",
+      "_type": "request",
+      "parentId": "fld_attendances",
+      "name": "POST /attendances/batch",
+      "method": "POST",
+      "url": "{{ _.base_url }}/attendances/batch",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_045",
+      "_type": "request",
+      "parentId": "fld_attendances",
+      "name": "PATCH /attendances/:id",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/attendances/:id",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_046",
+      "_type": "request",
+      "parentId": "fld_pastoral_visits",
+      "name": "GET /pastoral-visits",
+      "method": "GET",
+      "url": "{{ _.base_url }}/pastoral-visits",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_047",
+      "_type": "request",
+      "parentId": "fld_pastoral_visits",
+      "name": "POST /pastoral-visits",
+      "method": "POST",
+      "url": "{{ _.base_url }}/pastoral-visits",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_048",
+      "_type": "request",
+      "parentId": "fld_pastoral_visits",
+      "name": "PATCH /pastoral-visits/:id/resolve",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/pastoral-visits/:id/resolve",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_049",
+      "_type": "request",
+      "parentId": "fld_pastoral_visits",
+      "name": "GET /pastoral-visits/servant/:servantId/history",
+      "method": "GET",
+      "url": "{{ _.base_url }}/pastoral-visits/servant/:servantId/history",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_050",
+      "_type": "request",
+      "parentId": "fld_reports",
+      "name": "GET /reports/attendance",
+      "method": "GET",
+      "url": "{{ _.base_url }}/reports/attendance",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_051",
+      "_type": "request",
+      "parentId": "fld_reports",
+      "name": "GET /reports/absences",
+      "method": "GET",
+      "url": "{{ _.base_url }}/reports/absences",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_052",
+      "_type": "request",
+      "parentId": "fld_reports",
+      "name": "GET /reports/pastoral-visits",
+      "method": "GET",
+      "url": "{{ _.base_url }}/reports/pastoral-visits",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_053",
+      "_type": "request",
+      "parentId": "fld_reports",
+      "name": "GET /reports/talents",
+      "method": "GET",
+      "url": "{{ _.base_url }}/reports/talents",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_054",
+      "_type": "request",
+      "parentId": "fld_talents",
+      "name": "GET /talents",
+      "method": "GET",
+      "url": "{{ _.base_url }}/talents",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_055",
+      "_type": "request",
+      "parentId": "fld_talents",
+      "name": "POST /talents",
+      "method": "POST",
+      "url": "{{ _.base_url }}/talents",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_056",
+      "_type": "request",
+      "parentId": "fld_talents",
+      "name": "PATCH /talents/:id/stage",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/talents/:id/stage",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_057",
+      "_type": "request",
+      "parentId": "fld_talents",
+      "name": "PATCH /talents/:id/approve",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/talents/:id/approve",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \n}"
+      }
+    },
+    {
+      "_id": "req_058",
+      "_type": "request",
+      "parentId": "fld_dashboard",
+      "name": "GET /dashboard/summary",
+      "method": "GET",
+      "url": "{{ _.base_url }}/dashboard/summary",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_059",
+      "_type": "request",
+      "parentId": "fld_dashboard",
+      "name": "GET /dashboard/alerts",
+      "method": "GET",
+      "url": "{{ _.base_url }}/dashboard/alerts",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    },
+    {
+      "_id": "req_060",
+      "_type": "request",
+      "parentId": "fld_audit",
+      "name": "GET /audit",
+      "method": "GET",
+      "url": "{{ _.base_url }}/audit",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      }
+    }
+  ]
+}

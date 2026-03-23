@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { Role, ScheduleStatus } from '@prisma/client';
+import { AuditAction, Role, ScheduleStatus } from '@prisma/client';
 import { SchedulesService } from './schedules.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -80,7 +80,9 @@ describe('SchedulesService - duplicate', () => {
 
     const result = await service.duplicate('schedule-1', { worshipServiceId: 'service-b' }, actor);
 
-    expect(result).toEqual({ id: 'schedule-2', status: ScheduleStatus.ASSIGNED });
+    expect(result).toEqual(
+      expect.objectContaining({ id: 'schedule-2', status: ScheduleStatus.ASSIGNED }),
+    );
     expect(prisma.schedule.create).toHaveBeenCalled();
     expect(auditService.log).toHaveBeenCalled();
   });
@@ -147,5 +149,130 @@ describe('SchedulesService - duplicate', () => {
     await expect(
       service.duplicate('schedule-1', { worshipServiceId: 'service-b' }, localActor),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('SchedulesService - history', () => {
+  const prisma = {
+    schedule: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    scheduleSwapHistory: {
+      findMany: jest.fn(),
+    },
+    auditLog: {
+      findMany: jest.fn(),
+    },
+  } as any;
+
+  const auditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+
+  const actor: JwtPayload = {
+    sub: 'user-1',
+    email: 'admin@wcservus.com',
+    role: Role.ADMIN,
+    servantId: null,
+  };
+
+  let service: SchedulesService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.schedule.findFirst.mockReset();
+    prisma.schedule.findUnique.mockReset();
+    prisma.scheduleSwapHistory.findMany.mockReset();
+    prisma.auditLog.findMany.mockReset();
+    service = new SchedulesService(prisma, auditService);
+  });
+
+  it('should return merged history sorted desc with SWAPPED/CREATED/UPDATED/STATUS_CHANGED/DUPLICATED', async () => {
+    prisma.schedule.findFirst.mockResolvedValue({ id: 'schedule-1' });
+    prisma.schedule.findUnique.mockResolvedValue({ id: 'schedule-1' });
+
+    prisma.scheduleSwapHistory.findMany.mockResolvedValue([
+      {
+        id: 'sw-1',
+        fromScheduleId: 'schedule-1',
+        toScheduleId: 'schedule-2',
+        reason: 'Troca manual',
+        createdAt: new Date('2026-03-23T10:00:00.000Z'),
+        swappedBy: { id: 'u-1', name: 'Coord' },
+      },
+    ]);
+
+    prisma.auditLog.findMany.mockResolvedValue([
+      {
+        id: 'a-1',
+        action: AuditAction.CREATE,
+        entity: 'Schedule',
+        metadata: null,
+        createdAt: new Date('2026-03-23T09:00:00.000Z'),
+      },
+      {
+        id: 'a-2',
+        action: AuditAction.UPDATE,
+        entity: 'Schedule',
+        metadata: null,
+        createdAt: new Date('2026-03-23T08:00:00.000Z'),
+      },
+      {
+        id: 'a-3',
+        action: AuditAction.STATUS_CHANGE,
+        entity: 'Schedule',
+        metadata: null,
+        createdAt: new Date('2026-03-23T07:00:00.000Z'),
+      },
+      {
+        id: 'a-4',
+        action: AuditAction.CREATE,
+        entity: 'ScheduleDuplicate',
+        metadata: null,
+        createdAt: new Date('2026-03-23T06:00:00.000Z'),
+      },
+    ]);
+
+    const result = await service.history('schedule-1', actor);
+
+    expect(result.map((item) => item.type)).toEqual([
+      'SWAPPED',
+      'CREATED',
+      'UPDATED',
+      'STATUS_CHANGED',
+      'DUPLICATED',
+    ]);
+    expect(result[0].createdAt.toISOString()).toBe('2026-03-23T10:00:00.000Z');
+    expect(result[result.length - 1].createdAt.toISOString()).toBe('2026-03-23T06:00:00.000Z');
+  });
+
+  it('should include swaps where schedule is source or target', async () => {
+    prisma.schedule.findFirst.mockResolvedValue({ id: 'schedule-1' });
+    prisma.schedule.findUnique.mockResolvedValue({ id: 'schedule-1' });
+
+    prisma.scheduleSwapHistory.findMany.mockResolvedValue([
+      {
+        id: 'sw-from',
+        fromScheduleId: 'schedule-1',
+        toScheduleId: 'schedule-9',
+        reason: null,
+        createdAt: new Date('2026-03-23T10:00:00.000Z'),
+        swappedBy: { id: 'u-1', name: 'Coord' },
+      },
+      {
+        id: 'sw-to',
+        fromScheduleId: 'schedule-8',
+        toScheduleId: 'schedule-1',
+        reason: null,
+        createdAt: new Date('2026-03-23T09:00:00.000Z'),
+        swappedBy: { id: 'u-1', name: 'Coord' },
+      },
+    ]);
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const result = await service.history('schedule-1', actor);
+
+    expect(result.filter((item) => item.type === 'SWAPPED')).toHaveLength(2);
   });
 });

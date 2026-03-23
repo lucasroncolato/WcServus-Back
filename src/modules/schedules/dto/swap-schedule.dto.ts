@@ -2,13 +2,25 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional } from 'class-validator';
 
 export class SwapScheduleDto {
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Modo novo: id da escala a ser trocada' })
+  @IsOptional()
   @IsString()
-  fromScheduleId: string;
+  scheduleId?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Modo novo: novo servo da escala' })
+  @IsOptional()
   @IsString()
-  toScheduleId: string;
+  servantId?: string;
+
+  @ApiProperty({ description: 'Modo legado: escala origem' })
+  @IsString()
+  @IsOptional()
+  fromScheduleId?: string;
+
+  @ApiProperty({ description: 'Modo legado: escala destino' })
+  @IsString()
+  @IsOptional()
+  toScheduleId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

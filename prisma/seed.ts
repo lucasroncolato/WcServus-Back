@@ -1,6 +1,10 @@
 import {
   Aptitude,
+  AlertStatus,
+  AuditAction,
   AttendanceStatus,
+  Gender,
+  ScheduleStatus,
   TrainingStatus,
   PrismaClient,
   Role,
@@ -19,10 +23,16 @@ const DEFAULT_PASSWORD = '123456';
 async function upsertServantByName(params: {
   name: string;
   phone?: string;
+  gender?: Gender;
+  birthDate?: Date;
   status?: ServantStatus;
+  trainingStatus?: TrainingStatus;
   aptitude?: Aptitude;
   classGroup?: string;
   mainSectorId?: string;
+  notes?: string;
+  consecutiveAbsences?: number;
+  monthlyAbsences?: number;
   joinedAt?: Date;
 }) {
   const existing = await prisma.servant.findFirst({
@@ -35,10 +45,16 @@ async function upsertServantByName(params: {
       where: { id: existing.id },
       data: {
         phone: params.phone,
+        gender: params.gender,
+        birthDate: params.birthDate,
         status: params.status,
+        trainingStatus: params.trainingStatus,
         aptitude: params.aptitude,
         classGroup: params.classGroup,
         mainSectorId: params.mainSectorId,
+        notes: params.notes,
+        consecutiveAbsences: params.consecutiveAbsences,
+        monthlyAbsences: params.monthlyAbsences,
         joinedAt: params.joinedAt,
       },
     });
@@ -48,10 +64,16 @@ async function upsertServantByName(params: {
     data: {
       name: params.name,
       phone: params.phone,
+      gender: params.gender,
+      birthDate: params.birthDate,
       status: params.status,
+      trainingStatus: params.trainingStatus,
       aptitude: params.aptitude,
       classGroup: params.classGroup,
       mainSectorId: params.mainSectorId,
+      notes: params.notes,
+      consecutiveAbsences: params.consecutiveAbsences,
+      monthlyAbsences: params.monthlyAbsences,
       joinedAt: params.joinedAt,
     },
   });
@@ -71,6 +93,7 @@ async function main() {
         role: Role.SUPER_ADMIN,
         status: UserStatus.ACTIVE,
         passwordHash,
+        phone: '11999990000',
       },
       create: {
         name: 'Super Admin',
@@ -78,6 +101,7 @@ async function main() {
         passwordHash,
         role: Role.SUPER_ADMIN,
         status: UserStatus.ACTIVE,
+        phone: '11999990000',
       },
     });
 
@@ -88,6 +112,7 @@ async function main() {
         role: Role.ADMIN,
         status: UserStatus.ACTIVE,
         passwordHash,
+        phone: '11999990010',
       },
       create: {
         name: 'Admin Geral',
@@ -95,6 +120,7 @@ async function main() {
         passwordHash,
         role: Role.ADMIN,
         status: UserStatus.ACTIVE,
+        phone: '11999990010',
       },
     });
 
@@ -200,57 +226,81 @@ async function main() {
     const lucas = await upsertServantByName({
       name: 'Lucas Alves',
       phone: '11999990001',
+      gender: Gender.MASCULINO,
+      birthDate: new Date('1998-05-12T00:00:00Z'),
       status: ServantStatus.ATIVO,
+      trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.SOCIAL,
       classGroup: 'A',
       mainSectorId: recepcao.id,
+      notes: 'Comunicativo e responsavel na recepcao.',
       joinedAt: new Date('2024-03-01T00:00:00Z'),
     });
 
     const carla = await upsertServantByName({
       name: 'Carla Menezes',
       phone: '11999990002',
+      gender: Gender.FEMININO,
+      birthDate: new Date('1995-09-01T00:00:00Z'),
       status: ServantStatus.ATIVO,
+      trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.TECNICO,
       classGroup: 'B',
       mainSectorId: midia.id,
+      notes: 'Referencia em transmissao e projecao.',
       joinedAt: new Date('2023-08-20T00:00:00Z'),
     });
 
     const renato = await upsertServantByName({
       name: 'Renato Lima',
       phone: '11999990003',
+      gender: Gender.MASCULINO,
       status: ServantStatus.RECICLAGEM,
+      trainingStatus: TrainingStatus.PENDING,
       aptitude: Aptitude.APOIO,
       classGroup: 'A',
       mainSectorId: recepcao.id,
+      notes: 'Em processo de reciclagem.',
+      consecutiveAbsences: 1,
+      monthlyAbsences: 1,
     });
 
     const bruna = await upsertServantByName({
       name: 'Bruna Costa',
       phone: '11999990004',
+      gender: Gender.FEMININO,
       status: ServantStatus.ATIVO,
+      trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.LIDERANCA,
       classGroup: 'C',
       mainSectorId: intercessao.id,
+      notes: 'Perfil de lideranca e cuidado pastoral.',
     });
 
     const mateus = await upsertServantByName({
       name: 'Mateus Rocha',
       phone: '11999990005',
+      gender: Gender.MASCULINO,
       status: ServantStatus.AFASTADO,
+      trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.OPERACIONAL,
       classGroup: 'B',
       mainSectorId: midia.id,
+      notes: 'Afastado temporariamente por questoes pessoais.',
+      consecutiveAbsences: 2,
+      monthlyAbsences: 3,
     });
 
     console.log('Cleaning operational records to keep seed deterministic...');
     await prisma.scheduleSwapHistory.deleteMany();
+    await prisma.passwordResetToken.deleteMany();
+    await prisma.refreshToken.deleteMany();
     await prisma.attendance.deleteMany();
     await prisma.schedule.deleteMany();
     await prisma.pastoralVisit.deleteMany();
     await prisma.pastoralAlert.deleteMany();
     await prisma.talent.deleteMany();
+    await prisma.auditLog.deleteMany();
     await prisma.servantStatusHistory.deleteMany();
     await prisma.servantSector.deleteMany({
       where: { servantId: { in: [lucas.id, carla.id, renato.id, bruna.id, mateus.id] } },
@@ -366,7 +416,7 @@ async function main() {
     });
 
     console.log('Upserting schedules and attendances...');
-    await prisma.schedule.upsert({
+    const scheduleDomingoManhaLucas = await prisma.schedule.upsert({
       where: {
         serviceId_servantId_sectorId: {
           serviceId: cultoDomingoManha.id,
@@ -417,6 +467,61 @@ async function main() {
         sectorId: intercessao.id,
         classGroup: 'C',
         assignedByUserId: admin.id,
+      },
+    });
+
+    const scheduleDomingoNoiteLucas = await prisma.schedule.upsert({
+      where: {
+        serviceId_servantId_sectorId: {
+          serviceId: cultoDomingoNoite.id,
+          servantId: lucas.id,
+          sectorId: recepcao.id,
+        },
+      },
+      update: {
+        classGroup: 'A',
+        assignedByUserId: admin.id,
+        status: ScheduleStatus.SWAPPED,
+      },
+      create: {
+        serviceId: cultoDomingoNoite.id,
+        servantId: lucas.id,
+        sectorId: recepcao.id,
+        classGroup: 'A',
+        assignedByUserId: admin.id,
+        status: ScheduleStatus.SWAPPED,
+      },
+    });
+
+    const scheduleDomingoNoiteCarla = await prisma.schedule.upsert({
+      where: {
+        serviceId_servantId_sectorId: {
+          serviceId: cultoDomingoNoite.id,
+          servantId: carla.id,
+          sectorId: midia.id,
+        },
+      },
+      update: {
+        classGroup: 'B',
+        assignedByUserId: admin.id,
+        status: ScheduleStatus.SWAPPED,
+      },
+      create: {
+        serviceId: cultoDomingoNoite.id,
+        servantId: carla.id,
+        sectorId: midia.id,
+        classGroup: 'B',
+        assignedByUserId: admin.id,
+        status: ScheduleStatus.SWAPPED,
+      },
+    });
+
+    const scheduleSwap = await prisma.scheduleSwapHistory.create({
+      data: {
+        fromScheduleId: scheduleDomingoNoiteLucas.id,
+        toScheduleId: scheduleDomingoNoiteCarla.id,
+        reason: 'Troca aprovada por indisponibilidade de ultima hora',
+        swappedByUserId: coordenador.id,
       },
     });
 
@@ -496,6 +601,18 @@ async function main() {
       ],
     });
 
+    const resolvedVisit = await prisma.pastoralVisit.create({
+      data: {
+        servantId: mateus.id,
+        reason: 'Reintegracao apos periodo afastado',
+        status: PastoralVisitStatus.RESOLVIDA,
+        createdByUserId: pastor.id,
+        resolvedByUserId: pastor.id,
+        resolvedAt: new Date('2026-03-16T18:00:00Z'),
+        notes: 'Retorno liberado com acompanhamento.',
+      },
+    });
+
     await prisma.pastoralAlert.createMany({
       data: [
         {
@@ -509,6 +626,15 @@ async function main() {
           trigger: 'MONTHLY_ABSENCES',
           message: 'Servo com faltas acumuladas no mes.',
           createdByUserId: pastor.id,
+        },
+        {
+          servantId: mateus.id,
+          trigger: 'PASTORAL_FOLLOWUP',
+          message: 'Alerta encerrado apos reuniao pastoral.',
+          status: AlertStatus.RESOLVED,
+          createdByUserId: pastor.id,
+          resolvedByUserId: pastor.id,
+          resolvedAt: new Date('2026-03-16T18:30:00Z'),
         },
       ],
     });
@@ -530,6 +656,57 @@ async function main() {
           servantId: mateus.id,
           stage: TalentStage.EM_AVALIACAO,
           notes: 'Retorno gradual apos afastamento',
+        },
+        {
+          servantId: carla.id,
+          stage: TalentStage.RECRUTA,
+          notes: 'Novo talento para mentoria tecnica interna.',
+        },
+      ],
+    });
+
+    await prisma.refreshToken.create({
+      data: {
+        userId: servo.id,
+        tokenHash: await bcrypt.hash('seed-refresh-token-servo', 10),
+        expiresAt: new Date('2026-04-01T00:00:00Z'),
+      },
+    });
+
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: lider.id,
+        tokenHash: await bcrypt.hash('seed-reset-token-lider', 10),
+        expiresAt: new Date('2026-03-24T00:00:00Z'),
+      },
+    });
+
+    await prisma.auditLog.createMany({
+      data: [
+        {
+          action: AuditAction.CREATE,
+          entity: 'Schedule',
+          entityId: scheduleDomingoManhaLucas.id,
+          metadata: { source: 'seed', service: 'Culto Domingo Manha' },
+          userId: admin.id,
+        },
+        {
+          action: AuditAction.SCHEDULE_SWAP,
+          entity: 'ScheduleSwapHistory',
+          entityId: scheduleSwap.id,
+          metadata: {
+            source: 'seed',
+            fromScheduleId: scheduleDomingoNoiteLucas.id,
+            toScheduleId: scheduleDomingoNoiteCarla.id,
+          },
+          userId: coordenador.id,
+        },
+        {
+          action: AuditAction.VISIT_RESOLVED,
+          entity: 'PastoralVisit',
+          entityId: resolvedVisit.id,
+          metadata: { source: 'seed', note: 'Visita pastoral resolvida no seed' },
+          userId: pastor.id,
         },
       ],
     });

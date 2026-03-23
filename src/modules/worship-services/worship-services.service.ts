@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
+import { getSaoPauloWeekday, resolvePlanningWindow } from 'src/common/utils/planning-window.utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateWorshipServiceDto } from './dto/create-worship-service.dto';
@@ -14,18 +15,32 @@ export class WorshipServicesService {
   ) {}
 
   findAll(query: ListWorshipServicesQueryDto) {
+    if (query.windowMode && !query.startDate) {
+      throw new BadRequestException('startDate is required when windowMode is informed');
+    }
+
+    const { start, end } = resolvePlanningWindow({
+      windowMode: query.windowMode,
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
+
     return this.prisma.worshipService.findMany({
       where: {
         serviceDate:
-          query.startDate || query.endDate
+          start || end
             ? {
-                gte: query.startDate ? new Date(query.startDate) : undefined,
-                lte: query.endDate ? new Date(query.endDate) : undefined,
+                gte: start,
+                lte: end,
               }
             : undefined,
       },
       orderBy: { serviceDate: 'asc' },
-    });
+    }).then((services) =>
+      query.weekdays?.length
+        ? services.filter((service) => query.weekdays?.includes(getSaoPauloWeekday(service.serviceDate)))
+        : services,
+    );
   }
 
   findOne(id: string) {

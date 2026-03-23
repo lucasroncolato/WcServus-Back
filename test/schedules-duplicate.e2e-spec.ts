@@ -15,9 +15,13 @@ describe('Schedules duplicate endpoint (e2e)', () => {
 
   const schedulesServiceMock = {
     duplicate: jest.fn(),
+    history: jest.fn(),
     findAll: jest.fn(),
     create: jest.fn(),
     generateMonth: jest.fn(),
+    generatePeriod: jest.fn(),
+    generateService: jest.fn(),
+    generateServices: jest.fn(),
     generateYear: jest.fn(),
     swap: jest.fn(),
     update: jest.fn(),
@@ -107,5 +111,31 @@ describe('Schedules duplicate endpoint (e2e)', () => {
       .post('/schedules/schedule-1/duplicate')
       .send({ worshipServiceId: 'service-2' })
       .expect(409);
+  });
+
+  it('GET /schedules/:id/history -> 200', async () => {
+    schedulesServiceMock.history.mockResolvedValue([
+      {
+        id: 'evt-1',
+        scheduleId: 'schedule-1',
+        type: 'CREATED',
+        message: 'Escala criada.',
+        createdAt: '2026-03-23T12:00:00.000Z',
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .get('/schedules/schedule-1/history')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(Array.isArray(body)).toBe(true);
+        expect(body[0].type).toBe('CREATED');
+      });
+  });
+
+  it('GET /schedules/:id/history -> 404', async () => {
+    schedulesServiceMock.history.mockRejectedValue(new NotFoundException('Schedule not found'));
+
+    await request(app.getHttpServer()).get('/schedules/not-found/history').expect(404);
   });
 });

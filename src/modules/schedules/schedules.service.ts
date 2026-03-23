@@ -6,7 +6,22 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { AuditAction, Prisma, Role, ScheduleStatus, ServantStatus, TrainingStatus } from '@prisma/client';
+import {
+  AttendanceStatus,
+  AuditAction,
+  Prisma,
+  Role,
+  ScheduleStatus,
+  ServantStatus,
+  TrainingStatus,
+  WorshipServiceStatus,
+} from '@prisma/client';
+import {
+  getSaoPauloWeekday,
+  parseSaoPauloDateEnd,
+  parseSaoPauloDateStart,
+  resolvePlanningWindow,
+} from 'src/common/utils/planning-window.utils';
 import {
   assertSectorAccess,
   assertServantAccess,
@@ -19,11 +34,73 @@ import { AuditService } from '../audit/audit.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { DuplicateScheduleDto } from './dto/duplicate-schedule.dto';
 import { GenerateMonthScheduleDto } from './dto/generate-month-schedule.dto';
+import { GeneratePeriodScheduleDto } from './dto/generate-period-schedule.dto';
+import { GenerateServiceScheduleDto } from './dto/generate-service-schedule.dto';
+import { GenerateServicesScheduleDto } from './dto/generate-services-schedule.dto';
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
 import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
+import { ScheduleGenerationWeightsDto } from './dto/schedule-generation-weights.dto';
+
+type GenerationWeights = {
+  monthlyLoad: number;
+  recentSequence: number;
+  recentAbsences: number;
+  sectorAffinity: number;
+};
+
+type GenerationOptions = {
+  mode?: 'generate-month' | 'generate-year' | 'generate-service' | 'generate-services' | 'generate-period';
+  year: number;
+  month?: number;
+  serviceIds?: string[];
+  weekdays?: number[];
+  sectorIds?: string[];
+  classGroup?: string;
+  respectFairnessRules?: boolean;
+  dryRun?: boolean;
+  force?: boolean;
+  allowMultiSectorSameService?: boolean;
+  weights?: ScheduleGenerationWeightsDto;
+};
+
+type EligibleCandidate = {
+  servantId: string;
+  sectorId: string;
+  isMainSector: boolean;
+  assignedCountMonth: number;
+  consecutiveAssignments: number;
+  lastAssignedAt: Date | null;
+  absencesLast60d: number;
+  score: number;
+};
+
+type GenerationAction =
+  | 'CREATED'
+  | 'UPDATED'
+  | 'SKIPPED'
+  | 'CONFLICT'
+  | 'WOULD_CREATE'
+  | 'WOULD_UPDATE';
+
+type GenerationItem = {
+  serviceId: string;
+  sectorId: string;
+  servantId?: string;
+  scheduleId?: string;
+  action: GenerationAction;
+  score?: number;
+  reason?: string;
+};
+
+const DEFAULT_GENERATION_WEIGHTS: GenerationWeights = {
+  monthlyLoad: 0.6,
+  recentSequence: 0.2,
+  recentAbsences: 0.15,
+  sectorAffinity: 0.05,
+};
 
 @Injectable()
 export class SchedulesService {
@@ -33,16 +110,35 @@ export class SchedulesService {
   ) {}
 
   async findAll(query: ListSchedulesQueryDto, actor: JwtPayload) {
+    if (query.windowMode && !query.startDate) {
+      throw new BadRequestException('startDate is required when windowMode is informed');
+    }
+
+    const { start, end } = resolvePlanningWindow({
+      windowMode: query.windowMode,
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
+
     const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
     const queryWhere: Prisma.ScheduleWhereInput = {
       serviceId: query.serviceId,
       sectorId: query.sectorId,
       servantId: query.servantId,
+      service:
+        start || end
+          ? {
+              serviceDate: {
+                gte: start,
+                lte: end,
+              },
+            }
+          : undefined,
     };
     const where: Prisma.ScheduleWhereInput =
       scopeWhere !== undefined ? { AND: [queryWhere, scopeWhere] } : queryWhere;
 
-    return this.prisma.schedule.findMany({
+    const schedules = await this.prisma.schedule.findMany({
       where,
       include: {
         service: true,
@@ -54,6 +150,12 @@ export class SchedulesService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    const filteredByWeekday = query.weekdays?.length
+      ? schedules.filter((schedule) => query.weekdays?.includes(getSaoPauloWeekday(schedule.service.serviceDate)))
+      : schedules;
+
+    return filteredByWeekday.map((schedule) => this.toApiSchedule(schedule));
   }
 
   async create(dto: CreateScheduleDto, actor: JwtPayload) {
@@ -86,7 +188,7 @@ export class SchedulesService {
       metadata: dto as unknown as Record<string, unknown>,
     });
 
-    return schedule;
+    return this.toApiSchedule(schedule);
   }
 
   async generateMonth(dto: GenerateMonthScheduleDto, actor: JwtPayload) {
@@ -99,7 +201,143 @@ export class SchedulesService {
     const start = new Date(Date.UTC(dto.year, dto.month - 1, 1, 0, 0, 0));
     const end = new Date(Date.UTC(dto.year, dto.month, 0, 23, 59, 59));
 
-    return this.generateBetween(start, end, dto.sectorIds, dto.classGroup, actor);
+    return this.generateBetween(start, end, actor, {
+      mode: 'generate-month',
+      year: dto.year,
+      month: dto.month,
+      sectorIds: dto.sectorIds,
+      classGroup: dto.classGroup,
+      dryRun: dto.dryRun,
+      force: dto.force,
+      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      weights: dto.weights,
+    });
+  }
+
+  async generatePeriod(dto: GeneratePeriodScheduleDto, actor: JwtPayload) {
+    if (dto.sectorIds?.length) {
+      for (const sectorId of dto.sectorIds) {
+        await this.assertCanManageSector(actor, sectorId);
+      }
+    }
+
+    const start = parseSaoPauloDateStart(dto.startDate);
+    const end = parseSaoPauloDateEnd(dto.endDate);
+
+    if (end.getTime() < start.getTime()) {
+      throw new BadRequestException('endDate must be greater than or equal to startDate');
+    }
+
+    return this.generateBetween(start, end, actor, {
+      mode: 'generate-period',
+      year: Number(dto.startDate.slice(0, 4)),
+      weekdays: dto.weekdays,
+      sectorIds: dto.sectorIds,
+      classGroup: dto.classGroup,
+      respectFairnessRules: dto.respectFairnessRules,
+      dryRun: dto.dryRun,
+      force: dto.force,
+      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      weights: dto.weights,
+    });
+  }
+
+  async generateService(dto: GenerateServiceScheduleDto, actor: JwtPayload) {
+    if (dto.sectorIds?.length) {
+      for (const sectorId of dto.sectorIds) {
+        await this.assertCanManageSector(actor, sectorId);
+      }
+    }
+
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: dto.serviceId },
+      select: { id: true, serviceDate: true },
+    });
+
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+
+    const serviceDate = new Date(service.serviceDate);
+    const start = new Date(Date.UTC(serviceDate.getUTCFullYear(), serviceDate.getUTCMonth(), serviceDate.getUTCDate(), 0, 0, 0));
+    const end = new Date(Date.UTC(serviceDate.getUTCFullYear(), serviceDate.getUTCMonth(), serviceDate.getUTCDate(), 23, 59, 59));
+
+    return this.generateBetween(start, end, actor, {
+      mode: 'generate-service',
+      year: serviceDate.getUTCFullYear(),
+      month: serviceDate.getUTCMonth() + 1,
+      serviceIds: [service.id],
+      sectorIds: dto.sectorIds,
+      classGroup: dto.classGroup,
+      dryRun: dto.dryRun,
+      force: dto.force,
+      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      weights: dto.weights,
+    });
+  }
+
+  async generateServices(dto: GenerateServicesScheduleDto, actor: JwtPayload) {
+    const serviceIds = [...new Set(dto.serviceIds ?? [])].filter(Boolean);
+    if (!serviceIds.length) {
+      throw new BadRequestException('At least one serviceId must be provided');
+    }
+
+    if (dto.sectorIds?.length) {
+      for (const sectorId of dto.sectorIds) {
+        await this.assertCanManageSector(actor, sectorId);
+      }
+    }
+
+    const services = await this.prisma.worshipService.findMany({
+      where: { id: { in: serviceIds } },
+      select: { id: true, serviceDate: true },
+      orderBy: [{ serviceDate: 'asc' }, { id: 'asc' }],
+    });
+
+    if (!services.length) {
+      throw new NotFoundException('No worship services found for the provided serviceIds');
+    }
+
+    const foundIds = new Set(services.map((service) => service.id));
+    const missingServiceId = serviceIds.find((id) => !foundIds.has(id));
+    if (missingServiceId) {
+      throw new NotFoundException(`Worship service not found: ${missingServiceId}`);
+    }
+
+    const startServiceDate = services[0].serviceDate;
+    const endServiceDate = services[services.length - 1].serviceDate;
+    const start = new Date(
+      Date.UTC(
+        startServiceDate.getUTCFullYear(),
+        startServiceDate.getUTCMonth(),
+        startServiceDate.getUTCDate(),
+        0,
+        0,
+        0,
+      ),
+    );
+    const end = new Date(
+      Date.UTC(
+        endServiceDate.getUTCFullYear(),
+        endServiceDate.getUTCMonth(),
+        endServiceDate.getUTCDate(),
+        23,
+        59,
+        59,
+      ),
+    );
+
+    return this.generateBetween(start, end, actor, {
+      mode: 'generate-services',
+      year: startServiceDate.getUTCFullYear(),
+      serviceIds,
+      sectorIds: dto.sectorIds,
+      classGroup: dto.classGroup,
+      dryRun: dto.dryRun,
+      force: dto.force,
+      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      weights: dto.weights,
+    });
   }
 
   async generateYear(dto: GenerateYearScheduleDto, actor: JwtPayload) {
@@ -112,17 +350,111 @@ export class SchedulesService {
     const start = new Date(Date.UTC(dto.year, 0, 1, 0, 0, 0));
     const end = new Date(Date.UTC(dto.year, 11, 31, 23, 59, 59));
 
-    return this.generateBetween(start, end, dto.sectorIds, dto.classGroup, actor);
+    return this.generateBetween(start, end, actor, {
+      mode: 'generate-year',
+      year: dto.year,
+      sectorIds: dto.sectorIds,
+      classGroup: dto.classGroup,
+      dryRun: dto.dryRun,
+      force: dto.force,
+      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      weights: dto.weights,
+    });
   }
 
   async swap(dto: SwapScheduleDto, actor: JwtPayload) {
+    const scheduleInclude = {
+      service: true,
+      servant: true,
+      sector: true,
+    } as const;
+
+    const isSimpleSwap = dto.scheduleId !== undefined || dto.servantId !== undefined;
+
+    if (isSimpleSwap) {
+      if (!dto.scheduleId || !dto.servantId) {
+        throw new BadRequestException('Payload must include scheduleId and servantId');
+      }
+
+      const current = await this.prisma.schedule.findUnique({
+        where: { id: dto.scheduleId },
+        include: scheduleInclude,
+      });
+
+      if (!current) {
+        throw new NotFoundException('Schedule not found');
+      }
+
+      await this.assertCanManageSchedule(actor, current.id);
+      await assertServantAccess(this.prisma, actor, dto.servantId);
+      await this.ensureServantEligibleForSector(dto.servantId, current.sectorId);
+
+      const conflict = await this.prisma.schedule.findFirst({
+        where: {
+          serviceId: current.serviceId,
+          servantId: dto.servantId,
+          NOT: { id: current.id },
+        },
+        select: { id: true },
+      });
+
+      if (conflict) {
+        throw new ConflictException('Servant is already assigned to this worship service');
+      }
+
+      const updated = await this.prisma.schedule.update({
+        where: { id: current.id },
+        data: {
+          servantId: dto.servantId,
+          status: ScheduleStatus.SWAPPED,
+        },
+        include: scheduleInclude,
+      });
+
+      await this.prisma.scheduleSwapHistory.create({
+        data: {
+          fromScheduleId: current.id,
+          toScheduleId: updated.id,
+          reason: dto.reason,
+          swappedByUserId: actor.sub,
+        },
+      });
+
+      await this.auditService.log({
+        action: AuditAction.SCHEDULE_SWAP,
+        entity: 'Schedule',
+        entityId: current.id,
+        userId: actor.sub,
+        metadata: {
+          scheduleId: current.id,
+          previousServantId: current.servantId,
+          servantId: dto.servantId,
+          reason: dto.reason,
+        },
+      });
+
+      return this.toApiSchedule(updated);
+    }
+
+    if (!dto.fromScheduleId || !dto.toScheduleId) {
+      throw new BadRequestException(
+        'Payload must include either scheduleId+servantId or fromScheduleId+toScheduleId',
+      );
+    }
+
     if (dto.fromScheduleId === dto.toScheduleId) {
       throw new BadRequestException('Schedules must be different for swap');
     }
 
     const [from, to] = await Promise.all([
-      this.prisma.schedule.findUnique({ where: { id: dto.fromScheduleId }, include: { service: true } }),
-      this.prisma.schedule.findUnique({ where: { id: dto.toScheduleId }, include: { service: true } }),
+      this.prisma.schedule.findUnique({
+        where: { id: dto.fromScheduleId },
+        include: { service: true, servant: true, sector: true },
+      }),
+      this.prisma.schedule.findUnique({
+        where: { id: dto.toScheduleId },
+        include: { service: true, servant: true, sector: true },
+      }),
     ]);
 
     if (!from || !to) {
@@ -163,15 +495,17 @@ export class SchedulesService {
       throw new BadRequestException('Swap creates a sector conflict');
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.schedule.update({
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedFrom = await tx.schedule.update({
         where: { id: from.id },
         data: { servantId: to.servantId, status: ScheduleStatus.SWAPPED },
+        include: scheduleInclude,
       });
 
-      await tx.schedule.update({
+      const updatedTo = await tx.schedule.update({
         where: { id: to.id },
         data: { servantId: from.servantId, status: ScheduleStatus.SWAPPED },
+        include: scheduleInclude,
       });
 
       await tx.scheduleSwapHistory.create({
@@ -182,6 +516,11 @@ export class SchedulesService {
           swappedByUserId: actor.sub,
         },
       });
+
+      return {
+        fromSchedule: this.toApiSchedule(updatedFrom),
+        toSchedule: this.toApiSchedule(updatedTo),
+      };
     });
 
     await this.auditService.log({
@@ -196,7 +535,7 @@ export class SchedulesService {
       },
     });
 
-    return { message: 'Swap completed successfully' };
+    return result;
   }
 
   async update(id: string, dto: UpdateScheduleDto, actor: JwtPayload) {
@@ -207,34 +546,48 @@ export class SchedulesService {
       throw new NotFoundException('Schedule not found');
     }
 
-    if (!dto.servantId && dto.classGroup === undefined) {
+    if (
+      dto.servantId === undefined &&
+      dto.sectorId === undefined &&
+      dto.classGroup === undefined &&
+      dto.status === undefined
+    ) {
       throw new BadRequestException('Nothing to update in schedule');
     }
 
-    if (dto.servantId) {
+    const nextServantId = dto.servantId ?? existing.servantId;
+    const nextSectorId = dto.sectorId ?? existing.sectorId;
+
+    if (dto.servantId !== undefined) {
       await assertServantAccess(this.prisma, actor, dto.servantId);
-      await this.ensureServantEligibleForSector(dto.servantId, existing.sectorId);
+    }
 
-      const conflict = await this.prisma.schedule.findFirst({
-        where: {
-          serviceId: existing.serviceId,
-          servantId: dto.servantId,
-          NOT: { id },
-        },
-        select: { id: true },
-      });
+    if (dto.sectorId !== undefined) {
+      await this.assertCanManageSector(actor, dto.sectorId);
+    }
 
-      if (conflict) {
-        throw new BadRequestException('Servant is already assigned to this worship service');
-      }
+    await this.ensureServantEligibleForSector(nextServantId, nextSectorId);
+
+    const conflict = await this.prisma.schedule.findFirst({
+      where: {
+        serviceId: existing.serviceId,
+        servantId: nextServantId,
+        NOT: { id },
+      },
+      select: { id: true },
+    });
+
+    if (conflict) {
+      throw new ConflictException('Servant is already assigned to this worship service');
     }
 
     const updated = await this.prisma.schedule.update({
       where: { id },
       data: {
         servantId: dto.servantId,
+        sectorId: dto.sectorId,
         classGroup: dto.classGroup,
-        status: dto.servantId ? ScheduleStatus.SWAPPED : undefined,
+        status: dto.status,
       },
       include: {
         service: true,
@@ -244,14 +597,14 @@ export class SchedulesService {
     });
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: dto.status !== undefined ? AuditAction.STATUS_CHANGE : AuditAction.UPDATE,
       entity: 'Schedule',
       entityId: id,
       userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 
-    return updated;
+    return this.toApiSchedule(updated);
   }
 
   async duplicate(scheduleId: string, dto: DuplicateScheduleDto, actor: JwtPayload) {
@@ -321,7 +674,19 @@ export class SchedulesService {
       },
     });
 
-    return duplicated;
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'Schedule',
+      entityId: source.id,
+      userId: actor.sub,
+      metadata: {
+        type: 'DUPLICATED',
+        duplicatedScheduleId: duplicated.id,
+        targetWorshipServiceId: dto.worshipServiceId,
+      },
+    });
+
+    return this.toApiSchedule(duplicated);
   }
 
   async swapHistory(query: ListSwapHistoryQueryDto, actor: JwtPayload) {
@@ -339,7 +704,7 @@ export class SchedulesService {
     const where: Prisma.ScheduleSwapHistoryWhereInput =
       scopeWhere !== undefined ? { AND: [filterWhere, scopeWhere] } : filterWhere;
 
-    return this.prisma.scheduleSwapHistory.findMany({
+    const records = await this.prisma.scheduleSwapHistory.findMany({
       where,
       include: {
         swappedBy: {
@@ -355,155 +720,463 @@ export class SchedulesService {
       orderBy: { createdAt: 'desc' },
       take: query.limit ?? 100,
     });
+
+    return records.map((item) => {
+      const message =
+        item.reason ??
+        `Troca de escala realizada por ${item.swappedBy.name} em ${item.createdAt.toISOString()}`;
+
+      return {
+        id: item.id,
+        scheduleId: item.fromScheduleId,
+        type: 'SWAPPED' as const,
+        message,
+        description: message,
+        createdAt: item.createdAt,
+      };
+    });
+  }
+
+  async history(scheduleId: string, actor: JwtPayload) {
+    await this.assertCanManageSchedule(actor, scheduleId);
+
+    const schedule = await this.prisma.schedule.findUnique({
+      where: { id: scheduleId },
+      select: { id: true },
+    });
+
+    if (!schedule) {
+      throw new NotFoundException('Schedule not found');
+    }
+
+    const [swapRecords, auditRecords] = await Promise.all([
+      this.prisma.scheduleSwapHistory.findMany({
+        where: {
+          OR: [{ fromScheduleId: scheduleId }, { toScheduleId: scheduleId }],
+        },
+        include: {
+          swappedBy: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 300,
+      }),
+      this.prisma.auditLog.findMany({
+        where: {
+          entityId: scheduleId,
+          entity: { in: ['Schedule', 'ScheduleDuplicate'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 300,
+      }),
+    ]);
+
+    const swapEvents = swapRecords.map((item) => {
+      const message =
+        item.reason ??
+        `Troca de escala realizada por ${item.swappedBy.name} em ${item.createdAt.toISOString()}`;
+
+      return {
+        id: `swap-${item.id}`,
+        scheduleId,
+        type: 'SWAPPED' as const,
+        message,
+        description: message,
+        createdAt: item.createdAt,
+      };
+    });
+
+    const auditEvents = auditRecords.map((item) => {
+      const isDuplicatedEvent =
+        item.entity === 'ScheduleDuplicate' || (item.metadata as { type?: string } | null)?.type === 'DUPLICATED';
+
+      const type = isDuplicatedEvent
+        ? ('DUPLICATED' as const)
+        : item.action === AuditAction.CREATE
+          ? ('CREATED' as const)
+          : item.action === AuditAction.UPDATE
+            ? ('UPDATED' as const)
+            : item.action === AuditAction.STATUS_CHANGE
+              ? ('STATUS_CHANGED' as const)
+              : ('UPDATED' as const);
+
+      const message =
+        type === 'DUPLICATED'
+          ? 'Escala duplicada.'
+          : type === 'CREATED'
+          ? 'Escala criada.'
+          : type === 'STATUS_CHANGED'
+            ? 'Status da escala alterado.'
+            : 'Escala atualizada.';
+
+      return {
+        id: `audit-${item.id}`,
+        scheduleId,
+        type,
+        message,
+        description: message,
+        createdAt: item.createdAt,
+      };
+    });
+
+    return [...swapEvents, ...auditEvents].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   private async generateBetween(
     start: Date,
     end: Date,
-    sectorIds: string[] | undefined,
-    classGroup: string | undefined,
     actor: JwtPayload,
+    options: GenerationOptions,
   ) {
-    const scopedSectorIds = await this.resolveAllowedSectorIds(actor, sectorIds);
+    const respectFairnessRules = options.respectFairnessRules !== false;
+    const dryRun = options.dryRun === true;
+    const force = options.force === true;
+    const allowMultiSectorSameService = options.allowMultiSectorSameService === true;
+    const weights = this.normalizeGenerationWeights(options.weights);
 
-    const services = await this.prisma.worshipService.findMany({
+    const scopedSectorIds = await this.resolveAllowedSectorIds(actor, options.sectorIds);
+    const servicesInPeriod = await this.prisma.worshipService.findMany({
       where: {
         serviceDate: { gte: start, lte: end },
+        status: { in: [WorshipServiceStatus.PLANEJADO, WorshipServiceStatus.CONFIRMADO] },
+        id: options.serviceIds?.length ? { in: options.serviceIds } : undefined,
       },
-      orderBy: { serviceDate: 'asc' },
+      orderBy: [{ serviceDate: 'asc' }, { id: 'asc' }],
+      select: { id: true, serviceDate: true },
     });
 
+    const services = options.weekdays?.length
+      ? servicesInPeriod.filter((service) => options.weekdays?.includes(getSaoPauloWeekday(service.serviceDate)))
+      : servicesInPeriod;
+
+    const result = {
+      period: {
+        year: options.year,
+        ...(options.month ? { month: options.month } : {}),
+      },
+      dryRun,
+      summary: {
+        servicesEvaluated: services.length,
+        slotsTotal: 0,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        conflicts: 0,
+        warnings: 0,
+      },
+      items: [] as GenerationItem[],
+      warnings: [] as Array<{ code: string; serviceId: string; sectorId: string; message: string }>,
+      weights,
+    };
+
     if (services.length === 0) {
-      return { created: 0, skipped: 0, reason: 'No worship services in period' };
+      return result;
     }
 
     const sectors = await this.prisma.sector.findMany({
       where: { id: { in: scopedSectorIds } },
-      orderBy: { name: 'asc' },
+      orderBy: [{ id: 'asc' }],
+      select: { id: true, name: true },
     });
 
     if (sectors.length === 0) {
-      return { created: 0, skipped: 0, reason: 'No sectors available for this profile' };
+      return result;
     }
 
-    const sectorServants = await this.prisma.servant.findMany({
-      where: {
-        status: ServantStatus.ATIVO,
-        trainingStatus: TrainingStatus.COMPLETED,
-        servantSectors: { some: { sectorId: { in: sectors.map((s) => s.id) } } },
-        classGroup: classGroup ?? undefined,
-      },
-      include: {
-        servantSectors: {
-          select: { sectorId: true },
-        },
-      },
-      orderBy: { name: 'asc' },
-    });
+    result.summary.slotsTotal = services.length * sectors.length;
 
-    const poolBySector = new Map<string, typeof sectorServants>();
+    const candidatesBySector = await this.buildEligibleCandidatesBySector(
+      sectors.map((sector) => sector.id),
+      options.classGroup,
+    );
+
+    const totalSlotsPerSector = new Map<string, number>();
+    const hardCapBySector = new Map<string, number>();
     for (const sector of sectors) {
-      poolBySector.set(
-        sector.id,
-        sectorServants.filter((servant) =>
-          servant.servantSectors.some((servantSector) => servantSector.sectorId === sector.id),
-        ),
-      );
+      const totalSlots = services.length;
+      const eligibleCount = Math.max(1, (candidatesBySector.get(sector.id) ?? []).length);
+      totalSlotsPerSector.set(sector.id, totalSlots);
+      hardCapBySector.set(sector.id, Math.ceil(totalSlots / eligibleCount) + 1);
     }
 
-    const historicalStart = new Date(start);
-    historicalStart.setDate(historicalStart.getDate() - 45);
+    const assignedCountMonth = await this.getAssignedCountMap(start, end);
+    const absencesLast60d = await this.getAbsencesLast60dMap(start, end);
+    const { lastAssignedAtMap, lastServiceOrderMap } = await this.getHistoricalAssignmentMaps(start, end);
 
-    const historySchedules = await this.prisma.schedule.findMany({
-      where: {
-        service: { serviceDate: { gte: historicalStart, lte: end } },
-      },
-      include: { service: true },
-      orderBy: { createdAt: 'asc' },
+    const serviceOrder = new Map<string, number>();
+    services.forEach((service, index) => {
+      serviceOrder.set(service.id, index);
     });
-
-    const usage = new Map<string, { count: number; lastAssignedAt: Date | null }>();
-    for (const schedule of historySchedules) {
-      const current = usage.get(schedule.servantId) ?? { count: 0, lastAssignedAt: null };
-      current.count += 1;
-      if (!current.lastAssignedAt || schedule.service.serviceDate > current.lastAssignedAt) {
-        current.lastAssignedAt = schedule.service.serviceDate;
-      }
-      usage.set(schedule.servantId, current);
-    }
-
-    let created = 0;
-    let skipped = 0;
 
     for (const service of services) {
-      const assignedInService = new Set(
-        (
-          await this.prisma.schedule.findMany({
-            where: { serviceId: service.id },
-            select: { servantId: true },
-          })
-        ).map((s) => s.servantId),
-      );
+      if (!dryRun) {
+        await this.acquireServiceGenerationLock(service.id);
+      }
+
+      const existingSchedules = await this.prisma.schedule.findMany({
+        where: { serviceId: service.id },
+        orderBy: [{ createdAt: 'asc' }],
+        select: {
+          id: true,
+          serviceId: true,
+          sectorId: true,
+          servantId: true,
+          classGroup: true,
+        },
+      });
+
+      const assignedInServiceCount = new Map<string, number>();
+      for (const schedule of existingSchedules) {
+        assignedInServiceCount.set(
+          schedule.servantId,
+          (assignedInServiceCount.get(schedule.servantId) ?? 0) + 1,
+        );
+      }
 
       for (const sector of sectors) {
-        const exists = await this.prisma.schedule.findFirst({
-          where: { serviceId: service.id, sectorId: sector.id, classGroup: classGroup ?? undefined },
-          select: { id: true },
-        });
+        const existing = this.findExistingScheduleForSlot(
+          existingSchedules,
+          sector.id,
+          options.classGroup,
+        );
 
-        if (exists) {
-          skipped += 1;
-          continue;
-        }
-
-        const pool = poolBySector.get(sector.id) ?? [];
-        const available = pool.filter((servant) => !assignedInService.has(servant.id));
-
-        if (available.length === 0) {
-          skipped += 1;
-          continue;
-        }
-
-        available.sort((a, b) => {
-          const usageA = usage.get(a.id) ?? { count: 0, lastAssignedAt: null };
-          const usageB = usage.get(b.id) ?? { count: 0, lastAssignedAt: null };
-
-          const restA = usageA.lastAssignedAt
-            ? (service.serviceDate.getTime() - usageA.lastAssignedAt.getTime()) / (1000 * 60 * 60 * 24)
-            : 999;
-          const restB = usageB.lastAssignedAt
-            ? (service.serviceDate.getTime() - usageB.lastAssignedAt.getTime()) / (1000 * 60 * 60 * 24)
-            : 999;
-
-          if (restA !== restB) {
-            return restB - restA;
-          }
-
-          if (usageA.count !== usageB.count) {
-            return usageA.count - usageB.count;
-          }
-
-          return a.name.localeCompare(b.name);
-        });
-
-        const selected = available[0];
-
-        await this.prisma.schedule.create({
-          data: {
+        if (existing && !force) {
+          result.summary.skipped += 1;
+          result.items.push({
             serviceId: service.id,
             sectorId: sector.id,
-            servantId: selected.id,
-            classGroup,
-            assignedByUserId: actor.sub,
-          },
+            servantId: existing.servantId,
+            scheduleId: existing.id,
+            action: 'SKIPPED',
+            reason: 'manual_or_existing_schedule',
+          });
+          await this.logGenerationAudit(actor.sub, service.id, sector.id, existing.servantId, {
+            action: 'SKIPPED',
+            reason: 'manual_or_existing_schedule',
+            dryRun,
+            force,
+            weights,
+          });
+          continue;
+        }
+
+        const rawCandidates = candidatesBySector.get(sector.id) ?? [];
+        const serviceIndex = serviceOrder.get(service.id) ?? 0;
+        const filtered = rawCandidates.filter((candidate) =>
+          this.isCandidateAllowedInService(
+            candidate.servantId,
+            existing,
+            assignedInServiceCount,
+            allowMultiSectorSameService,
+          ),
+        );
+
+        if (filtered.length === 0) {
+          this.pushNoEligibleWarning(result, service.id, sector.id);
+          await this.logGenerationAudit(actor.sub, service.id, sector.id, undefined, {
+            action: 'SKIPPED',
+            reason: 'NO_ELIGIBLE_SERVANT',
+            dryRun,
+            force,
+            weights,
+          });
+          continue;
+        }
+
+        const finalPool = respectFairnessRules
+          ? this.applyFairnessBands(filtered, assignedCountMonth, hardCapBySector.get(sector.id))
+          : filtered;
+
+        const eligibleCount = Math.max(1, rawCandidates.length);
+        const targetMonth = Math.max(
+          1,
+          Math.ceil((totalSlotsPerSector.get(sector.id) ?? services.length) / eligibleCount),
+        );
+
+        const scored: EligibleCandidate[] = finalPool.map((candidate) => {
+          const candidateAssignedCount = assignedCountMonth.get(candidate.servantId) ?? 0;
+          const lastAt = lastAssignedAtMap.get(candidate.servantId) ?? null;
+          const lastIdx = lastServiceOrderMap.get(candidate.servantId);
+          const diff = lastIdx === undefined ? Number.MAX_SAFE_INTEGER : serviceIndex - lastIdx;
+
+          const recentSequenceScore = diff === 1 ? 0 : diff === 2 ? 0.5 : 1;
+          const consecutiveAssignments = diff === 1 ? 2 : diff === 2 ? 1 : 0;
+          const absenceCount = absencesLast60d.get(candidate.servantId) ?? 0;
+
+          const monthlyLoadScore = 1 - Math.min(candidateAssignedCount / targetMonth, 1);
+          const absenceScore = 1 - Math.min(absenceCount / 4, 1);
+          const sectorAffinityScore = candidate.isMainSector ? 1 : 0.7;
+
+          const score =
+            weights.monthlyLoad * monthlyLoadScore +
+            weights.recentSequence * recentSequenceScore +
+            weights.recentAbsences * absenceScore +
+            weights.sectorAffinity * sectorAffinityScore;
+
+          return {
+            servantId: candidate.servantId,
+            sectorId: sector.id,
+            isMainSector: candidate.isMainSector,
+            assignedCountMonth: candidateAssignedCount,
+            consecutiveAssignments,
+            lastAssignedAt: lastAt,
+            absencesLast60d: absenceCount,
+            score,
+          };
         });
 
-        const currentUsage = usage.get(selected.id) ?? { count: 0, lastAssignedAt: null };
-        currentUsage.count += 1;
-        currentUsage.lastAssignedAt = service.serviceDate;
-        usage.set(selected.id, currentUsage);
-        assignedInService.add(selected.id);
-        created += 1;
+        this.sortScoredCandidates(scored);
+
+        const winner = scored[0];
+        const score = Number(winner.score.toFixed(4));
+
+        if (!allowMultiSectorSameService) {
+          const serviceConflict = await this.prisma.schedule.findFirst({
+            where: {
+              serviceId: service.id,
+              servantId: winner.servantId,
+              ...(existing ? { NOT: { id: existing.id } } : {}),
+            },
+            select: { id: true },
+          });
+
+          if (serviceConflict) {
+            result.summary.conflicts += 1;
+            result.items.push({
+              serviceId: service.id,
+              sectorId: sector.id,
+              servantId: winner.servantId,
+              action: dryRun ? 'WOULD_CREATE' : 'CONFLICT',
+              reason: 'same_service_conflict',
+              score,
+            });
+            await this.logGenerationAudit(actor.sub, service.id, sector.id, winner.servantId, {
+              action: 'CONFLICT',
+              reason: 'same_service_conflict',
+              score,
+              dryRun,
+              force,
+              weights,
+            });
+            continue;
+          }
+        }
+
+        if (dryRun) {
+          result.items.push({
+            serviceId: service.id,
+            sectorId: sector.id,
+            servantId: winner.servantId,
+            scheduleId: existing?.id,
+            action: existing ? 'WOULD_UPDATE' : 'WOULD_CREATE',
+            score,
+            reason: 'best_score_priority_band',
+          });
+          this.updateInMemoryMetrics(
+            existing?.servantId,
+            winner.servantId,
+            assignedInServiceCount,
+            assignedCountMonth,
+            lastAssignedAtMap,
+            lastServiceOrderMap,
+            serviceIndex,
+            service.serviceDate,
+          );
+          continue;
+        }
+
+        if (existing) {
+          const updatedSchedule = await this.prisma.schedule.update({
+            where: { id: existing.id },
+            data: {
+              servantId: winner.servantId,
+              status: ScheduleStatus.ASSIGNED,
+              classGroup: options.classGroup ?? existing.classGroup,
+            },
+            select: { id: true },
+          });
+          await this.auditService.log({
+            action: AuditAction.UPDATE,
+            entity: 'Schedule',
+            entityId: updatedSchedule.id,
+            userId: actor.sub,
+            metadata: {
+              source: 'generation',
+              mode: options.mode ?? 'generate-year',
+              serviceId: service.id,
+              sectorId: sector.id,
+              servantId: winner.servantId,
+              score,
+            },
+          });
+          result.summary.updated += 1;
+          result.items.push({
+            serviceId: service.id,
+            sectorId: sector.id,
+            servantId: winner.servantId,
+            scheduleId: existing.id,
+            action: 'UPDATED',
+            score,
+            reason: 'best_score_priority_band',
+          });
+        } else {
+          const created = await this.prisma.schedule.create({
+            data: {
+              serviceId: service.id,
+              sectorId: sector.id,
+              servantId: winner.servantId,
+              status: ScheduleStatus.ASSIGNED,
+              classGroup: options.classGroup ?? null,
+              assignedByUserId: actor.sub,
+            },
+            select: { id: true },
+          });
+          await this.auditService.log({
+            action: AuditAction.CREATE,
+            entity: 'Schedule',
+            entityId: created.id,
+            userId: actor.sub,
+            metadata: {
+              source: 'generation',
+              mode: options.mode ?? 'generate-year',
+              serviceId: service.id,
+              sectorId: sector.id,
+              servantId: winner.servantId,
+              score,
+            },
+          });
+          result.summary.created += 1;
+          result.items.push({
+            serviceId: service.id,
+            sectorId: sector.id,
+            servantId: winner.servantId,
+            scheduleId: created.id,
+            action: 'CREATED',
+            score,
+            reason: 'best_score_priority_band',
+          });
+        }
+
+        this.updateInMemoryMetrics(
+          existing?.servantId,
+          winner.servantId,
+          assignedInServiceCount,
+          assignedCountMonth,
+          lastAssignedAtMap,
+          lastServiceOrderMap,
+          serviceIndex,
+          service.serviceDate,
+        );
+
+        await this.logGenerationAudit(actor.sub, service.id, sector.id, winner.servantId, {
+          action: existing ? 'UPDATED' : 'CREATED',
+          score,
+          reason: 'best_score_priority_band',
+          dryRun,
+          force,
+          weights,
+        });
       }
     }
 
@@ -512,10 +1185,311 @@ export class SchedulesService {
       entity: 'ScheduleGeneration',
       entityId: `${start.toISOString()}_${end.toISOString()}`,
       userId: actor.sub,
-      metadata: { created, skipped, classGroup, sectorIds: scopedSectorIds },
+      metadata: {
+        mode: options.mode ?? 'generate-year',
+        period: result.period,
+        dryRun,
+        force,
+        respectFairnessRules,
+        weekdays: options.weekdays,
+        allowMultiSectorSameService,
+        classGroup: options.classGroup,
+        sectorIds: scopedSectorIds,
+        summary: result.summary,
+        weights,
+      },
     });
 
-    return { created, skipped, services: services.length, sectors: sectors.length };
+    return {
+      ...result,
+      details: result.items,
+    };
+  }
+
+  private normalizeGenerationWeights(weights?: ScheduleGenerationWeightsDto): GenerationWeights {
+    const merged = { ...DEFAULT_GENERATION_WEIGHTS, ...(weights ?? {}) };
+    const sum =
+      merged.monthlyLoad + merged.recentSequence + merged.recentAbsences + merged.sectorAffinity;
+    if (sum <= 0) {
+      return DEFAULT_GENERATION_WEIGHTS;
+    }
+    return {
+      monthlyLoad: merged.monthlyLoad / sum,
+      recentSequence: merged.recentSequence / sum,
+      recentAbsences: merged.recentAbsences / sum,
+      sectorAffinity: merged.sectorAffinity / sum,
+    };
+  }
+
+  private applyFairnessBands<T extends { servantId: string }>(
+    candidates: T[],
+    assignedCountMonth: Map<string, number>,
+    hardCap?: number,
+  ) {
+    const minAssigned = Math.min(
+      ...candidates.map((candidate) => assignedCountMonth.get(candidate.servantId) ?? 0),
+    );
+
+    const priorityBand = candidates.filter(
+      (candidate) => (assignedCountMonth.get(candidate.servantId) ?? 0) <= minAssigned + 1,
+    );
+    const pool = priorityBand.length > 0 ? priorityBand : candidates;
+
+    const maxAllowed = hardCap ?? Number.MAX_SAFE_INTEGER;
+    const underCap = pool.filter((candidate) => (assignedCountMonth.get(candidate.servantId) ?? 0) < maxAllowed);
+    return (underCap.length > 0 ? underCap : pool) as T[];
+  }
+
+  private sortScoredCandidates(candidates: EligibleCandidate[]) {
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      if (a.assignedCountMonth !== b.assignedCountMonth) {
+        return a.assignedCountMonth - b.assignedCountMonth;
+      }
+      const aTs = a.lastAssignedAt ? a.lastAssignedAt.getTime() : 0;
+      const bTs = b.lastAssignedAt ? b.lastAssignedAt.getTime() : 0;
+      if (aTs !== bTs) {
+        return aTs - bTs;
+      }
+      if (a.consecutiveAssignments !== b.consecutiveAssignments) {
+        return a.consecutiveAssignments - b.consecutiveAssignments;
+      }
+      return a.servantId.localeCompare(b.servantId);
+    });
+  }
+
+  private async buildEligibleCandidatesBySector(sectorIds: string[], classGroup?: string) {
+    const servants = await this.prisma.servant.findMany({
+      where: {
+        status: ServantStatus.ATIVO,
+        trainingStatus: TrainingStatus.COMPLETED,
+        classGroup: classGroup ?? undefined,
+        OR: [{ mainSectorId: { in: sectorIds } }, { servantSectors: { some: { sectorId: { in: sectorIds } } } }],
+      },
+      select: {
+        id: true,
+        mainSectorId: true,
+        servantSectors: {
+          select: { sectorId: true },
+        },
+      },
+      orderBy: [{ id: 'asc' }],
+    });
+
+    const map = new Map<string, Array<{ servantId: string; isMainSector: boolean }>>();
+    for (const sectorId of sectorIds) {
+      map.set(sectorId, []);
+    }
+
+    for (const servant of servants) {
+      for (const sectorId of sectorIds) {
+        const belongsToSector =
+          servant.mainSectorId === sectorId ||
+          servant.servantSectors.some((servantSector) => servantSector.sectorId === sectorId);
+        if (!belongsToSector) {
+          continue;
+        }
+        map.get(sectorId)?.push({
+          servantId: servant.id,
+          isMainSector: servant.mainSectorId === sectorId,
+        });
+      }
+    }
+
+    for (const [sectorId, candidates] of map) {
+      candidates.sort((a, b) => a.servantId.localeCompare(b.servantId));
+      map.set(sectorId, candidates);
+    }
+
+    return map;
+  }
+
+  private async getAssignedCountMap(start: Date, end: Date) {
+    const schedules = await this.prisma.schedule.findMany({
+      where: { service: { serviceDate: { gte: start, lte: end } } },
+      select: { servantId: true },
+    });
+
+    const map = new Map<string, number>();
+    for (const item of schedules) {
+      map.set(item.servantId, (map.get(item.servantId) ?? 0) + 1);
+    }
+    return map;
+  }
+
+  private async getAbsencesLast60dMap(start: Date, end: Date) {
+    const absencesStart = new Date(start);
+    absencesStart.setUTCDate(absencesStart.getUTCDate() - 60);
+
+    const records = await this.prisma.attendance.findMany({
+      where: {
+        status: { in: [AttendanceStatus.FALTA, AttendanceStatus.FALTA_JUSTIFICADA] },
+        service: {
+          serviceDate: { gte: absencesStart, lte: end },
+        },
+      },
+      select: { servantId: true },
+    });
+
+    const map = new Map<string, number>();
+    for (const item of records) {
+      map.set(item.servantId, (map.get(item.servantId) ?? 0) + 1);
+    }
+    return map;
+  }
+
+  private async getHistoricalAssignmentMaps(start: Date, end: Date) {
+    const [allServices, historicalSchedules] = await Promise.all([
+      this.prisma.worshipService.findMany({
+        where: { serviceDate: { lte: end } },
+        orderBy: [{ serviceDate: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      }),
+      this.prisma.schedule.findMany({
+        where: { service: { serviceDate: { lt: start } } },
+        include: {
+          service: {
+            select: { id: true, serviceDate: true },
+          },
+        },
+        orderBy: [{ service: { serviceDate: 'asc' } }, { id: 'asc' }],
+      }),
+    ]);
+
+    const serviceOrder = new Map<string, number>();
+    allServices.forEach((service, index) => {
+      serviceOrder.set(service.id, index);
+    });
+
+    const lastAssignedAtMap = new Map<string, Date>();
+    const lastServiceOrderMap = new Map<string, number>();
+
+    for (const schedule of historicalSchedules) {
+      lastAssignedAtMap.set(schedule.servantId, schedule.service.serviceDate);
+      const order = serviceOrder.get(schedule.serviceId);
+      if (order !== undefined) {
+        lastServiceOrderMap.set(schedule.servantId, order);
+      }
+    }
+
+    return { lastAssignedAtMap, lastServiceOrderMap };
+  }
+
+  private async acquireServiceGenerationLock(serviceId: string) {
+    try {
+      await this.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext(${`schedule:${serviceId}`}))`;
+      await this.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext(${`schedule:${serviceId}`}))`;
+    } catch {
+      // Best-effort lock. If DB does not support advisory lock, generation still follows unique constraints.
+    }
+  }
+
+  private findExistingScheduleForSlot(
+    existingSchedules: Array<{
+      id: string;
+      sectorId: string;
+      servantId: string;
+      classGroup: string | null;
+    }>,
+    sectorId: string,
+    classGroup?: string,
+  ) {
+    if (classGroup !== undefined) {
+      return existingSchedules.find((item) => item.sectorId === sectorId && item.classGroup === classGroup);
+    }
+    return existingSchedules.find((item) => item.sectorId === sectorId);
+  }
+
+  private isCandidateAllowedInService(
+    servantId: string,
+    existing: { servantId: string } | undefined,
+    assignedInServiceCount: Map<string, number>,
+    allowMultiSectorSameService: boolean,
+  ) {
+    if (allowMultiSectorSameService) {
+      return true;
+    }
+
+    const currentCount = assignedInServiceCount.get(servantId) ?? 0;
+    if (currentCount === 0) {
+      return true;
+    }
+
+    return existing?.servantId === servantId;
+  }
+
+  private updateInMemoryMetrics(
+    previousServantId: string | undefined,
+    newServantId: string,
+    assignedInServiceCount: Map<string, number>,
+    assignedCountMonth: Map<string, number>,
+    lastAssignedAtMap: Map<string, Date>,
+    lastServiceOrderMap: Map<string, number>,
+    serviceOrder: number,
+    serviceDate: Date,
+  ) {
+    if (previousServantId && previousServantId !== newServantId) {
+      assignedCountMonth.set(
+        previousServantId,
+        Math.max(0, (assignedCountMonth.get(previousServantId) ?? 0) - 1),
+      );
+      const oldCount = assignedInServiceCount.get(previousServantId) ?? 0;
+      assignedInServiceCount.set(previousServantId, Math.max(0, oldCount - 1));
+    }
+
+    if (!previousServantId || previousServantId !== newServantId) {
+      assignedCountMonth.set(newServantId, (assignedCountMonth.get(newServantId) ?? 0) + 1);
+      assignedInServiceCount.set(newServantId, (assignedInServiceCount.get(newServantId) ?? 0) + 1);
+    }
+
+    lastAssignedAtMap.set(newServantId, serviceDate);
+    lastServiceOrderMap.set(newServantId, serviceOrder);
+  }
+
+  private pushNoEligibleWarning(
+    result: {
+      summary: { skipped: number; warnings: number };
+      warnings: Array<{ code: string; serviceId: string; sectorId: string; message: string }>;
+    },
+    serviceId: string,
+    sectorId: string,
+  ) {
+    result.summary.warnings += 1;
+    result.summary.skipped += 1;
+    result.warnings.push({
+      code: 'NO_ELIGIBLE_SERVANT',
+      serviceId,
+      sectorId,
+      message: 'Nenhum servo elegivel encontrado.',
+    });
+  }
+
+  private async logGenerationAudit(
+    userId: string,
+    serviceId: string,
+    sectorId: string,
+    servantId: string | undefined,
+    payload: Record<string, unknown>,
+  ) {
+    await this.auditService.log({
+      action:
+        payload.action === 'CREATED'
+          ? AuditAction.CREATE
+          : payload.action === 'UPDATED'
+            ? AuditAction.UPDATE
+            : AuditAction.STATUS_CHANGE,
+      entity: 'ScheduleGenerationDecision',
+      entityId: `${serviceId}:${sectorId}:${servantId ?? 'none'}`,
+      userId,
+      metadata: {
+        serviceId,
+        sectorId,
+        servantId,
+        ...payload,
+      },
+    });
   }
 
   private async validateScheduleInput(serviceId: string, sectorId: string, servantId: string) {
@@ -679,6 +1653,23 @@ export class SchedulesService {
 
     return {
       OR: [{ fromSchedule: scopeWhere }, { toSchedule: scopeWhere }],
+    };
+  }
+
+  private toApiSchedule<
+    T extends {
+      serviceId: string;
+      service?: { title?: string } | null;
+      servant?: { name?: string } | null;
+      sector?: { name?: string } | null;
+    },
+  >(schedule: T) {
+    return {
+      ...schedule,
+      worshipServiceId: schedule.serviceId,
+      worshipServiceTitle: schedule.service?.title ?? null,
+      servantName: schedule.servant?.name ?? null,
+      sectorName: schedule.sector?.name ?? null,
     };
   }
 }

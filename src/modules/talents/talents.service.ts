@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction, ServantStatus, TalentStage } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ApproveTalentDto } from './dto/approve-talent.dto';
 import { CreateTalentDto } from './dto/create-talent.dto';
 import { UpdateTalentStageDto } from './dto/update-talent-stage.dto';
@@ -11,6 +12,7 @@ export class TalentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   findAll() {
@@ -40,6 +42,14 @@ export class TalentsService {
       entity: 'Talent',
       entityId: talent.id,
       userId: actorUserId,
+    });
+
+    await this.notificationsService.notifyServantLinkedUser(dto.servantId, {
+      type: 'TALENT_CREATED',
+      title: 'Talento registrado',
+      message: 'Seu talento foi registrado no pipeline ministerial.',
+      link: '/talents',
+      metadata: { talentId: talent.id, stage: talent.stage },
     });
 
     return talent;
@@ -74,6 +84,17 @@ export class TalentsService {
       entityId: id,
       userId: actorUserId,
       metadata: { stage: dto.stage },
+    });
+
+    await this.notificationsService.notifyServantLinkedUser(updated.servantId, {
+      type: dto.stage === TalentStage.APROVADO ? 'TALENT_APPROVED' : 'TALENT_STAGE_UPDATED',
+      title: dto.stage === TalentStage.APROVADO ? 'Talento aprovado' : 'Etapa do talento atualizada',
+      message:
+        dto.stage === TalentStage.APROVADO
+          ? 'Parabens! Seu talento foi aprovado.'
+          : `Seu talento foi movido para a etapa ${dto.stage}.`,
+      link: '/talents',
+      metadata: { talentId: updated.id, stage: dto.stage },
     });
 
     return updated;

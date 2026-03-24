@@ -21,6 +21,18 @@ enum UserStatus {
   INACTIVE
 }
 
+enum UserScope {
+  GLOBAL
+  SETOR
+  EQUIPE
+  SELF
+}
+
+enum PermissionEffect {
+  ALLOW
+  DENY
+}
+
 enum Gender {
   MASCULINO
   FEMININO
@@ -111,9 +123,12 @@ model User {
   email                  String              @unique
   passwordHash           String
   role                   Role
+  scope                  UserScope           @default(GLOBAL)
   status                 UserStatus          @default(ACTIVE)
+  mustChangePassword     Boolean             @default(false)
   servantId              String?             @unique
   phone                  String?
+  sectorTeam             String?
   lastLoginAt            DateTime?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
@@ -129,10 +144,15 @@ model User {
   createdAlerts          PastoralAlert[]     @relation("AlertCreatedBy")
   resolvedAlerts         PastoralAlert[]     @relation("AlertResolvedBy")
   auditLogs              AuditLog[]
+  scopeBindings          UserScopeBinding[]
+  permissionOverrides    UserPermissionOverride[]
+  notifications          Notification[]
 
   @@index([role])
+  @@index([scope])
   @@index([status])
   @@index([servantId])
+  @@index([createdAt])
 }
 
 model RefreshToken {
@@ -174,6 +194,7 @@ model Sector {
   coordinator       User?     @relation(fields: [coordinatorUserId], references: [id])
   servants          Servant[]
   servantSectors    ServantSector[]
+  userScopeBindings UserScopeBinding[]
   schedules         Schedule[]
 
   @@index([coordinatorUserId])
@@ -379,4 +400,51 @@ model AuditLog {
   @@index([entity, entityId])
   @@index([action])
   @@index([createdAt])
+}
+
+model UserScopeBinding {
+  id        String   @id @default(cuid())
+  userId    String
+  sectorId  String?
+  teamName  String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sector    Sector?  @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sectorId])
+  @@index([teamName])
+  @@unique([userId, sectorId, teamName])
+}
+
+model UserPermissionOverride {
+  id            String           @id @default(cuid())
+  userId        String
+  permissionKey String
+  effect        PermissionEffect
+  reason        String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionKey])
+  @@index([userId])
+  @@index([permissionKey])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  link      String?
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@index([type])
 }

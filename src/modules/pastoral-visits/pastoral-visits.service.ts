@@ -7,6 +7,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePastoralVisitDto } from './dto/create-pastoral-visit.dto';
 import { ListPastoralVisitsQueryDto } from './dto/list-pastoral-visits-query.dto';
 import { ResolvePastoralVisitDto } from './dto/resolve-pastoral-visit.dto';
@@ -16,6 +17,7 @@ export class PastoralVisitsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: ListPastoralVisitsQueryDto, actor: JwtPayload) {
@@ -66,6 +68,14 @@ export class PastoralVisitsService {
       userId: actor.sub,
     });
 
+    await this.notificationsService.notifyServantLinkedUser(dto.servantId, {
+      type: 'PASTORAL_VISIT_OPENED',
+      title: 'Acompanhamento pastoral aberto',
+      message: 'Foi aberto um registro de acompanhamento pastoral para voce.',
+      link: '/pastoral-visits',
+      metadata: { pastoralVisitId: visit.id },
+    });
+
     return visit;
   }
 
@@ -105,6 +115,14 @@ export class PastoralVisitsService {
       entityId: id,
       userId: actor.sub,
       metadata: { notes: dto.notes },
+    });
+
+    await this.notificationsService.notifyServantLinkedUser(visit.servantId, {
+      type: 'PASTORAL_VISIT_RESOLVED',
+      title: 'Acompanhamento pastoral resolvido',
+      message: 'Seu acompanhamento pastoral foi marcado como resolvido.',
+      link: '/pastoral-visits',
+      metadata: { pastoralVisitId: visit.id },
     });
 
     return visit;

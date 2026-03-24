@@ -7,7 +7,9 @@ import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateServantWithUserDto } from './dto/create-servant-with-user.dto';
 import { CreateServantDto } from './dto/create-servant.dto';
 import { CompleteTrainingDto } from './dto/complete-training.dto';
+import { CreateServantAccessDto } from './dto/create-servant-access.dto';
 import { LinkServantUserDto } from './dto/link-servant-user.dto';
+import { ListEligibleServantsQueryDto } from './dto/list-eligible-servants-query.dto';
 import { ListServantsQueryDto } from './dto/list-servants-query.dto';
 import { UpdateServantStatusDto } from './dto/update-servant-status.dto';
 import { UpdateServantDto } from './dto/update-servant.dto';
@@ -22,6 +24,12 @@ export class ServantsController {
   @Get()
   findAll(@Query() query: ListServantsQueryDto, @CurrentUser() user: JwtPayload) {
     return this.servantsService.findAll(query, user);
+  }
+
+  @Get('eligible')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  findEligible(@Query() query: ListEligibleServantsQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.servantsService.findEligible(query.userId, user);
   }
 
   @Get(':id')
@@ -69,6 +77,16 @@ export class ServantsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.servantsService.linkUser(id, dto, user);
+  }
+
+  @Post(':id/create-user-access')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  createUserAccess(
+    @Param('id') id: string,
+    @Body() dto: CreateServantAccessDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.servantsService.createUserAccess(id, dto, user);
   }
 
   @Get(':id/history')

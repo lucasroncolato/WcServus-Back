@@ -1,0 +1,15 @@
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'UserScope') THEN
+    CREATE TYPE "UserScope" AS ENUM ('GLOBAL', 'SETOR', 'EQUIPE');
+  END IF;
+END
+$$;
+
+ALTER TABLE "User"
+  ADD COLUMN IF NOT EXISTS "scope" "UserScope" NOT NULL DEFAULT 'GLOBAL';
+
+ALTER TABLE "User"
+  ADD COLUMN IF NOT EXISTS "sectorTeam" TEXT;
+
+CREATE INDEX IF NOT EXISTS "User_scope_idx" ON "User" ("scope");

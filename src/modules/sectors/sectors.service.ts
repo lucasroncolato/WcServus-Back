@@ -4,7 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, ServantStatus, TrainingStatus } from '@prisma/client';
+import { assertSectorAccess, getSectorAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { CreateSectorDto } from './dto/create-sector.dto';
 import { UpdateSectorDto } from './dto/update-sector.dto';
@@ -16,8 +18,11 @@ export class SectorsService {
     private readonly auditService: AuditService,
   ) {}
 
-  async findAll() {
+  async findAll(actor: JwtPayload) {
+    const scopeWhere = await getSectorAccessWhere(this.prisma, actor);
+
     const sectors = await this.prisma.sector.findMany({
+      where: scopeWhere,
       include: {
         coordinator: { select: { id: true, name: true, email: true } },
         servantSectors: {
@@ -52,7 +57,9 @@ export class SectorsService {
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, actor: JwtPayload) {
+    await assertSectorAccess(this.prisma, actor, id);
+
     const sector = await this.prisma.sector.findUniqueOrThrow({
       where: { id },
       include: {
@@ -175,8 +182,9 @@ export class SectorsService {
     };
   }
 
-  async listServants(sectorId: string) {
+  async listServants(sectorId: string, actor: JwtPayload) {
     await this.ensureExists(sectorId);
+    await assertSectorAccess(this.prisma, actor, sectorId);
 
     const servantSectors = await this.prisma.servantSector.findMany({
       where: { sectorId },

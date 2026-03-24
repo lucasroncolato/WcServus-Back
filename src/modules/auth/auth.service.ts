@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role, UserStatus } from '@prisma/client';
+import { Role, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -32,7 +32,9 @@ export class AuthService {
         id: true,
         email: true,
         role: true,
+        scope: true,
         status: true,
+        mustChangePassword: true,
         passwordHash: true,
         servantId: true,
       },
@@ -57,6 +59,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       servantId: user.servantId,
+      mustChangePassword: user.mustChangePassword,
     });
   }
 
@@ -68,7 +71,9 @@ export class AuthService {
         id: true,
         email: true,
         role: true,
+        scope: true,
         status: true,
+        mustChangePassword: true,
         servantId: true,
       },
     });
@@ -136,7 +141,7 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: user.id },
-        data: { passwordHash: newPasswordHash },
+        data: { passwordHash: newPasswordHash, mustChangePassword: false },
       }),
       this.prisma.refreshToken.updateMany({
         where: { userId: user.id, revokedAt: null },
@@ -202,7 +207,7 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
-        data: { passwordHash: newHash },
+        data: { passwordHash: newHash, mustChangePassword: false },
       }),
       this.prisma.passwordResetToken.update({
         where: { id: matchedRecordId },
@@ -225,8 +230,11 @@ export class AuthService {
         name: true,
         email: true,
         role: true,
+        scope: true,
         status: true,
+        mustChangePassword: true,
         phone: true,
+        sectorTeam: true,
         servantId: true,
         servant: {
           select: {
@@ -275,8 +283,12 @@ export class AuthService {
       name: account.name,
       email: account.email,
       role: account.role,
+      scope: account.scope,
+      scopeType: account.scope,
       status: account.status,
+      mustChangePassword: account.mustChangePassword,
       phone: account.phone,
+      sectorTeam: account.sectorTeam,
       servantId: account.servantId,
       servant: account.servant
         ? {
@@ -289,7 +301,7 @@ export class AuthService {
           }
         : null,
       linkedSector,
-      permissions: this.resolvePermissions(account.role),
+      permissions: this.resolvePermissions(account.role, account.scope),
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
     };
@@ -310,6 +322,7 @@ export class AuthService {
     email: string;
     role: JwtPayload['role'];
     servantId?: string | null;
+    mustChangePassword?: boolean;
   }) {
     const payload: JwtPayload = {
       sub: user.id,
@@ -346,10 +359,10 @@ export class AuthService {
     return { accessToken, refreshToken, user: account };
   }
 
-  private resolvePermissions(role: Role) {
+  private resolvePermissions(role: Role, scope: UserScope = UserScope.GLOBAL) {
     if (role === Role.SUPER_ADMIN) {
       return {
-        scope: 'GLOBAL',
+        scope,
         canManageUsers: true,
         canManageServants: true,
         canManageSchedules: true,
@@ -360,7 +373,7 @@ export class AuthService {
 
     if (role === Role.ADMIN) {
       return {
-        scope: 'GLOBAL',
+        scope,
         canManageUsers: true,
         canManageServants: true,
         canManageSchedules: true,
@@ -371,7 +384,7 @@ export class AuthService {
 
     if (role === Role.PASTOR) {
       return {
-        scope: 'GLOBAL_PASTORAL',
+        scope,
         canManageUsers: false,
         canManageServants: true,
         canManageSchedules: false,
@@ -382,7 +395,7 @@ export class AuthService {
 
     if (role === Role.COORDENADOR) {
       return {
-        scope: 'SECTOR',
+        scope,
         canManageUsers: false,
         canManageServants: true,
         canManageSchedules: true,
@@ -393,7 +406,7 @@ export class AuthService {
 
     if (role === Role.LIDER) {
       return {
-        scope: 'TEAM',
+        scope,
         canManageUsers: false,
         canManageServants: true,
         canManageSchedules: true,
@@ -403,7 +416,7 @@ export class AuthService {
     }
 
     return {
-      scope: 'SELF',
+      scope,
       canManageUsers: false,
       canManageServants: false,
       canManageSchedules: false,

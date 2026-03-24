@@ -4,6 +4,7 @@ import { assertServantAccess, getAttendanceAccessWhere } from 'src/common/auth/a
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { BatchAttendanceDto } from './dto/batch-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { ListAttendancesQueryDto } from './dto/list-attendances-query.dto';
@@ -14,6 +15,7 @@ export class AttendancesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: ListAttendancesQueryDto, actor: JwtPayload) {
@@ -82,6 +84,8 @@ export class AttendancesService {
       metadata: dto as unknown as Record<string, unknown>,
     });
 
+    await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
+
     return attendance;
   }
 
@@ -131,6 +135,8 @@ export class AttendancesService {
       userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
+
+    await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
 
     return attendance;
   }
@@ -242,5 +248,30 @@ export class AttendancesService {
     }
 
     await assertServantAccess(this.prisma, actor, servantId);
+  }
+
+  private async notifyAttendanceChange(
+    servantId: string,
+    attendanceId: string,
+    status: AttendanceStatus,
+  ) {
+    const title =
+      status === AttendanceStatus.PRESENTE ? 'Presenca registrada' : 'Falta registrada';
+
+    const message =
+      status === AttendanceStatus.PRESENTE
+        ? 'Sua presenca foi registrada em um culto.'
+        : 'Foi registrada falta para voce em um culto.';
+
+    await this.notificationsService.notifyServantLinkedUser(servantId, {
+      type: 'ATTENDANCE_UPDATED',
+      title,
+      message,
+      link: '/attendances',
+      metadata: {
+        attendanceId,
+        status,
+      },
+    });
   }
 }

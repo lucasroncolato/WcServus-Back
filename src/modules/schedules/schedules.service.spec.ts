@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import { AuditAction, Role, ScheduleStatus } from '@prisma/client';
 import { SchedulesService } from './schedules.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 
 jest.mock('src/common/auth/access-scope', () => ({
@@ -33,6 +34,12 @@ describe('SchedulesService - duplicate', () => {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
 
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+    createMany: jest.fn().mockResolvedValue(undefined),
+    notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
+
   const actor: JwtPayload = {
     sub: 'user-1',
     email: 'admin@wcservus.com',
@@ -52,7 +59,10 @@ describe('SchedulesService - duplicate', () => {
     prisma.sector.findMany.mockReset();
     (auditService.log as jest.Mock).mockReset();
     (auditService.log as jest.Mock).mockResolvedValue(undefined);
-    service = new SchedulesService(prisma, auditService);
+    (notificationsService.create as jest.Mock).mockReset();
+    (notificationsService.createMany as jest.Mock).mockReset();
+    (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset();
+    service = new SchedulesService(prisma, auditService, notificationsService);
   });
 
   it('should duplicate schedule successfully', async () => {
@@ -76,6 +86,9 @@ describe('SchedulesService - duplicate', () => {
     prisma.schedule.create.mockResolvedValue({
       id: 'schedule-2',
       status: ScheduleStatus.ASSIGNED,
+      service: { title: 'Culto Domingo 19h' },
+      servant: { id: 'servant-1', name: 'Servo 1' },
+      sector: { id: 'sector-1', name: 'Louvor' },
     });
 
     const result = await service.duplicate('schedule-1', { worshipServiceId: 'service-b' }, actor);
@@ -170,6 +183,12 @@ describe('SchedulesService - history', () => {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
 
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+    createMany: jest.fn().mockResolvedValue(undefined),
+    notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
+
   const actor: JwtPayload = {
     sub: 'user-1',
     email: 'admin@wcservus.com',
@@ -185,7 +204,10 @@ describe('SchedulesService - history', () => {
     prisma.schedule.findUnique.mockReset();
     prisma.scheduleSwapHistory.findMany.mockReset();
     prisma.auditLog.findMany.mockReset();
-    service = new SchedulesService(prisma, auditService);
+    (notificationsService.create as jest.Mock).mockReset();
+    (notificationsService.createMany as jest.Mock).mockReset();
+    (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset();
+    service = new SchedulesService(prisma, auditService, notificationsService);
   });
 
   it('should return merged history sorted desc with SWAPPED/CREATED/UPDATED/STATUS_CHANGED/DUPLICATED', async () => {

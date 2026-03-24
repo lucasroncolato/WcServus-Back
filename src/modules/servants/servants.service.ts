@@ -11,15 +11,19 @@ import {
   Role,
   ServantStatus,
   TrainingStatus,
+  UserScope,
   UserStatus,
   type Sector,
   type Servant,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { getServantAccessWhere, resolveScopedSectorIds } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { CompleteTrainingDto } from './dto/complete-training.dto';
+import { CreateServantAccessDto } from './dto/create-servant-access.dto';
 import { CreateServantWithUserDto } from './dto/create-servant-with-user.dto';
 import { CreateServantDto, ServantActiveStatusDto } from './dto/create-servant.dto';
 import { LinkServantUserDto } from './dto/link-servant-user.dto';
@@ -44,6 +48,7 @@ export class ServantsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private readonly servantInclude = {
@@ -63,7 +68,7 @@ export class ServantsService {
   } as const;
 
   async findAll(query: ListServantsQueryDto, actor: JwtPayload) {
-    const accessWhere = await this.getServantAccessWhere(actor);
+    const accessWhere = await getServantAccessWhere(this.prisma, actor);
 
     const queryWhere: Prisma.ServantWhereInput = {
       status: this.mapQueryStatus(query.status),
@@ -103,6 +108,37 @@ export class ServantsService {
     }
 
     return this.toApiServant(servant);
+  }
+
+  async findEligible(userId: string | undefined, actor: JwtPayload) {
+    if (userId) {
+      const userExists = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
+
+      if (!userExists) {
+        throw new NotFoundException('User not found');
+      }
+    }
+
+    const accessWhere = await getServantAccessWhere(this.prisma, actor);
+    const queryWhere: Prisma.ServantWhereInput = {
+      OR: [{ userAccount: null }, ...(userId ? [{ userAccount: { is: { id: userId } } }] : [])],
+    };
+    const where: Prisma.ServantWhereInput =
+      accessWhere !== undefined ? { AND: [queryWhere, accessWhere] } : queryWhere;
+
+    const servants = await this.prisma.servant.findMany({
+      where,
+      include: this.servantInclude,
+      orderBy: [{ status: 'asc' }, { name: 'asc' }],
+      take: 200,
+    });
+
+    return {
+      data: servants.map((servant) => this.toApiServant(servant)),
+    };
   }
 
   async create(dto: CreateServantDto, actor: JwtPayload) {
@@ -267,6 +303,18 @@ export class ServantsService {
         throw new ConflictException('User is already linked to another servant');
       }
 
+      const currentLink = await this.prisma.user.findFirst({
+        where: {
+          servantId,
+          NOT: { id: dto.userId },
+        },
+        select: { id: true },
+      });
+
+      if (currentLink) {
+        throw new ConflictException('Servant is already linked to another user');
+      }
+
       await this.prisma.user.update({
         where: { id: dto.userId },
         data: { servantId },
@@ -281,7 +329,115 @@ export class ServantsService {
       metadata: { userId: dto.userId ?? null },
     });
 
+    if (dto.userId) {
+      await this.notificationsService.create({
+        userId: dto.userId,
+        type: 'SERVANT_LINKED',
+        title: 'Conta vinculada ao cadastro ministerial',
+        message: 'Seu usuario foi vinculado ao seu cadastro de servo.',
+        link: `/servants/${servantId}`,
+        metadata: { servantId },
+      });
+    }
+
     return this.findOne(servantId, actor);
+  }
+
+  async createUserAccess(servantId: string, dto: CreateServantAccessDto, actor: JwtPayload) {
+    await this.assertCanManageServant(actor, servantId);
+
+    const servant = await this.prisma.servant.findUnique({
+      where: { id: servantId },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        classGroup: true,
+        userAccount: {
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!servant) {
+      throw new NotFoundException('Servant not found');
+    }
+
+    if (servant.userAccount) {
+      throw new ConflictException('Servant already has a linked user account');
+    }
+
+    const email = dto.email.toLowerCase();
+    const duplicated = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (duplicated) {
+      throw new ConflictException('Email already in use');
+    }
+
+    const role = dto.role ?? Role.SERVO;
+    this.assertCanAssignRole(actor.role, role);
+
+    const scope = dto.scope ?? (servant.classGroup ? UserScope.EQUIPE : UserScope.GLOBAL);
+    const sectorTeam = scope === UserScope.GLOBAL ? null : servant.classGroup ?? null;
+    if (scope !== UserScope.GLOBAL && !sectorTeam) {
+      throw new BadRequestException('Servant without team cannot receive non-GLOBAL scope');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+
+    const user = await this.prisma.user.create({
+      data: {
+        name: dto.name ?? servant.name,
+        email,
+        passwordHash,
+        role,
+        status: dto.status ?? UserStatus.ACTIVE,
+        scope,
+        sectorTeam,
+        phone: servant.phone ?? null,
+        servantId,
+        mustChangePassword: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        scope: true,
+        sectorTeam: true,
+        servantId: true,
+      },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.CREATE,
+      entity: 'ServantUserAccess',
+      entityId: servantId,
+      userId: actor.sub,
+      metadata: {
+        targetUserId: user.id,
+        servantId,
+        role: user.role,
+        scope: user.scope,
+      },
+    });
+
+    await this.notificationsService.create({
+      userId: user.id,
+      type: 'USER_ACCESS_CREATED',
+      title: 'Seu acesso foi criado',
+      message: 'Um administrador criou seu acesso ao sistema. Troque a senha no primeiro login.',
+      link: '/auth/me',
+      metadata: { servantId, mustChangePassword: true },
+    });
+
+    return {
+      message: 'User access created from servant successfully',
+      data: user,
+    };
   }
 
   async update(id: string, dto: UpdateServantDto, actor: JwtPayload) {
@@ -414,6 +570,14 @@ export class ServantsService {
       metadata: { trainingStatus: TrainingStatus.COMPLETED, notes: dto.notes },
     });
 
+    await this.notificationsService.notifyServantLinkedUser(id, {
+      type: 'TRAINING_COMPLETED',
+      title: 'Treinamento concluido',
+      message: 'Seu status de treinamento foi atualizado para concluido.',
+      link: `/servants/${id}`,
+      metadata: { servantId: id },
+    });
+
     return this.toApiServant(updated);
   }
 
@@ -495,6 +659,10 @@ export class ServantsService {
     return {
       ...servant,
       status: this.mapDbStatus(servant.status),
+      linkedUserId: servant.userAccount?.id ?? null,
+      linkedUserName: servant.userAccount?.name ?? null,
+      linkedUserEmail: servant.userAccount?.email ?? null,
+      linkedUserStatus: servant.userAccount?.status ?? null,
       sectorIds,
       sectorNames,
       sectorId: sectorIds[0] ?? null,
@@ -593,7 +761,7 @@ export class ServantsService {
       throw new ForbiddenException('This profile cannot manage servants');
     }
 
-    const allowedSectorIds = await this.resolveScopedSectorIds(actor);
+    const allowedSectorIds = await resolveScopedSectorIds(this.prisma, actor);
     const hasInvalidSector = sectorIds.some((sectorId) => !allowedSectorIds.includes(sectorId));
 
     if (hasInvalidSector) {
@@ -602,7 +770,7 @@ export class ServantsService {
   }
 
   private async buildScopedServantWhere(actor: JwtPayload, servantId: string) {
-    const accessWhere = await this.getServantAccessWhere(actor);
+    const accessWhere = await getServantAccessWhere(this.prisma, actor);
 
     if (!accessWhere) {
       return { id: servantId } satisfies Prisma.ServantWhereInput;
@@ -611,68 +779,4 @@ export class ServantsService {
     return { AND: [{ id: servantId }, accessWhere] } satisfies Prisma.ServantWhereInput;
   }
 
-  private async getServantAccessWhere(actor: JwtPayload): Promise<Prisma.ServantWhereInput | undefined> {
-    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
-      return undefined;
-    }
-
-    if (actor.role === Role.SERVO) {
-      return actor.servantId ? { id: actor.servantId } : { id: '__no_access__' };
-    }
-
-    if (actor.role === Role.COORDENADOR || actor.role === Role.LIDER) {
-      const sectorIds = await this.resolveScopedSectorIds(actor);
-      if (sectorIds.length === 0) {
-        return { id: '__no_access__' };
-      }
-
-      return {
-        OR: [
-          { mainSectorId: { in: sectorIds } },
-          { servantSectors: { some: { sectorId: { in: sectorIds } } } },
-        ],
-      };
-    }
-
-    return { id: '__no_access__' };
-  }
-
-  private async resolveScopedSectorIds(actor: JwtPayload) {
-    if (actor.role === Role.COORDENADOR) {
-      const sectors = await this.prisma.sector.findMany({
-        where: { coordinatorUserId: actor.sub },
-        select: { id: true },
-      });
-      return sectors.map((sector) => sector.id);
-    }
-
-    if (actor.role === Role.LIDER) {
-      if (!actor.servantId) {
-        return [];
-      }
-
-      const actorServant = await this.prisma.servant.findUnique({
-        where: { id: actor.servantId },
-        select: {
-          mainSectorId: true,
-          servantSectors: {
-            select: { sectorId: true },
-          },
-        },
-      });
-
-      if (!actorServant) {
-        return [];
-      }
-
-      const ids = [
-        ...(actorServant.mainSectorId ? [actorServant.mainSectorId] : []),
-        ...actorServant.servantSectors.map((item) => item.sectorId),
-      ];
-
-      return [...new Set(ids)];
-    }
-
-    return [];
-  }
 }

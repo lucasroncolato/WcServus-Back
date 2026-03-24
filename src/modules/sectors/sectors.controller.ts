@@ -15,13 +15,13 @@ export class SectorsController {
   constructor(private readonly sectorsService: SectorsService) {}
 
   @Get()
-  findAll() {
-    return this.sectorsService.findAll();
+  findAll(@CurrentUser() user: JwtPayload) {
+    return this.sectorsService.findAll(user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.sectorsService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.sectorsService.findOne(id, user);
   }
 
   @Post()
@@ -41,7 +41,7 @@ export class SectorsController {
   }
 
   @Get(':id/servants')
-  listServants(@Param('id') id: string) {
-    return this.sectorsService.listServants(id);
+  listServants(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.sectorsService.listServants(id, user);
   }
 }

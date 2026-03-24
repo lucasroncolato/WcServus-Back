@@ -15,6 +15,7 @@ import { TalentsModule } from './modules/talents/talents.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { PrismaModule } from './prisma/prisma.module';
     DashboardModule,
     ReportsModule,
     AuditModule,
+    NotificationsModule,
   ],
   providers: [
     {

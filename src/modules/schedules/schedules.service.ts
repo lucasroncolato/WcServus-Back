@@ -29,6 +29,7 @@ import {
   resolveScopedSectorIds,
 } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
@@ -107,6 +108,7 @@ export class SchedulesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: ListSchedulesQueryDto, actor: JwtPayload) {
@@ -187,6 +189,18 @@ export class SchedulesService {
       userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
+
+    await this.notifyScheduleEvent(
+      schedule.servantId,
+      'SCHEDULE_ASSIGNED',
+      'Nova escala atribuida',
+      `Voce foi escalado para ${schedule.service.title}.`,
+      {
+        scheduleId: schedule.id,
+        serviceId: schedule.serviceId,
+        sectorId: schedule.sectorId,
+      },
+    );
 
     return this.toApiSchedule(schedule);
   }
@@ -433,6 +447,18 @@ export class SchedulesService {
         },
       });
 
+      await this.notifyScheduleEvent(
+        updated.servantId,
+        'SCHEDULE_SWAPPED',
+        'Escala alterada',
+        `Sua escala foi alterada para ${updated.service.title}.`,
+        {
+          scheduleId: updated.id,
+          previousServantId: current.servantId,
+          newServantId: updated.servantId,
+        },
+      );
+
       return this.toApiSchedule(updated);
     }
 
@@ -535,6 +561,27 @@ export class SchedulesService {
       },
     });
 
+    await this.notifyScheduleEvent(
+      result.fromSchedule.servantId,
+      'SCHEDULE_SWAPPED',
+      'Troca de escala concluida',
+      'Sua escala foi atualizada por uma troca.',
+      {
+        fromScheduleId: from.id,
+        toScheduleId: to.id,
+      },
+    );
+    await this.notifyScheduleEvent(
+      result.toSchedule.servantId,
+      'SCHEDULE_SWAPPED',
+      'Troca de escala concluida',
+      'Sua escala foi atualizada por uma troca.',
+      {
+        fromScheduleId: from.id,
+        toScheduleId: to.id,
+      },
+    );
+
     return result;
   }
 
@@ -603,6 +650,17 @@ export class SchedulesService {
       userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
+
+    await this.notifyScheduleEvent(
+      updated.servantId,
+      dto.status !== undefined ? 'SCHEDULE_STATUS_CHANGED' : 'SCHEDULE_UPDATED',
+      dto.status !== undefined ? 'Status da escala alterado' : 'Escala atualizada',
+      `Sua escala em ${updated.service.title} foi atualizada.`,
+      {
+        scheduleId: updated.id,
+        status: updated.status,
+      },
+    );
 
     return this.toApiSchedule(updated);
   }
@@ -685,6 +743,17 @@ export class SchedulesService {
         targetWorshipServiceId: dto.worshipServiceId,
       },
     });
+
+    await this.notifyScheduleEvent(
+      duplicated.servantId,
+      'SCHEDULE_DUPLICATED',
+      'Escala duplicada para novo culto',
+      `Voce recebeu uma nova escala em ${duplicated.service.title}.`,
+      {
+        scheduleId: duplicated.id,
+        sourceScheduleId: source.id,
+      },
+    );
 
     return this.toApiSchedule(duplicated);
   }
@@ -1671,5 +1740,21 @@ export class SchedulesService {
       servantName: schedule.servant?.name ?? null,
       sectorName: schedule.sector?.name ?? null,
     };
+  }
+
+  private async notifyScheduleEvent(
+    servantId: string,
+    type: string,
+    title: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    await this.notificationsService.notifyServantLinkedUser(servantId, {
+      type,
+      title,
+      message,
+      link: '/schedules',
+      metadata,
+    });
   }
 }

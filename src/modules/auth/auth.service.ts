@@ -10,6 +10,7 @@ import { Role, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -23,6 +24,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -218,6 +220,14 @@ export class AuthService {
         data: { revokedAt: new Date() },
       }),
     ]);
+
+    await this.notificationsService.create({
+      userId,
+      type: 'USER_PASSWORD_RESET',
+      title: 'Senha redefinida',
+      message: 'Sua senha foi redefinida com sucesso.',
+      link: '/auth/me',
+    });
 
     return { message: 'Password reset successfully' };
   }

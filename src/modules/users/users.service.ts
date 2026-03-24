@@ -8,6 +8,7 @@ import {
 import { AuditAction, Prisma, Role, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getUserAccessWhere } from 'src/common/auth/access-scope';
@@ -100,6 +101,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: ListUsersQueryDto, actor: JwtPayload) {
@@ -245,6 +247,17 @@ export class UsersService {
         role: user.role,
         status: user.status,
         scope: user.scope,
+      },
+    });
+
+    await this.notificationsService.create({
+      userId: user.id,
+      type: 'USER_ACCESS_CREATED',
+      title: 'Seu acesso foi criado',
+      message: 'Sua conta foi criada e ja pode ser utilizada no sistema.',
+      link: '/auth/me',
+      metadata: {
+        createdBy: actorUserId ?? null,
       },
     });
 
@@ -462,6 +475,17 @@ export class UsersService {
       userId: actorUserId,
       metadata: {
         targetUserId: id,
+        mustChangePassword,
+      },
+    });
+
+    await this.notificationsService.create({
+      userId: id,
+      type: 'USER_PASSWORD_RESET',
+      title: 'Senha redefinida',
+      message: 'Sua senha foi redefinida por um administrador.',
+      link: '/auth/me',
+      metadata: {
         mustChangePassword,
       },
     });

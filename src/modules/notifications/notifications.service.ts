@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { WhatsappService } from './whatsapp/whatsapp.service';
 
 type CreateNotificationInput = {
   userId: string;
@@ -25,7 +26,10 @@ type NotificationRecord = {
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly whatsappService: WhatsappService,
+  ) {}
 
   async findAll(userId: string, query: ListNotificationsQueryDto) {
     const page = query.page ?? 1;
@@ -124,7 +128,7 @@ export class NotificationsService {
   }
 
   async create(input: CreateNotificationInput) {
-    return this.prisma.notification.create({
+    const created = await this.prisma.notification.create({
       data: {
         userId: input.userId,
         type: input.type,
@@ -134,6 +138,17 @@ export class NotificationsService {
         metadata: (input.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
+
+    await this.whatsappService.enqueueFromNotification({
+      userId: input.userId,
+      eventKey: input.type,
+      title: input.title,
+      message: input.message,
+      link: input.link ?? null,
+      metadata: input.metadata,
+    });
+
+    return created;
   }
 
   async createMany(inputs: CreateNotificationInput[]) {
@@ -152,6 +167,19 @@ export class NotificationsService {
         metadata: (input.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
       })),
     });
+
+    await Promise.all(
+      uniqueInputs.map((input) =>
+        this.whatsappService.enqueueFromNotification({
+          userId: input.userId,
+          eventKey: input.type,
+          title: input.title,
+          message: input.message,
+          link: input.link ?? null,
+          metadata: input.metadata,
+        }),
+      ),
+    );
 
     return { created: uniqueInputs.length };
   }

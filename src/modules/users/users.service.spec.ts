@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { Role, UserScope, UserStatus } from '@prisma/client';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from './users.service';
 
 describe('UsersService - updateRole', () => {
@@ -15,6 +16,9 @@ describe('UsersService - updateRole', () => {
   const auditService = {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
 
   const adminActor: JwtPayload = {
     sub: 'admin-1',
@@ -37,7 +41,7 @@ describe('UsersService - updateRole', () => {
     prisma.user.findUnique.mockReset();
     prisma.user.update.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
-    service = new UsersService(prisma, auditService);
+    service = new UsersService(prisma, auditService, notificationsService);
   });
 
   it('permite ADMIN alterar role de usuario abaixo do seu nivel', async () => {
@@ -145,6 +149,9 @@ describe('UsersService - compatibility safeguards', () => {
   const auditService = {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
 
   const adminActor: JwtPayload = {
     sub: 'admin-1',
@@ -166,7 +173,7 @@ describe('UsersService - compatibility safeguards', () => {
       permissionOverrides: [],
     });
     prisma.$transaction.mockReset().mockImplementation(async (operations: Promise<unknown>[]) => Promise.all(operations));
-    service = new UsersService(prisma, auditService);
+    service = new UsersService(prisma, auditService, notificationsService);
   });
 
   it('GET /users sem status filtra ACTIVE por padrao', async () => {
@@ -200,6 +207,9 @@ describe('UsersService - resetPassword', () => {
   const auditService = {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
 
   const adminActor: JwtPayload = {
     sub: 'admin-1',
@@ -215,7 +225,7 @@ describe('UsersService - resetPassword', () => {
     prisma.user.findUnique.mockReset();
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
-    service = new UsersService(prisma, auditService);
+    service = new UsersService(prisma, auditService, notificationsService);
   });
 
   it('reseta senha com mustChangePassword=true por padrao', async () => {

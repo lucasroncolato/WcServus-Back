@@ -3,6 +3,7 @@ import { AuditAction } from '@prisma/client';
 import { getSaoPauloWeekday, resolvePlanningWindow } from 'src/common/utils/planning-window.utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateWorshipServiceDto } from './dto/create-worship-service.dto';
 import { ListWorshipServicesQueryDto } from './dto/list-worship-services-query.dto';
 import { UpdateWorshipServiceDto } from './dto/update-worship-service.dto';
@@ -12,6 +13,7 @@ export class WorshipServicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   findAll(query: ListWorshipServicesQueryDto) {
@@ -68,6 +70,8 @@ export class WorshipServicesService {
       userId: actorUserId,
     });
 
+    await this.notifyServiceReminder(service.id, service.title, 'Novo culto cadastrado no sistema.');
+
     return service;
   }
 
@@ -90,6 +94,8 @@ export class WorshipServicesService {
       metadata: dto as unknown as Record<string, unknown>,
     });
 
+    await this.notifyServiceReminder(service.id, service.title, 'Atualizacao de culto. Verifique horarios e detalhes.');
+
     return service;
   }
 
@@ -101,5 +107,40 @@ export class WorshipServicesService {
     if (!found) {
       throw new NotFoundException('Worship service not found');
     }
+  }
+
+  private async notifyServiceReminder(serviceId: string, serviceTitle: string, message: string) {
+    const schedules = await this.prisma.schedule.findMany({
+      where: { serviceId },
+      select: { servantId: true },
+    });
+
+    const servantIds = [...new Set(schedules.map((item) => item.servantId))];
+    if (servantIds.length === 0) {
+      return;
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        servantId: { in: servantIds },
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    });
+
+    if (users.length === 0) {
+      return;
+    }
+
+    await this.notificationsService.createMany(
+      users.map((user) => ({
+        userId: user.id,
+        type: 'WORSHIP_SERVICE_REMINDER',
+        title: `Lembrete de culto: ${serviceTitle}`,
+        message,
+        link: '/schedules',
+        metadata: { serviceId },
+      })),
+    );
   }
 }

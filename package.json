@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "nest build && tsc-alias",
+    "build": "npx tsc -p tsconfig.build.json && npx tsc-alias -p tsconfig.build.json",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/src/main.js",

@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npx tsc -p tsconfig.build.json && npx tsc-alias -p tsconfig.build.json",
+    "build": "npx prisma generate && npx tsc -p tsconfig.build.json && npx tsc-alias -p tsconfig.build.json",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/src/main.js",
+    "postinstall": "prisma generate",
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "lint": "eslint \"{src,prisma}/**/*.ts\"",

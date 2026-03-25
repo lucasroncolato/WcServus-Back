@@ -1,3 +1,4 @@
+import 'module-alias/register';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -33,7 +34,7 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Sistema de Servos API')
-    .setDescription('API para gestão de servos e operação ministerial')
+    .setDescription('API para gestï¿½o de servos e operaï¿½ï¿½o ministerial')
     .setVersion('1.0.0')
     .addBearerAuth()
     .build();

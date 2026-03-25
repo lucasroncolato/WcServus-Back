@@ -17,6 +17,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuditModule,
     NotificationsModule,
   ],
+  controllers: [HealthController],
   providers: [
     {
       provide: APP_GUARD,

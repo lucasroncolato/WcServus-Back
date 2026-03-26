@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditAction, Prisma, Role, UserScope, UserStatus } from '@prisma/client';
+import { AuditAction, Prisma, Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -64,8 +64,15 @@ const USER_SELECT = {
     select: {
       id: true,
       sectorId: true,
+      teamId: true,
       teamName: true,
       sector: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      team: {
         select: {
           id: true,
           name: true,
@@ -122,6 +129,7 @@ export class UsersService {
               { email: { contains: search, mode: 'insensitive' } },
               { phone: { contains: search, mode: 'insensitive' } },
               { servant: { name: { contains: search, mode: 'insensitive' } } },
+              { servant: { team: { name: { contains: search, mode: 'insensitive' } } } },
               { servant: { classGroup: { contains: search, mode: 'insensitive' } } },
               { servant: { mainSector: { name: { contains: search, mode: 'insensitive' } } } },
             ],
@@ -207,8 +215,8 @@ export class UsersService {
     };
   }
 
-  async create(dto: CreateUserDto, actorUserId?: string) {
-    this.assertScopeSectorTeam(dto.scope ?? UserScope.GLOBAL, dto.sectorTeam);
+  async create(dto: CreateUserDto, actor: JwtPayload) {
+    this.assertCanCreateUser(actor.role, dto.role);
 
     const existing = await this.prisma.user.findUnique({
       where: { email: this.normalizeEmail(dto.email) },
@@ -223,6 +231,14 @@ export class UsersService {
       await this.assertServantAvailableForUser(dto.servantId);
     }
 
+    if (dto.role === Role.SERVO && !dto.servantId) {
+      throw new BadRequestException('SERVO user must be linked to a servant');
+    }
+
+    if (dto.role === Role.SERVO && dto.scope && dto.scope !== UserScope.SELF) {
+      throw new BadRequestException('SERVO user scope must be SELF');
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
     const user = await this.createUserWithConflictHandling({
@@ -230,7 +246,7 @@ export class UsersService {
       email: this.normalizeEmail(dto.email),
       passwordHash,
       role: dto.role,
-      scope: dto.scope ?? UserScope.GLOBAL,
+      scope: dto.role === Role.SERVO ? UserScope.SELF : (dto.scope ?? UserScope.GLOBAL),
       status: dto.status ?? UserStatus.ACTIVE,
       phone: dto.phone,
       sectorTeam: dto.sectorTeam,
@@ -241,7 +257,7 @@ export class UsersService {
       action: AuditAction.CREATE,
       entity: 'User',
       entityId: user.id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: {
         targetUserId: user.id,
         role: user.role,
@@ -257,7 +273,7 @@ export class UsersService {
       message: 'Sua conta foi criada e ja pode ser utilizada no sistema.',
       link: '/auth/me',
       metadata: {
-        createdBy: actorUserId ?? null,
+        createdBy: actor.sub,
       },
     });
 
@@ -280,7 +296,7 @@ export class UsersService {
 
     const existingUser = await this.prisma.user.findUnique({
       where: { id },
-      select: { id: true, status: true, servantId: true, scope: true, sectorTeam: true },
+      select: { id: true, role: true, status: true, servantId: true, scope: true, sectorTeam: true },
     });
     if (!existingUser) {
       throw new NotFoundException('User not found');
@@ -298,6 +314,17 @@ export class UsersService {
     }
 
     const shouldUpdateServantLink = Object.prototype.hasOwnProperty.call(dto, 'servantId');
+    if (
+      shouldUpdateServantLink &&
+      dto.servantId === null &&
+      existingUser.role === Role.SERVO &&
+      existingUser.servantId
+    ) {
+      throw new BadRequestException(
+        'SERVO user cannot be unlinked from servant. Link another SERVO user first.',
+      );
+    }
+
     if (shouldUpdateServantLink && dto.servantId) {
       await this.assertServantAvailableForUser(dto.servantId, id);
     }
@@ -305,11 +332,6 @@ export class UsersService {
     const isBeingInactivated =
       dto.status === UserStatus.INACTIVE && existingUser.status !== UserStatus.INACTIVE;
     const hasPasswordChange = Boolean(dto.password);
-
-    const nextScope = dto.scope ?? existingUser.scope;
-    const nextSectorTeam =
-      Object.prototype.hasOwnProperty.call(dto, 'sectorTeam') ? dto.sectorTeam : existingUser.sectorTeam;
-    this.assertScopeSectorTeam(nextScope, nextSectorTeam);
 
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, 10) : undefined;
 
@@ -441,7 +463,13 @@ export class UsersService {
 
     await this.assertCanAccessTargetUserByActorId(actorUserId, id);
 
-    await this.ensureExists(id);
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true },
+    });
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
 
     const rawPassword = dto.password ?? dto.newPassword;
     if (!rawPassword) {
@@ -497,6 +525,8 @@ export class UsersService {
   }
 
   async updateRole(id: string, dto: UpdateUserRoleDto, actor: JwtPayload) {
+    this.assertOnlySuperAdmin(actor.role, 'Only SUPER_ADMIN can manage user roles');
+
     if (actor.sub === id) {
       throw new ForbiddenException('You cannot change your own role');
     }
@@ -537,24 +567,41 @@ export class UsersService {
     };
   }
 
-  async updateScope(id: string, dto: UpdateUserScopeDto, actorUserId?: string) {
-    if (actorUserId && actorUserId === id) {
+  async updateScope(id: string, dto: UpdateUserScopeDto, actor: JwtPayload) {
+    this.assertOnlySuperAdmin(actor.role, 'Only SUPER_ADMIN can manage user scope');
+
+    if (actor.sub === id) {
       throw new ForbiddenException('You cannot change your own scope');
     }
 
-    await this.assertCanAccessTargetUserByActorId(actorUserId, id);
+    await this.assertCanAccessTargetUserByActorId(actor.sub, id);
 
-    await this.ensureExists(id);
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true },
+    });
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
 
     const sectorIds = [...new Set(dto.sectorIds ?? [])];
+    const teamIds = [...new Set((dto.teamIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const teamNames = [...new Set((dto.teamNames ?? []).map((value) => value.trim()).filter(Boolean))];
 
     if (dto.scopeType === UserScope.SETOR && sectorIds.length === 0) {
       throw new BadRequestException('scopeType=SETOR requires at least one sectorId');
     }
 
-    if (dto.scopeType === UserScope.EQUIPE && sectorIds.length === 0 && teamNames.length === 0) {
-      throw new BadRequestException('scopeType=EQUIPE requires sectorIds and/or teamNames');
+    if (dto.scopeType === UserScope.EQUIPE && sectorIds.length === 0 && teamIds.length === 0 && teamNames.length === 0) {
+      throw new BadRequestException('scopeType=EQUIPE requires teamIds and/or sectorIds');
+    }
+
+    if (target.role === Role.LIDER && dto.scopeType === UserScope.EQUIPE && teamIds.length === 0) {
+      throw new BadRequestException('LIDER scope requires at least one teamId');
+    }
+
+    if (target.role === Role.LIDER && dto.scopeType !== UserScope.EQUIPE) {
+      throw new BadRequestException('LIDER user scopeType must be EQUIPE');
     }
 
     if (dto.scopeType === UserScope.SELF && sectorIds.length > 0) {
@@ -563,6 +610,10 @@ export class UsersService {
 
     if (dto.scopeType === UserScope.SELF && teamNames.length > 0) {
       throw new BadRequestException('scopeType=SELF does not accept teamNames');
+    }
+
+    if (dto.scopeType === UserScope.SELF && teamIds.length > 0) {
+      throw new BadRequestException('scopeType=SELF does not accept teamIds');
     }
 
     if (sectorIds.length > 0) {
@@ -576,6 +627,25 @@ export class UsersService {
       }
     }
 
+    if (teamIds.length > 0) {
+      const teams = await this.prisma.team.findMany({
+        where: { id: { in: teamIds } },
+        select: { id: true, sectorId: true },
+      });
+
+      if (teams.length !== teamIds.length) {
+        throw new NotFoundException('One or more informed teams were not found');
+      }
+
+      if (sectorIds.length > 0) {
+        const sectorSet = new Set(sectorIds);
+        const invalidTeamSector = teams.some((team) => !sectorSet.has(team.sectorId));
+        if (invalidTeamSector) {
+          throw new BadRequestException('All teamIds must belong to informed sectorIds');
+        }
+      }
+    }
+
     const user = await this.prisma.$transaction(async (tx) => {
       await tx.userScopeBinding.deleteMany({ where: { userId: id } });
 
@@ -585,6 +655,19 @@ export class UsersService {
             data: sectorIds.map((sectorId) => ({
               userId: id,
               sectorId,
+              teamId: null,
+              teamName: null,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        if (teamIds.length > 0) {
+          await tx.userScopeBinding.createMany({
+            data: teamIds.map((teamId) => ({
+              userId: id,
+              sectorId: null,
+              teamId,
               teamName: null,
             })),
             skipDuplicates: true,
@@ -596,6 +679,7 @@ export class UsersService {
             data: teamNames.map((teamName) => ({
               userId: id,
               sectorId: null,
+              teamId: null,
               teamName,
             })),
             skipDuplicates: true,
@@ -614,11 +698,12 @@ export class UsersService {
       action: AuditAction.UPDATE,
       entity: 'UserScope',
       entityId: id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: {
         targetUserId: id,
         scopeType: dto.scopeType,
         sectorIds,
+        teamIds,
         teamNames,
       },
     });
@@ -632,7 +717,20 @@ export class UsersService {
   async setServantLink(id: string, dto: LinkUserServantDto, actorUserId?: string) {
     await this.assertCanAccessTargetUserByActorId(actorUserId, id);
 
-    await this.ensureExists(id);
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, servantId: true },
+    });
+
+    if (!currentUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (dto.servantId === null && currentUser.role === Role.SERVO && currentUser.servantId) {
+      throw new BadRequestException(
+        'SERVO user cannot be unlinked from servant. Link another SERVO user first.',
+      );
+    }
 
     if (dto.servantId) {
       await this.assertServantAvailableForUser(dto.servantId, id);
@@ -671,7 +769,20 @@ export class UsersService {
 
     await this.assertCanAccessTargetUserByActorId(actorUserId, id);
 
-    await this.ensureExists(id);
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, servantId: true },
+    });
+
+    if (!currentUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (currentUser.role === Role.SERVO && currentUser.servantId) {
+      throw new BadRequestException(
+        'SERVO user cannot be deactivated while linked to servant. Reassign access first.',
+      );
+    }
 
     const user = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.user.update({
@@ -775,6 +886,27 @@ export class UsersService {
     }
   }
 
+  private assertCanCreateUser(actorRole: Role, targetRole: Role) {
+    if (actorRole === Role.SUPER_ADMIN) {
+      return;
+    }
+
+    if (actorRole === Role.ADMIN) {
+      if (targetRole === Role.SUPER_ADMIN) {
+        throw new ForbiddenException('Only SUPER_ADMIN can create SUPER_ADMIN users');
+      }
+      return;
+    }
+
+    throw new ForbiddenException('Only SUPER_ADMIN and ADMIN can create users');
+  }
+
+  private assertOnlySuperAdmin(actorRole: Role, message: string) {
+    if (actorRole !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(message);
+    }
+  }
+
   private async createUserWithConflictHandling(data: Prisma.UserUncheckedCreateInput) {
     try {
       return await this.prisma.user.create({
@@ -826,12 +958,6 @@ export class UsersService {
     return email.trim().toLowerCase();
   }
 
-  private assertScopeSectorTeam(scope: UserScope, sectorTeam: string | null | undefined) {
-    if (scope !== UserScope.GLOBAL && !sectorTeam?.trim()) {
-      throw new BadRequestException('sectorTeam is required when scope is not GLOBAL');
-    }
-  }
-
   private async assertCanAccessTargetUser(actor: JwtPayload, targetUserId: string) {
     const where = await getUserAccessWhere(this.prisma, actor);
     if (!where) {
@@ -867,6 +993,19 @@ export class UsersService {
 
     if (!actor) {
       throw new ForbiddenException('Invalid actor');
+    }
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, role: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (actor.role !== Role.SUPER_ADMIN && target.role === Role.SUPER_ADMIN) {
+      throw new ForbiddenException('Only SUPER_ADMIN can manage SUPER_ADMIN users');
     }
 
     await this.assertCanAccessTargetUser(
@@ -906,7 +1045,8 @@ export class UsersService {
       scopeLinks: user.scopeBindings.map((item) => ({
         sectorId: item.sectorId,
         sectorName: item.sector?.name ?? null,
-        teamName: item.teamName,
+        teamId: item.teamId ?? item.team?.id ?? null,
+        teamName: item.team?.name ?? item.teamName ?? null,
       })),
       permissionOverrides: user.permissionOverrides.map((override) => ({
         key: override.permissionKey,
@@ -919,6 +1059,7 @@ export class UsersService {
             id: user.servant.id,
             name: user.servant.name,
             status: user.servant.status,
+            statusView: user.servant.status === ServantStatus.ATIVO ? 'ACTIVE' : 'INACTIVE',
             trainingStatus: user.servant.trainingStatus,
             mainSectorId: user.servant.mainSectorId,
             classGroup: user.servant.classGroup,

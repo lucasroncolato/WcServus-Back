@@ -14,19 +14,19 @@ export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}
 
   @Post('test-send')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   sendTest(@Body() dto: SendWhatsappTestDto) {
     return this.whatsappService.sendTest(dto);
   }
 
   @Post('queue/process')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   processQueue(@Body() dto: ProcessWhatsappQueueDto) {
     return this.whatsappService.processQueue(dto.limit ?? 20);
   }
 
   @Get('logs')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   listLogs(@Query() query: ListWhatsappLogsQueryDto) {
     return this.whatsappService.listLogs(query);
   }

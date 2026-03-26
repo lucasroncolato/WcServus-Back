@@ -43,7 +43,7 @@ export class UsersController {
 
   @Post()
   create(@Body() dto: CreateUserDto, @CurrentUser() user: JwtPayload) {
-    return this.usersService.create(dto, user.sub);
+    return this.usersService.create(dto, user);
   }
 
   @Patch(':id')
@@ -97,7 +97,7 @@ export class UsersController {
     @Body() dto: UpdateUserScopeDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.usersService.updateScope(id, dto, user.sub);
+    return this.usersService.updateScope(id, dto, user);
   }
 
   @Patch(':id/servant-link')

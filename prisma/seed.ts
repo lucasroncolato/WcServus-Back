@@ -9,8 +9,10 @@ import {
   PrismaClient,
   Role,
   ServantStatus,
+  TeamStatus,
   TalentStage,
   UserStatus,
+  UserScope,
   WorshipServiceStatus,
   WorshipServiceType,
   PastoralVisitStatus,
@@ -18,7 +20,69 @@ import {
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
+const prismaAny = prisma as any;
 const DEFAULT_PASSWORD = '123456';
+const SCHEDULE_RESPONSE = {
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  DECLINED: 'DECLINED',
+} as const;
+const AVAILABILITY_SHIFT = {
+  MORNING: 'MORNING',
+  AFTERNOON: 'AFTERNOON',
+  EVENING: 'EVENING',
+} as const;
+
+async function upsertUserByEmail(params: {
+  email: string;
+  name: string;
+  passwordHash: string;
+  role: Role;
+  scope?: UserScope;
+  status?: UserStatus;
+  phone?: string | null;
+  sectorTeam?: string | null;
+  servantId?: string | null;
+}) {
+  return prisma.user.upsert({
+    where: { email: params.email },
+    update: {
+      name: params.name,
+      passwordHash: params.passwordHash,
+      role: params.role,
+      scope: params.scope,
+      status: params.status,
+      phone: params.phone ?? null,
+      sectorTeam: params.sectorTeam ?? null,
+      servantId: params.servantId ?? null,
+    },
+    create: {
+      name: params.name,
+      email: params.email,
+      passwordHash: params.passwordHash,
+      role: params.role,
+      scope: params.scope,
+      status: params.status,
+      phone: params.phone ?? null,
+      sectorTeam: params.sectorTeam ?? null,
+      servantId: params.servantId ?? null,
+    },
+  });
+}
+
+async function clearServantLinks(servantIds: string[], exceptUserIds: string[]) {
+  if (!servantIds.length) {
+    return;
+  }
+
+  await prisma.user.updateMany({
+    where: {
+      servantId: { in: servantIds },
+      id: { notIn: exceptUserIds },
+    },
+    data: { servantId: null },
+  });
+}
 
 async function upsertServantByName(params: {
   name: string;
@@ -29,6 +93,7 @@ async function upsertServantByName(params: {
   trainingStatus?: TrainingStatus;
   aptitude?: Aptitude;
   classGroup?: string;
+  teamId?: string;
   mainSectorId?: string;
   notes?: string;
   consecutiveAbsences?: number;
@@ -51,6 +116,7 @@ async function upsertServantByName(params: {
         trainingStatus: params.trainingStatus,
         aptitude: params.aptitude,
         classGroup: params.classGroup,
+        teamId: params.teamId,
         mainSectorId: params.mainSectorId,
         notes: params.notes,
         consecutiveAbsences: params.consecutiveAbsences,
@@ -70,6 +136,7 @@ async function upsertServantByName(params: {
       trainingStatus: params.trainingStatus,
       aptitude: params.aptitude,
       classGroup: params.classGroup,
+      teamId: params.teamId,
       mainSectorId: params.mainSectorId,
       notes: params.notes,
       consecutiveAbsences: params.consecutiveAbsences,
@@ -86,86 +153,61 @@ async function main() {
     const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
     console.log('Upserting users...');
-    const superAdmin = await prisma.user.upsert({
-      where: { email: 'superadmin@servos.local' },
-      update: {
-        name: 'Super Admin',
-        role: Role.SUPER_ADMIN,
-        status: UserStatus.ACTIVE,
-        passwordHash,
-        phone: '11999990000',
-      },
-      create: {
-        name: 'Super Admin',
-        email: 'superadmin@servos.local',
-        passwordHash,
-        role: Role.SUPER_ADMIN,
-        status: UserStatus.ACTIVE,
-        phone: '11999990000',
-      },
+    const superAdmin = await upsertUserByEmail({
+      email: 'superadmin@servos.local',
+      name: 'Super Admin',
+      passwordHash,
+      role: Role.SUPER_ADMIN,
+      scope: UserScope.GLOBAL,
+      status: UserStatus.ACTIVE,
+      phone: '11999990000',
     });
 
-    const admin = await prisma.user.upsert({
-      where: { email: 'admin@servos.local' },
-      update: {
-        name: 'Admin Geral',
-        role: Role.ADMIN,
-        status: UserStatus.ACTIVE,
-        passwordHash,
-        phone: '11999990010',
-      },
-      create: {
-        name: 'Admin Geral',
-        email: 'admin@servos.local',
-        passwordHash,
-        role: Role.ADMIN,
-        status: UserStatus.ACTIVE,
-        phone: '11999990010',
-      },
+    const admin = await upsertUserByEmail({
+      email: 'admin@servos.local',
+      name: 'Admin Geral',
+      passwordHash,
+      role: Role.ADMIN,
+      scope: UserScope.GLOBAL,
+      status: UserStatus.ACTIVE,
+      phone: '11999990010',
     });
 
-    const pastor = await prisma.user.upsert({
-      where: { email: 'pastor@servos.local' },
-      update: { name: 'Pr. Elias', role: Role.PASTOR, passwordHash },
-      create: {
-        name: 'Pr. Elias',
-        email: 'pastor@servos.local',
-        passwordHash,
-        role: Role.PASTOR,
-      },
+    const pastor = await upsertUserByEmail({
+      email: 'pastor@servos.local',
+      name: 'Pr. Elias',
+      passwordHash,
+      role: Role.PASTOR,
+      scope: UserScope.GLOBAL,
+      status: UserStatus.ACTIVE,
     });
 
-    const coordenador = await prisma.user.upsert({
-      where: { email: 'coordenador@servos.local' },
-      update: { name: 'Coord. Joao', role: Role.COORDENADOR, passwordHash },
-      create: {
-        name: 'Coord. Joao',
-        email: 'coordenador@servos.local',
-        passwordHash,
-        role: Role.COORDENADOR,
-      },
+    const coordenador = await upsertUserByEmail({
+      email: 'coordenador@servos.local',
+      name: 'Coord. Joao',
+      passwordHash,
+      role: Role.COORDENADOR,
+      scope: UserScope.SETOR,
+      status: UserStatus.ACTIVE,
     });
 
-    const lider = await prisma.user.upsert({
-      where: { email: 'lider@servos.local' },
-      update: { name: 'Lider Maria', role: Role.LIDER, passwordHash },
-      create: {
-        name: 'Lider Maria',
-        email: 'lider@servos.local',
-        passwordHash,
-        role: Role.LIDER,
-      },
+    const lider = await upsertUserByEmail({
+      email: 'lider@servos.local',
+      name: 'Lider Maria',
+      passwordHash,
+      role: Role.LIDER,
+      scope: UserScope.EQUIPE,
+      status: UserStatus.ACTIVE,
+      sectorTeam: 'A',
     });
 
-    const servo = await prisma.user.upsert({
-      where: { email: 'apoio@servos.local' },
-      update: { name: 'Servo Pedro', role: Role.SERVO, passwordHash },
-      create: {
-        name: 'Servo Pedro',
-        email: 'apoio@servos.local',
-        passwordHash,
-        role: Role.SERVO,
-      },
+    const servo = await upsertUserByEmail({
+      email: 'apoio@servos.local',
+      name: 'Servo Pedro',
+      passwordHash,
+      role: Role.SERVO,
+      scope: UserScope.SELF,
+      status: UserStatus.ACTIVE,
     });
 
     console.log('Upserting sectors...');
@@ -222,6 +264,55 @@ async function main() {
       },
     });
 
+    console.log('Upserting teams...');
+    const recepcaoEquipeA = await prisma.team.upsert({
+      where: { sectorId_name: { sectorId: recepcao.id, name: 'A' } },
+      update: {
+        slug: 'a',
+        description: 'Equipe A da Recepcao',
+        status: TeamStatus.ACTIVE,
+      },
+      create: {
+        name: 'A',
+        slug: 'a',
+        description: 'Equipe A da Recepcao',
+        sectorId: recepcao.id,
+        status: TeamStatus.ACTIVE,
+      },
+    });
+
+    const midiaEquipeB = await prisma.team.upsert({
+      where: { sectorId_name: { sectorId: midia.id, name: 'B' } },
+      update: {
+        slug: 'b',
+        description: 'Equipe B da Midia',
+        status: TeamStatus.ACTIVE,
+      },
+      create: {
+        name: 'B',
+        slug: 'b',
+        description: 'Equipe B da Midia',
+        sectorId: midia.id,
+        status: TeamStatus.ACTIVE,
+      },
+    });
+
+    const intercessaoEquipeC = await prisma.team.upsert({
+      where: { sectorId_name: { sectorId: intercessao.id, name: 'C' } },
+      update: {
+        slug: 'c',
+        description: 'Equipe C da Intercessao',
+        status: TeamStatus.ACTIVE,
+      },
+      create: {
+        name: 'C',
+        slug: 'c',
+        description: 'Equipe C da Intercessao',
+        sectorId: intercessao.id,
+        status: TeamStatus.ACTIVE,
+      },
+    });
+
     console.log('Upserting servants...');
     const lucas = await upsertServantByName({
       name: 'Lucas Alves',
@@ -232,6 +323,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.SOCIAL,
       classGroup: 'A',
+      teamId: recepcaoEquipeA.id,
       mainSectorId: recepcao.id,
       notes: 'Comunicativo e responsavel na recepcao.',
       joinedAt: new Date('2024-03-01T00:00:00Z'),
@@ -246,6 +338,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.TECNICO,
       classGroup: 'B',
+      teamId: midiaEquipeB.id,
       mainSectorId: midia.id,
       notes: 'Referencia em transmissao e projecao.',
       joinedAt: new Date('2023-08-20T00:00:00Z'),
@@ -259,6 +352,7 @@ async function main() {
       trainingStatus: TrainingStatus.PENDING,
       aptitude: Aptitude.APOIO,
       classGroup: 'A',
+      teamId: recepcaoEquipeA.id,
       mainSectorId: recepcao.id,
       notes: 'Em processo de reciclagem.',
       consecutiveAbsences: 1,
@@ -273,6 +367,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.LIDERANCA,
       classGroup: 'C',
+      teamId: intercessaoEquipeC.id,
       mainSectorId: intercessao.id,
       notes: 'Perfil de lideranca e cuidado pastoral.',
     });
@@ -285,14 +380,40 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.OPERACIONAL,
       classGroup: 'B',
+      teamId: midiaEquipeB.id,
       mainSectorId: midia.id,
       notes: 'Afastado temporariamente por questoes pessoais.',
       consecutiveAbsences: 2,
       monthlyAbsences: 3,
     });
 
+    console.log('Upserting servant linked users...');
+    const renatoUser = await upsertUserByEmail({
+      email: 'renato@servos.local',
+      name: 'Renato Lima',
+      passwordHash,
+      role: Role.SERVO,
+      scope: UserScope.SELF,
+      status: UserStatus.ACTIVE,
+      servantId: renato.id,
+      phone: renato.phone ?? '11999990003',
+    });
+
+    const mateusUser = await upsertUserByEmail({
+      email: 'mateus@servos.local',
+      name: 'Mateus Rocha',
+      passwordHash,
+      role: Role.SERVO,
+      scope: UserScope.SELF,
+      status: UserStatus.ACTIVE,
+      servantId: mateus.id,
+      phone: mateus.phone ?? '11999990005',
+    });
+
     console.log('Cleaning operational records to keep seed deterministic...');
     await prisma.scheduleSwapHistory.deleteMany();
+    await prisma.scheduleResponseHistory.deleteMany();
+    await prismaAny.servantAvailability.deleteMany();
     await prisma.passwordResetToken.deleteMany();
     await prisma.refreshToken.deleteMany();
     await prisma.attendance.deleteMany();
@@ -302,6 +423,9 @@ async function main() {
     await prisma.talent.deleteMany();
     await prisma.auditLog.deleteMany();
     await prisma.servantStatusHistory.deleteMany();
+    await prisma.userScopeBinding.deleteMany({
+      where: { userId: { in: [coordenador.id, lider.id] } },
+    });
     await prisma.servantSector.deleteMany({
       where: { servantId: { in: [lucas.id, carla.id, renato.id, bruna.id, mateus.id] } },
     });
@@ -328,19 +452,47 @@ async function main() {
       skipDuplicates: true,
     });
 
+    await clearServantLinks(
+      [bruna.id, lucas.id, carla.id, renato.id, mateus.id],
+      [coordenador.id, lider.id, servo.id, renatoUser.id, mateusUser.id],
+    );
+
     await prisma.user.update({
       where: { id: coordenador.id },
-      data: { servantId: bruna.id },
+      data: { servantId: bruna.id, scope: UserScope.SETOR, sectorTeam: recepcao.name },
     });
 
     await prisma.user.update({
       where: { id: lider.id },
-      data: { servantId: lucas.id },
+      data: { servantId: lucas.id, scope: UserScope.EQUIPE, sectorTeam: 'A' },
     });
 
     await prisma.user.update({
       where: { id: servo.id },
-      data: { servantId: carla.id },
+      data: { servantId: carla.id, scope: UserScope.SELF, role: Role.SERVO },
+    });
+
+    await prisma.team.update({
+      where: { id: recepcaoEquipeA.id },
+      data: { leaderUserId: lider.id },
+    });
+
+    await prisma.userScopeBinding.createMany({
+      data: [
+        {
+          userId: coordenador.id,
+          sectorId: recepcao.id,
+          teamId: null,
+          teamName: null,
+        },
+        {
+          userId: lider.id,
+          sectorId: recepcao.id,
+          teamId: recepcaoEquipeA.id,
+          teamName: recepcaoEquipeA.name,
+        },
+      ],
+      skipDuplicates: true,
     });
 
     await prisma.servantStatusHistory.createMany({
@@ -424,17 +576,25 @@ async function main() {
           sectorId: recepcao.id,
         },
       },
-      update: { classGroup: 'A', assignedByUserId: admin.id },
+      update: {
+        classGroup: 'A',
+        assignedByUserId: admin.id,
+        responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
+        responseAt: new Date('2026-03-07T17:10:00Z'),
+        declineReason: null,
+      } as any,
       create: {
         serviceId: cultoDomingoManha.id,
         servantId: lucas.id,
         sectorId: recepcao.id,
         classGroup: 'A',
         assignedByUserId: admin.id,
-      },
+        responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
+        responseAt: new Date('2026-03-07T17:10:00Z'),
+      } as any,
     });
 
-    await prisma.schedule.upsert({
+    const scheduleQuintaNoiteCarla = await prisma.schedule.upsert({
       where: {
         serviceId_servantId_sectorId: {
           serviceId: cultoQuintaNoite.id,
@@ -442,14 +602,23 @@ async function main() {
           sectorId: midia.id,
         },
       },
-      update: { classGroup: 'B', assignedByUserId: admin.id },
+      update: {
+        classGroup: 'B',
+        assignedByUserId: admin.id,
+        responseStatus: SCHEDULE_RESPONSE.DECLINED,
+        responseAt: new Date('2026-03-11T20:40:00Z'),
+        declineReason: 'Plantao extraordinario no trabalho',
+      } as any,
       create: {
         serviceId: cultoQuintaNoite.id,
         servantId: carla.id,
         sectorId: midia.id,
         classGroup: 'B',
         assignedByUserId: admin.id,
-      },
+        responseStatus: SCHEDULE_RESPONSE.DECLINED,
+        responseAt: new Date('2026-03-11T20:40:00Z'),
+        declineReason: 'Plantao extraordinario no trabalho',
+      } as any,
     });
 
     await prisma.schedule.upsert({
@@ -482,7 +651,10 @@ async function main() {
         classGroup: 'A',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
-      },
+        responseStatus: SCHEDULE_RESPONSE.PENDING,
+        responseAt: null,
+        declineReason: null,
+      } as any,
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: lucas.id,
@@ -490,7 +662,8 @@ async function main() {
         classGroup: 'A',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
-      },
+        responseStatus: SCHEDULE_RESPONSE.PENDING,
+      } as any,
     });
 
     const scheduleDomingoNoiteCarla = await prisma.schedule.upsert({
@@ -505,7 +678,10 @@ async function main() {
         classGroup: 'B',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
-      },
+        responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
+        responseAt: new Date('2026-03-14T14:30:00Z'),
+        declineReason: null,
+      } as any,
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: carla.id,
@@ -513,7 +689,66 @@ async function main() {
         classGroup: 'B',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
-      },
+        responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
+        responseAt: new Date('2026-03-14T14:30:00Z'),
+      } as any,
+    });
+
+    await prisma.scheduleResponseHistory.createMany({
+      data: [
+        {
+          scheduleId: scheduleDomingoManhaLucas.id,
+          responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
+          respondedByUserId: lider.id,
+          respondedAt: new Date('2026-03-07T17:10:00Z'),
+        },
+        {
+          scheduleId: scheduleQuintaNoiteCarla.id,
+          responseStatus: SCHEDULE_RESPONSE.DECLINED,
+          declineReason: 'Plantao extraordinario no trabalho',
+          respondedByUserId: servo.id,
+          respondedAt: new Date('2026-03-11T20:40:00Z'),
+        },
+      ],
+    });
+
+    await prismaAny.servantAvailability.createMany({
+      data: [
+        {
+          servantId: carla.id,
+          dayOfWeek: 0,
+          shift: AVAILABILITY_SHIFT.MORNING,
+          available: true,
+          notes: 'Disponivel para escala de domingo pela manha',
+        },
+        {
+          servantId: carla.id,
+          dayOfWeek: 0,
+          shift: AVAILABILITY_SHIFT.EVENING,
+          available: true,
+        },
+        {
+          servantId: carla.id,
+          dayOfWeek: 4,
+          shift: AVAILABILITY_SHIFT.EVENING,
+          available: false,
+          notes: 'Curso fixo na quinta a noite',
+        },
+        {
+          servantId: renato.id,
+          dayOfWeek: 0,
+          shift: AVAILABILITY_SHIFT.EVENING,
+          available: true,
+        },
+        {
+          servantId: mateus.id,
+          dayOfWeek: 0,
+          shift: AVAILABILITY_SHIFT.MORNING,
+          available: false,
+          notes: 'Em retorno gradual',
+        },
+      ],
+      skipDuplicates: true,
     });
 
     const scheduleSwap = await prisma.scheduleSwapHistory.create({
@@ -715,7 +950,9 @@ async function main() {
     console.log(`Default test password: ${DEFAULT_PASSWORD}`);
     console.log('Super admin login: superadmin@servos.local');
     console.log('Admin login: admin@servos.local');
-    console.log(`Common users: ${pastor.email}, ${coordenador.email}, ${lider.email}, ${servo.email}`);
+    console.log(
+      `Common users: ${pastor.email}, ${coordenador.email}, ${lider.email}, ${servo.email}, renato@servos.local, mateus@servos.local`,
+    );
     console.log(`Super admin id: ${superAdmin.id}`);
   } catch (error) {
     console.error('Seed failed:', error);

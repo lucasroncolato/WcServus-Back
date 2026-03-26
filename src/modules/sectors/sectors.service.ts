@@ -1,9 +1,10 @@
 import {
+  ForbiddenException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditAction, ServantStatus, TrainingStatus } from '@prisma/client';
+import { AuditAction, Role, ServantStatus, TrainingStatus } from '@prisma/client';
 import { assertSectorAccess, getSectorAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -73,7 +74,11 @@ export class SectorsService {
     };
   }
 
-  async create(dto: CreateSectorDto, actorUserId?: string) {
+  async create(dto: CreateSectorDto, actor: JwtPayload) {
+    if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
+      throw new ForbiddenException('Only SUPER_ADMIN and ADMIN can create sectors');
+    }
+
     const duplicated = await this.prisma.sector.findUnique({
       where: { name: dto.name },
       select: { id: true },
@@ -113,7 +118,7 @@ export class SectorsService {
       action: AuditAction.CREATE,
       entity: 'Sector',
       entityId: sector.id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: { servantIds: dto.servantIds },
     });
 
@@ -123,7 +128,19 @@ export class SectorsService {
     };
   }
 
-  async update(id: string, dto: UpdateSectorDto, actorUserId?: string) {
+  async update(id: string, dto: UpdateSectorDto, actor: JwtPayload) {
+    if (
+      actor.role !== Role.SUPER_ADMIN &&
+      actor.role !== Role.ADMIN &&
+      actor.role !== Role.COORDENADOR
+    ) {
+      throw new ForbiddenException('You do not have permission to update sectors');
+    }
+
+    if (actor.role === Role.COORDENADOR) {
+      await assertSectorAccess(this.prisma, actor, id);
+    }
+
     await this.ensureExists(id);
 
     if (dto.name) {
@@ -172,7 +189,7 @@ export class SectorsService {
       action: AuditAction.UPDATE,
       entity: 'Sector',
       entityId: id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 

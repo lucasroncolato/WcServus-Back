@@ -38,7 +38,7 @@ export class ServantsController {
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   create(@Body() dto: CreateServantDto, @CurrentUser() user: JwtPayload) {
     return this.servantsService.create(dto, user);
   }
@@ -50,7 +50,7 @@ export class ServantsController {
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateServantDto,
@@ -60,7 +60,7 @@ export class ServantsController {
   }
 
   @Patch(':id/status')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateServantStatusDto,
@@ -70,7 +70,7 @@ export class ServantsController {
   }
 
   @Patch(':id/link-user')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   linkUser(
     @Param('id') id: string,
     @Body() dto: LinkServantUserDto,
@@ -80,7 +80,7 @@ export class ServantsController {
   }
 
   @Post(':id/create-user-access')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   createUserAccess(
     @Param('id') id: string,
     @Body() dto: CreateServantAccessDto,
@@ -95,7 +95,7 @@ export class ServantsController {
   }
 
   @Patch(':id/training/complete')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   completeTraining(
     @Param('id') id: string,
     @Body() dto: CompleteTrainingDto,

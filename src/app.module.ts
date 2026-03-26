@@ -16,6 +16,9 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { MeModule } from './modules/me/me.module';
+import { TeamsModule } from './modules/teams/teams.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 
@@ -39,6 +42,9 @@ import { HealthController } from './health.controller';
     ReportsModule,
     AuditModule,
     NotificationsModule,
+    MeModule,
+    TeamsModule,
+    SettingsModule,
   ],
   controllers: [HealthController],
   providers: [

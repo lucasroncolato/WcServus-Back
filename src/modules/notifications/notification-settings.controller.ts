@@ -12,14 +12,26 @@ export class NotificationSettingsController {
   constructor(private readonly settingsService: NotificationSettingsService) {}
 
   @Get('whatsapp-global')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN)
   getWhatsappGlobalSetting() {
     return this.settingsService.getWhatsappGlobalSetting();
   }
 
   @Patch('whatsapp-global')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   updateWhatsappGlobalSetting(@Body() dto: UpdateWhatsappGlobalSettingDto) {
     return this.settingsService.updateWhatsappGlobalSetting(dto.enabled);
+  }
+
+  @Get('operational')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  getOperationalSettings() {
+    return this.settingsService.getWhatsappOperationalSetting();
+  }
+
+  @Patch('operational')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  updateOperationalSettings(@Body() dto: UpdateWhatsappGlobalSettingDto) {
+    return this.settingsService.updateWhatsappOperationalSetting(dto.enabled);
   }
 }

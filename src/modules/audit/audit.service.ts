@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
+import { AuditAction, Prisma, Role } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 
 @Injectable()
 export class AuditService {
@@ -24,8 +25,16 @@ export class AuditService {
     });
   }
 
-  list(limit = 50) {
-    return this.prisma.auditLog.findMany({
+  async list(limit = 50, actor?: JwtPayload) {
+    const records = await this.prisma.auditLog.findMany({
+      where:
+        actor?.role === Role.ADMIN
+          ? {
+              entity: {
+                in: ['User', 'Servant', 'Schedule', 'Attendance', 'PastoralVisit'],
+              },
+            }
+          : undefined,
       include: {
         user: {
           select: { id: true, name: true, email: true, role: true },
@@ -34,5 +43,14 @@ export class AuditService {
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
+
+    if (actor?.role === Role.ADMIN) {
+      return records.map((record) => ({
+        ...record,
+        metadata: null,
+      }));
+    }
+
+    return records;
   }
 }

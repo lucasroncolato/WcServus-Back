@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role, UserScope, UserStatus } from '@prisma/client';
+import { Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -46,6 +46,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.role === Role.SERVO && !user.servantId) {
+      throw new UnauthorizedException('SERVO account must be linked to a servant');
+    }
+
     const validPassword = await bcrypt.compare(dto.password, user.passwordHash);
     if (!validPassword) {
       throw new UnauthorizedException('Invalid credentials');
@@ -82,6 +86,10 @@ export class AuthService {
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (user.role === Role.SERVO && !user.servantId) {
+      throw new UnauthorizedException('SERVO account must be linked to a servant');
     }
 
     const matchedToken = await this.findValidRefreshTokenRecord(user.id, dto.refreshToken);
@@ -244,6 +252,7 @@ export class AuthService {
         status: true,
         mustChangePassword: true,
         phone: true,
+        avatarUrl: true,
         sectorTeam: true,
         servantId: true,
         servant: {
@@ -252,6 +261,13 @@ export class AuthService {
             name: true,
             status: true,
             trainingStatus: true,
+            teamId: true,
+            team: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
             mainSectorId: true,
             mainSector: {
               select: {
@@ -298,6 +314,7 @@ export class AuthService {
       status: account.status,
       mustChangePassword: account.mustChangePassword,
       phone: account.phone,
+      avatarUrl: account.avatarUrl,
       sectorTeam: account.sectorTeam,
       servantId: account.servantId,
       servant: account.servant
@@ -305,7 +322,11 @@ export class AuthService {
             id: account.servant.id,
             name: account.servant.name,
             status: account.servant.status,
+            statusView:
+              account.servant.status === ServantStatus.ATIVO ? 'ACTIVE' : 'INACTIVE',
             trainingStatus: account.servant.trainingStatus,
+            teamId: account.servant.teamId,
+            team: account.servant.team,
             mainSectorId: account.servant.mainSectorId,
             sectors: account.servant.servantSectors.map((x) => x.sector),
           }

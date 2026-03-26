@@ -1,7 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { getAttendanceAccessWhere, getScheduleAccessWhere } from 'src/common/auth/access-scope';
 import { AuditAction } from '@prisma/client';
 import { getSaoPauloWeekday, resolvePlanningWindow } from 'src/common/utils/planning-window.utils';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateWorshipServiceDto } from './dto/create-worship-service.dto';
@@ -16,10 +19,13 @@ export class WorshipServicesService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  findAll(query: ListWorshipServicesQueryDto) {
+  async findAll(query: ListWorshipServicesQueryDto, actor: JwtPayload) {
     if (query.windowMode && !query.startDate) {
       throw new BadRequestException('startDate is required when windowMode is informed');
     }
+
+    const scheduleScope = await getScheduleAccessWhere(this.prisma, actor);
+    const attendanceScope = await getAttendanceAccessWhere(this.prisma, actor);
 
     const { start, end } = resolvePlanningWindow({
       windowMode: query.windowMode,
@@ -29,6 +35,22 @@ export class WorshipServicesService {
 
     return this.prisma.worshipService.findMany({
       where: {
+        ...(actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
+          ? {}
+          : {
+              OR: [
+                {
+                  schedules: {
+                    some: scheduleScope ?? { id: '__no_access__' },
+                  },
+                },
+                {
+                  attendances: {
+                    some: attendanceScope ?? { id: '__no_access__' },
+                  },
+                },
+              ],
+            }),
         serviceDate:
           start || end
             ? {
@@ -38,21 +60,70 @@ export class WorshipServicesService {
             : undefined,
       },
       orderBy: { serviceDate: 'asc' },
-    }).then((services) =>
-      query.weekdays?.length
-        ? services.filter((service) => query.weekdays?.includes(getSaoPauloWeekday(service.serviceDate)))
-        : services,
-    );
+    }).then((services) => {
+      if (!query.weekdays?.length) {
+        return services;
+      }
+      return services.filter((service) => query.weekdays?.includes(getSaoPauloWeekday(service.serviceDate)));
+    });
   }
 
-  findOne(id: string) {
-    return this.prisma.worshipService.findUniqueOrThrow({
+  async findOne(id: string, actor: JwtPayload) {
+    const scheduleScope = await getScheduleAccessWhere(this.prisma, actor);
+    const attendanceScope = await getAttendanceAccessWhere(this.prisma, actor);
+
+    if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN && actor.role !== Role.PASTOR) {
+      const visible = await this.prisma.worshipService.findFirst({
+        where: {
+          id,
+          OR: [
+            {
+              schedules: {
+                some: scheduleScope ?? { id: '__no_access__' },
+              },
+            },
+            {
+              attendances: {
+                some: attendanceScope ?? { id: '__no_access__' },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (!visible) {
+        throw new ForbiddenException('You do not have permission for this worship service');
+      }
+    }
+
+    const record = await this.prisma.worshipService.findUniqueOrThrow({
       where: { id },
       include: {
-        schedules: true,
-        attendances: true,
+        schedules:
+          actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
+            ? true
+            : {
+                where: scheduleScope
+                  ? {
+                      AND: [scheduleScope],
+                    }
+                  : undefined,
+              },
+        attendances:
+          actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
+            ? true
+            : {
+                where: attendanceScope
+                  ? {
+                      AND: [attendanceScope],
+                    }
+                  : undefined,
+              },
       },
     });
+
+    return record;
   }
 
   async create(dto: CreateWorshipServiceDto, actorUserId?: string) {

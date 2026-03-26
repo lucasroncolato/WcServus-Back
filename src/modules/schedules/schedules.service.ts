@@ -142,20 +142,43 @@ export class SchedulesService {
 
     const schedules = await this.prisma.schedule.findMany({
       where,
-      include: {
-        service: true,
-        servant: true,
-        sector: true,
-        assignedBy: {
-          select: { id: true, name: true, email: true },
-        },
-      },
+      include:
+        actor.role === Role.SERVO
+          ? {
+              service: true,
+              sector: true,
+            }
+          : {
+              service: true,
+              servant: true,
+              sector: true,
+              assignedBy: {
+                select: { id: true, name: true, email: true },
+              },
+            },
       orderBy: { createdAt: 'desc' },
     });
 
     const filteredByWeekday = query.weekdays?.length
       ? schedules.filter((schedule) => query.weekdays?.includes(getSaoPauloWeekday(schedule.service.serviceDate)))
       : schedules;
+
+    if (actor.role === Role.SERVO) {
+      return filteredByWeekday.map((schedule) => ({
+        id: schedule.id,
+        serviceId: schedule.serviceId,
+        sectorId: schedule.sectorId,
+        classGroup: schedule.classGroup,
+        status: schedule.status,
+        responseStatus: schedule.responseStatus,
+        responseAt: schedule.responseAt,
+        declineReason: schedule.declineReason,
+        worshipServiceId: schedule.serviceId,
+        worshipServiceTitle: schedule.service.title,
+        service: schedule.service,
+        sector: schedule.sector,
+      }));
+    }
 
     return filteredByWeekday.map((schedule) => this.toApiSchedule(schedule));
   }
@@ -1686,7 +1709,7 @@ export class SchedulesService {
       return;
     }
 
-    if (actor.role === Role.COORDENADOR || actor.role === Role.LIDER) {
+    if (actor.role === Role.COORDENADOR) {
       await assertSectorAccess(this.prisma, actor, sectorId);
       return;
     }
@@ -1695,8 +1718,12 @@ export class SchedulesService {
   }
 
   private async assertCanManageSchedule(actor: JwtPayload, scheduleId: string) {
-    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
       return;
+    }
+
+    if (actor.role !== Role.COORDENADOR && actor.role !== Role.LIDER) {
+      throw new ForbiddenException('You do not have permission for this schedule');
     }
 
     const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);

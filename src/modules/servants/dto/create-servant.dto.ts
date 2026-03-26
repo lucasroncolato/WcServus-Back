@@ -48,6 +48,11 @@ export class CreateServantDto {
   @IsString()
   classGroup?: string;
 
+  @ApiPropertyOptional({ description: 'ID da equipe relacional oficial.' })
+  @IsOptional()
+  @IsString()
+  teamId?: string;
+
   @ApiPropertyOptional({ type: [String], description: 'Lista de setores do servo. O primeiro vira setor principal.' })
   @IsOptional()
   @IsArray()

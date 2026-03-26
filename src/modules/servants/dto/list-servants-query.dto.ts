@@ -22,5 +22,10 @@ export class ListServantsQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  teamId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   search?: string;
 }

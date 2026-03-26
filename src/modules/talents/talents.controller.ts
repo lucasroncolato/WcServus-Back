@@ -12,18 +12,19 @@ import { TalentsService } from './talents.service';
 @ApiTags('Talents')
 @ApiBearerAuth()
 @Controller('talents')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
 export class TalentsController {
   constructor(private readonly talentsService: TalentsService) {}
 
   @Get()
-  findAll() {
-    return this.talentsService.findAll();
+  findAll(@CurrentUser() user: JwtPayload) {
+    return this.talentsService.findAll(user);
   }
 
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
   create(@Body() dto: CreateTalentDto, @CurrentUser() user: JwtPayload) {
-    return this.talentsService.create(dto, user.sub);
+    return this.talentsService.create(dto, user);
   }
 
   @Patch(':id/stage')
@@ -33,7 +34,7 @@ export class TalentsController {
     @Body() dto: UpdateTalentStageDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.talentsService.moveStage(id, dto, user.sub);
+    return this.talentsService.moveStage(id, dto, user);
   }
 
   @Patch(':id/approve')
@@ -43,6 +44,6 @@ export class TalentsController {
     @Body() dto: ApproveTalentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.talentsService.approve(id, dto, user.sub);
+    return this.talentsService.approve(id, dto, user);
   }
 }

@@ -16,23 +16,23 @@ export class WorshipServicesController {
   constructor(private readonly worshipServicesService: WorshipServicesService) {}
 
   @Get()
-  findAll(@Query() query: ListWorshipServicesQueryDto) {
-    return this.worshipServicesService.findAll(query);
+  findAll(@Query() query: ListWorshipServicesQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.worshipServicesService.findAll(query, user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.worshipServicesService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.worshipServicesService.findOne(id, user);
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   create(@Body() dto: CreateWorshipServiceDto, @CurrentUser() user: JwtPayload) {
     return this.worshipServicesService.create(dto, user.sub);
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateWorshipServiceDto,

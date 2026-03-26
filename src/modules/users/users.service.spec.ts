@@ -44,36 +44,13 @@ describe('UsersService - updateRole', () => {
     service = new UsersService(prisma, auditService, notificationsService);
   });
 
-  it('permite ADMIN alterar role de usuario abaixo do seu nivel', async () => {
+  it('bloqueia ADMIN de alterar role mesmo para usuario abaixo do seu nivel', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: Role.LIDER });
-    prisma.user.update.mockResolvedValue({
-      id: 'user-1',
-      name: 'User',
-      email: 'user@test.com',
-      role: Role.SERVO,
-      scope: UserScope.GLOBAL,
-      status: UserStatus.ACTIVE,
-      mustChangePassword: false,
-      phone: null,
-      sectorTeam: null,
-      servantId: null,
-      lastLoginAt: null,
-      servant: null,
-      scopeBindings: [],
-      permissionOverrides: [],
-      createdAt: new Date('2026-03-23T00:00:00.000Z'),
-      updatedAt: new Date('2026-03-23T00:00:00.000Z'),
-    });
 
-    const result = await service.updateRole('user-1', { role: Role.SERVO }, adminActor);
-
-    expect(result.data.role).toBe(Role.SERVO);
-    expect(prisma.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'user-1' },
-        data: { role: Role.SERVO },
-      }),
+    await expect(service.updateRole('user-1', { role: Role.SERVO }, adminActor)).rejects.toBeInstanceOf(
+      ForbiddenException,
     );
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('bloqueia ADMIN promover para ADMIN (mesmo nivel)', async () => {
@@ -130,7 +107,7 @@ describe('UsersService - updateRole', () => {
   it('retorna 404 para usuario alvo inexistente', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 
-    await expect(service.updateRole('missing', { role: Role.SERVO }, adminActor)).rejects.toBeInstanceOf(
+    await expect(service.updateRole('missing', { role: Role.SERVO }, superAdminActor)).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });

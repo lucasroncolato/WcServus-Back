@@ -10,6 +10,7 @@ import { NotificationTemplatesService } from './notification-templates.service';
 @ApiTags('Notification Templates')
 @ApiBearerAuth()
 @Controller('notifications/templates')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class NotificationTemplatesController {
   constructor(private readonly templatesService: NotificationTemplatesService) {}
 
@@ -24,31 +25,31 @@ export class NotificationTemplatesController {
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   create(@Body() dto: CreateNotificationTemplateDto) {
     return this.templatesService.create(dto);
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateNotificationTemplateDto) {
     return this.templatesService.update(id, dto);
   }
 
   @Patch(':id/activate')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   activate(@Param('id') id: string) {
     return this.templatesService.activate(id, true);
   }
 
   @Patch(':id/deactivate')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   deactivate(@Param('id') id: string) {
     return this.templatesService.activate(id, false);
   }
 
   @Delete(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   remove(@Param('id') id: string) {
     return this.templatesService.remove(id);
   }

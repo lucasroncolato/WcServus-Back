@@ -12,6 +12,7 @@ import { PastoralVisitsService } from './pastoral-visits.service';
 @ApiTags('Pastoral Visits')
 @ApiBearerAuth()
 @Controller('pastoral-visits')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
 export class PastoralVisitsController {
   constructor(private readonly pastoralVisitsService: PastoralVisitsService) {}
 

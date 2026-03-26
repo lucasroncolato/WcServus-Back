@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-import { UserStatus } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 import { JwtPayload } from '../types/jwt-payload.type';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -33,6 +33,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Invalid token');
+    }
+
+    if (user.role === Role.SERVO && !user.servantId) {
+      throw new UnauthorizedException('SERVO account must be linked to a servant');
     }
 
     return {

@@ -22,13 +22,13 @@ export class AttendancesController {
   }
 
   @Post('check-in')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER, Role.SERVO)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
   checkIn(@Body() dto: CheckInDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.checkIn(dto, user);
   }
 
   @Post('batch')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER, Role.SERVO)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
   batch(@Body() dto: BatchAttendanceDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.batch(dto, user);
   }

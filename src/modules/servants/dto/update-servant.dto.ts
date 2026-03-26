@@ -44,6 +44,11 @@ export class UpdateServantDto {
   @IsString()
   classGroup?: string;
 
+  @ApiPropertyOptional({ description: 'ID da equipe relacional oficial.' })
+  @IsOptional()
+  @IsString()
+  teamId?: string;
+
   @ApiPropertyOptional({ type: [String], description: 'Setores do servo. O primeiro vira setor principal.' })
   @IsOptional()
   @IsArray()

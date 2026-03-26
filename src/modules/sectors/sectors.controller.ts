@@ -11,6 +11,7 @@ import { SectorsService } from './sectors.service';
 @ApiTags('Sectors')
 @ApiBearerAuth()
 @Controller('sectors')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
 export class SectorsController {
   constructor(private readonly sectorsService: SectorsService) {}
 
@@ -25,9 +26,9 @@ export class SectorsController {
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   create(@Body() dto: CreateSectorDto, @CurrentUser() user: JwtPayload) {
-    return this.sectorsService.create(dto, user.sub);
+    return this.sectorsService.create(dto, user);
   }
 
   @Patch(':id')
@@ -37,7 +38,7 @@ export class SectorsController {
     @Body() dto: UpdateSectorDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.sectorsService.update(id, dto, user.sub);
+    return this.sectorsService.update(id, dto, user);
   }
 
   @Get(':id/servants')

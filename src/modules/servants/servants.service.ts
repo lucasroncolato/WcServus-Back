@@ -15,6 +15,7 @@ import {
   UserStatus,
   type Sector,
   type Servant,
+  type Team,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { getServantAccessWhere, resolveScopedSectorIds } from 'src/common/auth/access-scope';
@@ -33,6 +34,7 @@ import { UpdateServantDto } from './dto/update-servant.dto';
 
 type ServantWithRelations = Servant & {
   mainSector: Sector | null;
+  team: Team | null;
   servantSectors: Array<{ sector: Sector }>;
   userAccount: {
     id: string;
@@ -53,6 +55,7 @@ export class ServantsService {
 
   private readonly servantInclude = {
     mainSector: true,
+    team: true,
     servantSectors: {
       include: { sector: true },
     },
@@ -73,6 +76,7 @@ export class ServantsService {
     const queryWhere: Prisma.ServantWhereInput = {
       status: this.mapQueryStatus(query.status),
       trainingStatus: query.trainingStatus,
+      teamId: query.teamId,
       OR: query.sectorId
         ? [{ mainSectorId: query.sectorId }, { servantSectors: { some: { sectorId: query.sectorId } } }]
         : undefined,
@@ -142,61 +146,17 @@ export class ServantsService {
   }
 
   async create(dto: CreateServantDto, actor: JwtPayload) {
-    const sectorIds = await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true);
-    await this.assertCanManageSectorSet(actor, sectorIds);
-
-    const servant = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.servant.create({
-        data: {
-          name: dto.name,
-          phone: dto.phone,
-          gender: dto.gender,
-          birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-          status: this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
-          trainingStatus: TrainingStatus.PENDING,
-          aptitude: dto.aptitude,
-          classGroup: dto.classGroup,
-          mainSectorId: sectorIds[0],
-          notes: dto.notes,
-          joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : undefined,
-        },
-      });
-
-      await tx.servantSector.createMany({
-        data: sectorIds.map((sectorId) => ({ servantId: created.id, sectorId })),
-      });
-
-      await tx.servantStatusHistory.create({
-        data: {
-          servantId: created.id,
-          toStatus: created.status,
-          reason: 'Initial status on creation',
-        },
-      });
-
-      return tx.servant.findUniqueOrThrow({
-        where: { id: created.id },
-        include: this.servantInclude,
-      });
-    });
-
-    await this.auditService.log({
-      action: AuditAction.CREATE,
-      entity: 'Servant',
-      entityId: servant.id,
-      userId: actor.sub,
-      metadata: {
-        sectorIds,
-        trainingStatus: TrainingStatus.PENDING,
-      },
-    });
-
-    return this.toApiServant(servant);
+    void dto;
+    void actor;
+    throw new BadRequestException(
+      'Use POST /servants/with-user. Every new servant must be created with a linked user account.',
+    );
   }
 
   async createWithUser(dto: CreateServantWithUserDto, actor: JwtPayload) {
     const sectorIds = await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true);
     await this.assertCanManageSectorSet(actor, sectorIds);
+    const teamId = await this.resolveAndValidateTeamId(dto.teamId, sectorIds, dto.classGroup);
 
     const email = dto.user.email.toLowerCase();
     const existingByEmail = await this.prisma.user.findUnique({
@@ -208,8 +168,11 @@ export class ServantsService {
       throw new ConflictException('Email already in use');
     }
 
-    const targetRole = dto.user.role ?? Role.SERVO;
-    this.assertCanAssignRole(actor.role, targetRole);
+    if (dto.user.role && dto.user.role !== Role.SERVO) {
+      throw new BadRequestException('Every new servant user account must use role SERVO');
+    }
+
+    const targetRole = Role.SERVO;
 
     const passwordHash = await bcrypt.hash(dto.user.password, 10);
 
@@ -223,7 +186,8 @@ export class ServantsService {
           status: this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
           trainingStatus: TrainingStatus.PENDING,
           aptitude: dto.aptitude,
-          classGroup: dto.classGroup,
+          classGroup: dto.classGroup ?? null,
+          teamId,
           mainSectorId: sectorIds[0],
           notes: dto.notes,
           joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : undefined,
@@ -248,6 +212,7 @@ export class ServantsService {
           email,
           passwordHash,
           role: targetRole,
+          scope: UserScope.SELF,
           status: dto.user.status ?? UserStatus.ACTIVE,
           phone: dto.user.phone ?? createdServant.phone ?? null,
           servantId: createdServant.id,
@@ -267,6 +232,7 @@ export class ServantsService {
       userId: actor.sub,
       metadata: {
         sectorIds,
+        teamId,
         userRole: targetRole,
       },
     });
@@ -278,17 +244,9 @@ export class ServantsService {
     await this.assertCanManageServant(actor, servantId);
 
     if (dto.userId === null) {
-      const linked = await this.prisma.user.findFirst({
-        where: { servantId },
-        select: { id: true },
-      });
-
-      if (linked) {
-        await this.prisma.user.update({
-          where: { id: linked.id },
-          data: { servantId: null },
-        });
-      }
+      throw new BadRequestException(
+        'A servant cannot be unlinked from user access. Link another user instead.',
+      );
     } else if (dto.userId) {
       const user = await this.prisma.user.findUnique({
         where: { id: dto.userId },
@@ -353,6 +311,7 @@ export class ServantsService {
         name: true,
         phone: true,
         classGroup: true,
+        team: { select: { id: true, name: true } },
         userAccount: {
           select: { id: true },
         },
@@ -376,13 +335,12 @@ export class ServantsService {
       throw new ConflictException('Email already in use');
     }
 
-    const role = dto.role ?? Role.SERVO;
-    this.assertCanAssignRole(actor.role, role);
+    if (dto.role && dto.role !== Role.SERVO) {
+      throw new BadRequestException('Servant access role must be SERVO');
+    }
 
-    const scope = dto.scope ?? (servant.classGroup ? UserScope.EQUIPE : UserScope.GLOBAL);
-    const sectorTeam = scope === UserScope.GLOBAL ? null : servant.classGroup ?? null;
-    if (scope !== UserScope.GLOBAL && !sectorTeam) {
-      throw new BadRequestException('Servant without team cannot receive non-GLOBAL scope');
+    if (dto.scope && dto.scope !== UserScope.SELF) {
+      throw new BadRequestException('Servant access scope must be SELF');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -392,10 +350,10 @@ export class ServantsService {
         name: dto.name ?? servant.name,
         email,
         passwordHash,
-        role,
+        role: Role.SERVO,
+        scope: UserScope.SELF,
         status: dto.status ?? UserStatus.ACTIVE,
-        scope,
-        sectorTeam,
+        sectorTeam: servant.team?.name ?? servant.classGroup ?? null,
         phone: servant.phone ?? null,
         servantId,
         mustChangePassword: true,
@@ -443,7 +401,20 @@ export class ServantsService {
   async update(id: string, dto: UpdateServantDto, actor: JwtPayload) {
     await this.assertCanManageServant(actor, id);
 
-    const existing = await this.prisma.servant.findUnique({ where: { id } });
+    const existing = await this.prisma.servant.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        teamId: true,
+        mainSectorId: true,
+        servantSectors: {
+          select: {
+            sectorId: true,
+          },
+        },
+      },
+    });
     if (!existing) {
       throw new NotFoundException('Servant not found');
     }
@@ -457,6 +428,26 @@ export class ServantsService {
       await this.assertCanManageSectorSet(actor, resolvedSectorIds);
     }
 
+    const fallbackSectorIds =
+      resolvedSectorIds ??
+      [
+        ...(existing.mainSectorId ? [existing.mainSectorId] : []),
+        ...existing.servantSectors.map((item) => item.sectorId),
+      ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
+    const resolvedTeamId =
+      dto.teamId !== undefined || dto.classGroup !== undefined || resolvedSectorIds !== undefined
+        ? await this.resolveAndValidateTeamId(dto.teamId, fallbackSectorIds, dto.classGroup)
+        : undefined;
+
+    const explicitStatus = dto.status ? this.mapDtoStatus(dto.status) : undefined;
+    const implicitStatusFromTraining =
+      !explicitStatus &&
+      dto.trainingStatus === TrainingStatus.COMPLETED &&
+      this.shouldPromoteToActiveOnTrainingCompletion(existing.status)
+        ? ServantStatus.ATIVO
+        : undefined;
+    const nextStatus = explicitStatus ?? implicitStatusFromTraining;
+
     const servant = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.servant.update({
         where: { id },
@@ -465,10 +456,11 @@ export class ServantsService {
           phone: dto.phone,
           gender: dto.gender,
           birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-          status: dto.status ? this.mapDtoStatus(dto.status) : undefined,
+          status: nextStatus,
           trainingStatus: dto.trainingStatus,
           aptitude: dto.aptitude,
           classGroup: dto.classGroup,
+          teamId: resolvedTeamId,
           mainSectorId: resolvedSectorIds ? resolvedSectorIds[0] : undefined,
           notes: dto.notes,
           joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : undefined,
@@ -482,13 +474,15 @@ export class ServantsService {
         });
       }
 
-      if (dto.status && this.mapDtoStatus(dto.status) !== existing.status) {
+      if (nextStatus && nextStatus !== existing.status) {
         await tx.servantStatusHistory.create({
           data: {
             servantId: id,
             fromStatus: existing.status,
-            toStatus: this.mapDtoStatus(dto.status),
-            reason: 'Updated in servant profile',
+            toStatus: nextStatus,
+            reason: dto.status
+              ? 'Updated in servant profile'
+              : 'Auto-promoted after training completion',
           },
         });
       }
@@ -507,6 +501,7 @@ export class ServantsService {
       metadata: {
         ...dto,
         sectorIds: resolvedSectorIds,
+        teamId: resolvedTeamId,
       } as unknown as Record<string, unknown>,
     });
 
@@ -554,12 +549,39 @@ export class ServantsService {
 
   async completeTraining(id: string, dto: CompleteTrainingDto, actor: JwtPayload) {
     await this.assertCanManageServant(actor, id);
-    await this.ensureExists(id);
 
-    const updated = await this.prisma.servant.update({
+    const existing = await this.prisma.servant.findUnique({
       where: { id },
-      data: { trainingStatus: TrainingStatus.COMPLETED },
-      include: this.servantInclude,
+      select: { id: true, status: true, trainingStatus: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Servant not found');
+    }
+
+    const promoteToActive = this.shouldPromoteToActiveOnTrainingCompletion(existing.status);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.servant.update({
+        where: { id },
+        data: {
+          trainingStatus: TrainingStatus.COMPLETED,
+          status: promoteToActive ? ServantStatus.ATIVO : undefined,
+        },
+        include: this.servantInclude,
+      });
+
+      if (promoteToActive) {
+        await tx.servantStatusHistory.create({
+          data: {
+            servantId: id,
+            fromStatus: existing.status,
+            toStatus: ServantStatus.ATIVO,
+            reason: 'Auto-promoted after training completion',
+          },
+        });
+      }
+
+      return next;
     });
 
     await this.auditService.log({
@@ -567,7 +589,13 @@ export class ServantsService {
       entity: 'ServantTraining',
       entityId: id,
       userId: actor.sub,
-      metadata: { trainingStatus: TrainingStatus.COMPLETED, notes: dto.notes },
+      metadata: {
+        fromTrainingStatus: existing.trainingStatus,
+        toTrainingStatus: TrainingStatus.COMPLETED,
+        fromStatus: existing.status,
+        toStatus: promoteToActive ? ServantStatus.ATIVO : existing.status,
+        notes: dto.notes,
+      },
     });
 
     await this.notificationsService.notifyServantLinkedUser(id, {
@@ -642,6 +670,10 @@ export class ServantsService {
       : ServantActiveStatusDto.INACTIVE;
   }
 
+  private shouldPromoteToActiveOnTrainingCompletion(status: ServantStatus) {
+    return status === ServantStatus.RECRUTAMENTO || status === ServantStatus.RECICLAGEM;
+  }
+
   private toApiServant(servant: ServantWithRelations) {
     const sectorsMap = new Map<string, string>();
 
@@ -658,7 +690,9 @@ export class ServantsService {
 
     return {
       ...servant,
+      statusRaw: servant.status,
       status: this.mapDbStatus(servant.status),
+      statusView: this.mapDbStatus(servant.status),
       linkedUserId: servant.userAccount?.id ?? null,
       linkedUserName: servant.userAccount?.name ?? null,
       linkedUserEmail: servant.userAccount?.email ?? null,
@@ -667,6 +701,8 @@ export class ServantsService {
       sectorNames,
       sectorId: sectorIds[0] ?? null,
       sectorName: sectorNames[0] ?? null,
+      teamId: servant.team?.id ?? servant.teamId ?? null,
+      teamName: servant.team?.name ?? servant.classGroup ?? null,
     };
   }
 
@@ -703,6 +739,49 @@ export class ServantsService {
     return merged;
   }
 
+  private async resolveAndValidateTeamId(
+    teamId: string | undefined,
+    sectorIds: string[],
+    legacyClassGroup?: string,
+  ) {
+    if (!teamId && !legacyClassGroup?.trim()) {
+      return null;
+    }
+
+    if (teamId) {
+      const team = await this.prisma.team.findUnique({
+        where: { id: teamId },
+        select: { id: true, sectorId: true },
+      });
+
+      if (!team) {
+        throw new BadRequestException({
+          code: 'SERVANT_TEAM_INVALID',
+          message: 'Team not found',
+        });
+      }
+
+      if (!sectorIds.includes(team.sectorId)) {
+        throw new BadRequestException({
+          code: 'SERVANT_TEAM_INVALID',
+          message: 'Team must belong to one of servant sectors',
+        });
+      }
+
+      return team.id;
+    }
+
+    const teamByLegacyName = await this.prisma.team.findFirst({
+      where: {
+        sectorId: sectorIds[0],
+        name: legacyClassGroup?.trim(),
+      },
+      select: { id: true },
+    });
+
+    return teamByLegacyName?.id ?? null;
+  }
+
   private async ensureExists(id: string) {
     const servant = await this.prisma.servant.findUnique({ where: { id }, select: { id: true } });
     if (!servant) {
@@ -733,8 +812,12 @@ export class ServantsService {
   }
 
   private async assertCanManageServant(actor: JwtPayload, servantId: string) {
-    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
       return;
+    }
+
+    if (actor.role !== Role.COORDENADOR) {
+      throw new ForbiddenException('You do not have permission to manage this servant');
     }
 
     const where = await this.buildScopedServantWhere(actor, servantId);
@@ -749,15 +832,11 @@ export class ServantsService {
   }
 
   private async assertCanManageSectorSet(actor: JwtPayload, sectorIds: string[]) {
-    if (
-      actor.role === Role.SUPER_ADMIN ||
-      actor.role === Role.ADMIN ||
-      actor.role === Role.PASTOR
-    ) {
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
       return;
     }
 
-    if (actor.role !== Role.COORDENADOR && actor.role !== Role.LIDER) {
+    if (actor.role !== Role.COORDENADOR) {
       throw new ForbiddenException('This profile cannot manage servants');
     }
 

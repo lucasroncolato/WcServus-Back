@@ -38,13 +38,13 @@ export class SchedulesController {
   }
 
   @Get(':id/history')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
   history(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.history(id, user);
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   create(@Body() dto: CreateScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.create(dto, user);
   }
@@ -80,13 +80,13 @@ export class SchedulesController {
   }
 
   @Post('swap')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   swap(@Body() dto: SwapScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.swap(dto, user);
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateScheduleDto,
@@ -96,7 +96,7 @@ export class SchedulesController {
   }
 
   @Post(':id/duplicate')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   @ApiOperation({ summary: 'Duplicar uma escala para outro culto' })
   @ApiCreatedResponse({ description: 'Escala duplicada com sucesso.' })
   @ApiBadRequestResponse({ description: 'Payload inválido.' })
@@ -112,7 +112,7 @@ export class SchedulesController {
   }
 
   @Get('swap-history')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
   swapHistory(@Query() query: ListSwapHistoryQueryDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.swapHistory(query, user);
   }

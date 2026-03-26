@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction, ServantStatus, TalentStage } from '@prisma/client';
+import { assertServantAccess, getServantAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ApproveTalentDto } from './dto/approve-talent.dto';
@@ -15,14 +17,19 @@ export class TalentsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  findAll() {
+  async findAll(actor: JwtPayload) {
+    const servantScope = await getServantAccessWhere(this.prisma, actor);
+
     return this.prisma.talent.findMany({
+      where: servantScope ? { servant: servantScope } : undefined,
       include: { servant: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async create(dto: CreateTalentDto, actorUserId: string) {
+  async create(dto: CreateTalentDto, actor: JwtPayload) {
+    await assertServantAccess(this.prisma, actor, dto.servantId);
+
     const servant = await this.prisma.servant.findUnique({
       where: { id: dto.servantId },
       select: { id: true },
@@ -41,7 +48,7 @@ export class TalentsService {
       action: AuditAction.CREATE,
       entity: 'Talent',
       entityId: talent.id,
-      userId: actorUserId,
+      userId: actor.sub,
     });
 
     await this.notificationsService.notifyServantLinkedUser(dto.servantId, {
@@ -55,11 +62,13 @@ export class TalentsService {
     return talent;
   }
 
-  async moveStage(id: string, dto: UpdateTalentStageDto, actorUserId: string) {
+  async moveStage(id: string, dto: UpdateTalentStageDto, actor: JwtPayload) {
     const talent = await this.prisma.talent.findUnique({ where: { id } });
     if (!talent) {
       throw new NotFoundException('Talent pipeline entry not found');
     }
+
+    await assertServantAccess(this.prisma, actor, talent.servantId);
 
     const updated = await this.prisma.talent.update({
       where: { id },
@@ -82,7 +91,7 @@ export class TalentsService {
       action: AuditAction.STATUS_CHANGE,
       entity: 'Talent',
       entityId: id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: { stage: dto.stage },
     });
 
@@ -100,14 +109,14 @@ export class TalentsService {
     return updated;
   }
 
-  async approve(id: string, dto: ApproveTalentDto, actorUserId: string) {
+  async approve(id: string, dto: ApproveTalentDto, actor: JwtPayload) {
     return this.moveStage(
       id,
       {
         stage: TalentStage.APROVADO,
         notes: dto.notes,
       },
-      actorUserId,
+      actor,
     );
   }
 }

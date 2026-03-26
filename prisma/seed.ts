@@ -189,8 +189,8 @@ async function main() {
       email: 'lider@servos.local',
       name: 'Lider Maria',
       passwordHash,
-      role: Role.LIDER,
-      scope: UserScope.EQUIPE,
+      role: Role.COORDENADOR,
+      scope: UserScope.SETOR,
       status: UserStatus.ACTIVE,
     });
 
@@ -452,7 +452,7 @@ async function main() {
 
     await prisma.user.update({
       where: { id: lider.id },
-      data: { servantId: lucas.id, scope: UserScope.EQUIPE },
+      data: { servantId: lucas.id, scope: UserScope.SETOR },
     });
 
     await prisma.user.update({

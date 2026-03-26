@@ -74,14 +74,15 @@ export class ServantsService {
 
   async findAll(query: ListServantsQueryDto, actor: JwtPayload) {
     const accessWhere = await getServantAccessWhere(this.prisma, actor);
+    const sectorId = query.ministryId ?? query.sectorId;
 
     const queryWhere: Prisma.ServantWhereInput = {
       status: this.mapQueryStatus(query.status),
       trainingStatus: query.trainingStatus,
       approvalStatus: query.approvalStatus,
       teamId: query.teamId,
-      OR: query.sectorId
-        ? [{ mainSectorId: query.sectorId }, { servantSectors: { some: { sectorId: query.sectorId } } }]
+      OR: sectorId
+        ? [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }]
         : undefined,
       name: query.search
         ? {
@@ -168,7 +169,11 @@ export class ServantsService {
     const isCoordinatorRequest = actor.role === Role.COORDENADOR;
     const sectorIds = isCoordinatorRequest
       ? await this.resolveCoordinatorCreationSectorIds(actor, dto.sectorIds, dto.mainSectorId)
-      : await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true);
+      : await this.resolveAndValidateSectorIds(
+          dto.ministryIds ?? dto.sectorIds,
+          dto.mainMinistryId ?? dto.mainSectorId,
+          true,
+        );
     await this.assertCanManageSectorSet(actor, sectorIds);
     const teamId = await this.resolveAndValidateTeamId(dto.teamId, sectorIds);
 
@@ -449,8 +454,15 @@ export class ServantsService {
     }
 
     const resolvedSectorIds =
-      dto.sectorIds !== undefined || dto.mainSectorId !== undefined
-        ? await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true)
+      dto.sectorIds !== undefined ||
+      dto.mainSectorId !== undefined ||
+      dto.ministryIds !== undefined ||
+      dto.mainMinistryId !== undefined
+        ? await this.resolveAndValidateSectorIds(
+            dto.ministryIds ?? dto.sectorIds,
+            dto.mainMinistryId ?? dto.mainSectorId,
+            true,
+          )
         : undefined;
 
     if (resolvedSectorIds) {
@@ -794,6 +806,10 @@ export class ServantsService {
       linkedUserStatus: servant.userAccount?.status ?? null,
       sectorIds,
       sectorNames,
+      ministryIds: sectorIds,
+      ministryNames: sectorNames,
+      ministryId: sectorIds[0] ?? null,
+      ministryName: sectorNames[0] ?? null,
       sectorId: sectorIds[0] ?? null,
       sectorName: sectorNames[0] ?? null,
       teamId: servant.team?.id ?? servant.teamId ?? null,
@@ -912,8 +928,8 @@ export class ServantsService {
     }
 
     if (actorRole === Role.COORDENADOR) {
-      if (targetRole !== Role.LIDER && targetRole !== Role.SERVO) {
-        throw new ForbiddenException('COORDENADOR can only create LIDER or SERVO users');
+      if (targetRole !== Role.SERVO) {
+        throw new ForbiddenException('COORDENADOR can only create SERVO users');
       }
       return;
     }

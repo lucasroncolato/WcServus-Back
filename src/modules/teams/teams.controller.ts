@@ -17,13 +17,13 @@ export class TeamsController {
   constructor(private readonly teamsService: TeamsService) {}
 
   @Get()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   findAll(@Query() query: ListTeamsQueryDto, @CurrentUser() user: JwtPayload) {
     return this.teamsService.findAll(query, user);
   }
 
   @Get(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.teamsService.findOne(id, user);
   }
@@ -47,7 +47,7 @@ export class TeamsController {
   }
 
   @Get(':id/members')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   members(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.teamsService.members(id, user);
   }

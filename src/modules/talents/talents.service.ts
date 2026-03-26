@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, ServantStatus, TalentStage } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditAction, ServantStatus, TalentReviewStatus, TalentStage } from '@prisma/client';
 import { assertServantAccess, getServantAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -7,6 +7,8 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ApproveTalentDto } from './dto/approve-talent.dto';
 import { CreateTalentDto } from './dto/create-talent.dto';
+import { RejectTalentDto } from './dto/reject-talent.dto';
+import { ReviewRejectedTalentDto, TalentReviewDecisionDto } from './dto/review-rejected-talent.dto';
 import { UpdateTalentStageDto } from './dto/update-talent-stage.dto';
 
 @Injectable()
@@ -40,7 +42,10 @@ export class TalentsService {
     }
 
     const talent = await this.prisma.talent.create({
-      data: dto,
+      data: {
+        ...dto,
+        reviewStatus: TalentReviewStatus.NOT_REQUIRED,
+      },
       include: { servant: true },
     });
 
@@ -63,6 +68,10 @@ export class TalentsService {
   }
 
   async moveStage(id: string, dto: UpdateTalentStageDto, actor: JwtPayload) {
+    if (dto.stage === TalentStage.REPROVADO) {
+      throw new BadRequestException('Use /talents/:id/reject with mandatory reason');
+    }
+
     const talent = await this.prisma.talent.findUnique({ where: { id } });
     if (!talent) {
       throw new NotFoundException('Talent pipeline entry not found');
@@ -75,6 +84,13 @@ export class TalentsService {
       data: {
         stage: dto.stage,
         notes: dto.notes ?? talent.notes,
+        reviewStatus: TalentReviewStatus.NOT_REQUIRED,
+        rejectionReason: null,
+        rejectedByUserId: null,
+        rejectedAt: null,
+        reviewedByUserId: null,
+        reviewedAt: null,
+        reviewNotes: null,
         approvedAt: dto.stage === TalentStage.APROVADO ? new Date() : null,
       },
       include: { servant: true },
@@ -118,5 +134,81 @@ export class TalentsService {
       },
       actor,
     );
+  }
+
+  async reject(id: string, dto: RejectTalentDto, actor: JwtPayload) {
+    const talent = await this.prisma.talent.findUnique({ where: { id } });
+    if (!talent) {
+      throw new NotFoundException('Talent pipeline entry not found');
+    }
+
+    await assertServantAccess(this.prisma, actor, talent.servantId);
+
+    const updated = await this.prisma.talent.update({
+      where: { id },
+      data: {
+        stage: TalentStage.REPROVADO,
+        reviewStatus: TalentReviewStatus.PENDING_ADMIN_REVIEW,
+        rejectionReason: dto.reason,
+        rejectedByUserId: actor.sub,
+        rejectedAt: new Date(),
+        reviewNotes: null,
+        reviewedByUserId: null,
+        reviewedAt: null,
+      },
+      include: { servant: true },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.STATUS_CHANGE,
+      entity: 'TalentRejection',
+      entityId: id,
+      userId: actor.sub,
+      metadata: { reason: dto.reason },
+    });
+
+    return updated;
+  }
+
+  async reviewRejection(id: string, dto: ReviewRejectedTalentDto, actor: JwtPayload) {
+    const talent = await this.prisma.talent.findUnique({ where: { id } });
+    if (!talent) {
+      throw new NotFoundException('Talent pipeline entry not found');
+    }
+
+    if (talent.reviewStatus !== TalentReviewStatus.PENDING_ADMIN_REVIEW) {
+      throw new BadRequestException('This talent rejection is not pending admin review');
+    }
+
+    const nextStage =
+      dto.decision === TalentReviewDecisionDto.REVERSE_REJECTION
+        ? TalentStage.EM_AVALIACAO
+        : TalentStage.REPROVADO;
+    const nextReviewStatus =
+      dto.decision === TalentReviewDecisionDto.REVERSE_REJECTION
+        ? TalentReviewStatus.ADMIN_REVERSED_REJECTION
+        : TalentReviewStatus.ADMIN_CONFIRMED_REJECTION;
+
+    const updated = await this.prisma.talent.update({
+      where: { id },
+      data: {
+        stage: nextStage,
+        reviewStatus: nextReviewStatus,
+        reviewedByUserId: actor.sub,
+        reviewedAt: new Date(),
+        reviewNotes: dto.notes ?? null,
+      },
+      include: { servant: true },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.STATUS_CHANGE,
+      entity: 'TalentRejectionReview',
+      entityId: id,
+      userId: actor.sub,
+      metadata: { decision: dto.decision, notes: dto.notes },
+    });
+
+    return updated;
   }
 }

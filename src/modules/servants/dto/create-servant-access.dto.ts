@@ -26,7 +26,7 @@ export class CreateServantAccessDto {
   @IsEnum(UserStatus)
   status?: UserStatus;
 
-  @ApiPropertyOptional({ enum: UserScope, default: UserScope.EQUIPE })
+  @ApiPropertyOptional({ enum: UserScope, default: UserScope.SELF })
   @IsOptional()
   @IsEnum(UserScope)
   scope?: UserScope;

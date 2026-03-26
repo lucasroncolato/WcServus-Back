@@ -6,13 +6,11 @@ const ROLE_HIERARCHY: Record<Role, Role[]> = {
     Role.ADMIN,
     Role.PASTOR,
     Role.COORDENADOR,
-    Role.LIDER,
     Role.SERVO,
   ],
-  [Role.ADMIN]: [Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER, Role.SERVO],
-  [Role.PASTOR]: [Role.PASTOR, Role.COORDENADOR, Role.LIDER, Role.SERVO],
-  [Role.COORDENADOR]: [Role.COORDENADOR, Role.LIDER, Role.SERVO],
-  [Role.LIDER]: [Role.LIDER, Role.SERVO],
+  [Role.ADMIN]: [Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.SERVO],
+  [Role.PASTOR]: [Role.PASTOR],
+  [Role.COORDENADOR]: [Role.COORDENADOR, Role.SERVO],
   [Role.SERVO]: [Role.SERVO],
 };
 

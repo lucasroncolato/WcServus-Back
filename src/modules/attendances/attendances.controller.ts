@@ -17,25 +17,25 @@ export class AttendancesController {
   constructor(private readonly attendancesService: AttendancesService) {}
 
   @Get()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   findAll(@Query() query: ListAttendancesQueryDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.findAll(query, user);
   }
 
   @Post('check-in')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   checkIn(@Body() dto: CheckInDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.checkIn(dto, user);
   }
 
   @Post('batch')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   batch(@Body() dto: BatchAttendanceDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.batch(dto, user);
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAttendanceDto,

@@ -4,17 +4,17 @@ import { Role } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
-import { CreateMinistryResponsibilityDto } from './dto/create-ministry-responsibility.dto';
-import { CreateSectorDto } from './dto/create-sector.dto';
-import { UpdateMinistryResponsibilityDto } from './dto/update-ministry-responsibility.dto';
-import { UpdateSectorDto } from './dto/update-sector.dto';
-import { SectorsService } from './sectors.service';
+import { CreateMinistryResponsibilityDto } from '../sectors/dto/create-ministry-responsibility.dto';
+import { CreateSectorDto } from '../sectors/dto/create-sector.dto';
+import { UpdateMinistryResponsibilityDto } from '../sectors/dto/update-ministry-responsibility.dto';
+import { UpdateSectorDto } from '../sectors/dto/update-sector.dto';
+import { SectorsService } from '../sectors/sectors.service';
 
 @ApiTags('Ministries')
 @ApiBearerAuth()
-@Controller('sectors')
+@Controller('ministries')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
-export class SectorsController {
+export class MinistriesController {
   constructor(private readonly sectorsService: SectorsService) {}
 
   @Get()

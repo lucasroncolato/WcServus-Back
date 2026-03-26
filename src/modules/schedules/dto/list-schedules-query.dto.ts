@@ -14,6 +14,11 @@ export class ListSchedulesQueryDto {
   @IsString()
   sectorId?: string;
 
+  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @IsOptional()
+  @IsString()
+  ministryId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

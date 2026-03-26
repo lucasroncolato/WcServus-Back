@@ -15,6 +15,11 @@ export class UpdateScheduleDto {
   @IsString()
   sectorId?: string;
 
+  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @IsOptional()
+  @IsString()
+  ministryId?: string;
+
   @ApiPropertyOptional({ description: 'ID relacional da equipe (canonico).' })
   @IsOptional()
   @IsString()

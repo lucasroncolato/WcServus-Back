@@ -12,7 +12,10 @@ import {
   Prisma,
   Role,
   ScheduleStatus,
+  Shift,
+  ServantApprovalStatus,
   ServantStatus,
+  TalentStage,
   TrainingStatus,
   WorshipServiceStatus,
 } from '@prisma/client';
@@ -40,6 +43,7 @@ import { GenerateServiceScheduleDto } from './dto/generate-service-schedule.dto'
 import { GenerateServicesScheduleDto } from './dto/generate-services-schedule.dto';
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
+import { ListEligibleScheduleServantsQueryDto } from './dto/list-eligible-schedule-servants-query.dto';
 import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
@@ -124,9 +128,10 @@ export class SchedulesService {
     });
 
     const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
+    const sectorId = query.ministryId ?? query.sectorId;
     const queryWhere: Prisma.ScheduleWhereInput = {
       serviceId: query.serviceId,
-      sectorId: query.sectorId,
+      sectorId,
       servantId: query.servantId,
       service:
         start || end
@@ -183,17 +188,118 @@ export class SchedulesService {
     return filteredByWeekday.map((schedule) => this.toApiSchedule(schedule));
   }
 
+  async listEligibleServants(query: ListEligibleScheduleServantsQueryDto, actor: JwtPayload) {
+    const sectorId = query.ministryId ?? query.sectorId;
+    if (!sectorId) {
+      throw new BadRequestException('sectorId or ministryId is required');
+    }
+
+    await this.assertCanManageSector(actor, sectorId);
+
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: query.serviceId },
+      select: { id: true, serviceDate: true, startTime: true },
+    });
+
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+
+    const weekday = getSaoPauloWeekday(service.serviceDate);
+    const shift = this.resolveShiftFromStartTime(service.startTime);
+
+    const servants = await this.prisma.servant.findMany({
+      where: {
+        OR: [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }],
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        trainingStatus: true,
+        approvalStatus: true,
+        mainSectorId: true,
+        servantSectors: { select: { sectorId: true } },
+        availabilities: {
+          where: {
+            dayOfWeek: weekday,
+            shift,
+          },
+          select: {
+            available: true,
+          },
+        },
+        talents: {
+          take: 1,
+          orderBy: { updatedAt: 'desc' },
+          select: { stage: true },
+        },
+      },
+      orderBy: [{ name: 'asc' }],
+    });
+
+    const conflicts = await this.prisma.schedule.findMany({
+      where: {
+        serviceId: service.id,
+        servantId: { in: servants.map((item) => item.id) },
+      },
+      select: { servantId: true, sectorId: true },
+    });
+    const conflictMap = new Map(conflicts.map((item) => [item.servantId, item.sectorId]));
+
+    const evaluated = servants.map((servant) => {
+      const reasons: string[] = [];
+      if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
+        reasons.push('PENDING_MINISTRY_APPROVAL');
+      }
+      if (servant.status !== ServantStatus.ATIVO) {
+        reasons.push('SERVANT_NOT_ACTIVE');
+      }
+      if (servant.trainingStatus !== TrainingStatus.COMPLETED) {
+        reasons.push('TRAINING_NOT_COMPLETED');
+      }
+      const latestTalent = servant.talents[0];
+      if (latestTalent?.stage === TalentStage.REPROVADO) {
+        reasons.push('TALENT_REJECTED');
+      }
+      if (servant.availabilities.some((availability) => !availability.available)) {
+        reasons.push('UNAVAILABLE_FOR_SERVICE_SHIFT');
+      }
+      const conflictSector = conflictMap.get(servant.id);
+      if (conflictSector && conflictSector !== sectorId) {
+        reasons.push('ALREADY_SCHEDULED_IN_OTHER_MINISTRY');
+      }
+
+      return {
+        servantId: servant.id,
+        servantName: servant.name,
+        ministryId: sectorId,
+        sectorId,
+        eligible: reasons.length === 0,
+        reasons,
+      };
+    });
+
+    return query.includeReasons
+      ? evaluated
+      : evaluated.filter((item) => item.eligible);
+  }
+
   async create(dto: CreateScheduleDto, actor: JwtPayload) {
-    await this.assertCanManageSector(actor, dto.sectorId);
+    const sectorId = dto.ministryId ?? dto.sectorId;
+    if (!sectorId) {
+      throw new BadRequestException('sectorId or ministryId is required');
+    }
+    await this.assertCanManageSector(actor, sectorId);
     await assertServantAccess(this.prisma, actor, dto.servantId);
 
-    await this.validateScheduleInput(dto.serviceId, dto.sectorId, dto.servantId);
-    await this.ensureNoConflict(dto.serviceId, dto.servantId, dto.sectorId);
+    await this.validateScheduleInput(dto.serviceId, sectorId, dto.servantId);
+    await this.ensureNoConflict(dto.serviceId, dto.servantId, sectorId);
 
     const schedule = await this.prisma.schedule.create({
       data: {
         serviceId: dto.serviceId,
-        sectorId: dto.sectorId,
+        sectorId,
         servantId: dto.servantId,
         assignedByUserId: actor.sub,
       },
@@ -423,7 +529,7 @@ export class SchedulesService {
 
       await this.assertCanManageSchedule(actor, current.id);
       await assertServantAccess(this.prisma, actor, dto.servantId);
-      await this.ensureServantEligibleForSector(dto.servantId, current.sectorId);
+      await this.ensureServantEligibleForSector(dto.servantId, current.sectorId, current.serviceId);
 
       const conflict = await this.prisma.schedule.findFirst({
         where: {
@@ -516,8 +622,8 @@ export class SchedulesService {
       throw new BadRequestException('Swap must happen inside the same worship service');
     }
 
-    await this.ensureServantEligibleForSector(to.servantId, from.sectorId);
-    await this.ensureServantEligibleForSector(from.servantId, to.sectorId);
+    await this.ensureServantEligibleForSector(to.servantId, from.sectorId, from.serviceId);
+    await this.ensureServantEligibleForSector(from.servantId, to.sectorId, to.serviceId);
 
     const hasConflictFrom = await this.prisma.schedule.findFirst({
       where: {
@@ -624,17 +730,17 @@ export class SchedulesService {
       throw new BadRequestException('Nothing to update in schedule');
     }
     const nextServantId = dto.servantId ?? existing.servantId;
-    const nextSectorId = dto.sectorId ?? existing.sectorId;
+    const nextSectorId = dto.ministryId ?? dto.sectorId ?? existing.sectorId;
 
     if (dto.servantId !== undefined) {
       await assertServantAccess(this.prisma, actor, dto.servantId);
     }
 
-    if (dto.sectorId !== undefined) {
-      await this.assertCanManageSector(actor, dto.sectorId);
+    if (dto.sectorId !== undefined || dto.ministryId !== undefined) {
+      await this.assertCanManageSector(actor, nextSectorId);
     }
 
-    await this.ensureServantEligibleForSector(nextServantId, nextSectorId);
+    await this.ensureServantEligibleForSector(nextServantId, nextSectorId, existing.serviceId);
 
     const conflict = await this.prisma.schedule.findFirst({
       where: {
@@ -653,7 +759,7 @@ export class SchedulesService {
       where: { id },
       data: {
         servantId: dto.servantId,
-        sectorId: dto.sectorId,
+        sectorId: dto.ministryId ?? dto.sectorId,
         status: dto.status,
       },
       include: {
@@ -710,7 +816,7 @@ export class SchedulesService {
       throw new NotFoundException('Target worship service not found');
     }
 
-    await this.ensureServantEligibleForSector(source.servantId, source.sectorId);
+    await this.ensureServantEligibleForSector(source.servantId, source.sectorId, dto.worshipServiceId);
 
     const conflict = await this.prisma.schedule.findFirst({
       where: {
@@ -944,7 +1050,7 @@ export class SchedulesService {
         id: options.serviceIds?.length ? { in: options.serviceIds } : undefined,
       },
       orderBy: [{ serviceDate: 'asc' }, { id: 'asc' }],
-      select: { id: true, serviceDate: true },
+      select: { id: true, serviceDate: true, startTime: true },
     });
 
     const services = options.weekdays?.length
@@ -991,6 +1097,8 @@ export class SchedulesService {
       sectors.map((sector) => sector.id),
       teamFilter.teamIds,
     );
+    const candidateIds = [...new Set([...candidatesBySector.values()].flat().map((item) => item.servantId))];
+    const unavailableMap = await this.getServantUnavailableMap(candidateIds);
 
     const totalSlotsPerSector = new Map<string, number>();
     const hardCapBySector = new Map<string, number>();
@@ -1065,7 +1173,7 @@ export class SchedulesService {
             existing,
             assignedInServiceCount,
             allowMultiSectorSameService,
-          ),
+          ) && this.isCandidateAvailableForService(candidate.servantId, service.serviceDate, service.startTime, unavailableMap),
         );
 
         if (filtered.length === 0) {
@@ -1363,6 +1471,12 @@ export class SchedulesService {
       where: {
         status: ServantStatus.ATIVO,
         trainingStatus: TrainingStatus.COMPLETED,
+        approvalStatus: ServantApprovalStatus.APPROVED,
+        talents: {
+          none: {
+            stage: TalentStage.REPROVADO,
+          },
+        },
         teamId: teamIds.length ? { in: teamIds } : undefined,
         OR: [{ mainSectorId: { in: sectorIds } }, { servantSectors: { some: { sectorId: { in: sectorIds } } } }],
       },
@@ -1548,6 +1662,33 @@ export class SchedulesService {
     return existing?.servantId === servantId;
   }
 
+  private isCandidateAvailableForService(
+    servantId: string,
+    serviceDate: Date,
+    startTime: string,
+    unavailableMap: Set<string>,
+  ) {
+    const weekday = getSaoPauloWeekday(serviceDate);
+    const shift = this.resolveShiftFromStartTime(startTime);
+    return !unavailableMap.has(`${servantId}:${weekday}:${shift}`);
+  }
+
+  private async getServantUnavailableMap(servantIds: string[]) {
+    if (!servantIds.length) {
+      return new Set<string>();
+    }
+
+    const records = await this.prisma.servantAvailability.findMany({
+      where: {
+        servantId: { in: servantIds },
+        available: false,
+      },
+      select: { servantId: true, dayOfWeek: true, shift: true },
+    });
+
+    return new Set(records.map((item) => `${item.servantId}:${item.dayOfWeek}:${item.shift}`));
+  }
+
   private updateInMemoryMetrics(
     previousServantId: string | undefined,
     newServantId: string,
@@ -1634,7 +1775,7 @@ export class SchedulesService {
       throw new NotFoundException('Sector not found');
     }
 
-    await this.ensureServantEligibleForSector(servantId, sectorId);
+    await this.ensureServantEligibleForSector(servantId, sectorId, serviceId);
   }
 
   private async ensureNoConflict(serviceId: string, servantId: string, sectorId: string) {
@@ -1657,17 +1798,23 @@ export class SchedulesService {
     }
   }
 
-  private async ensureServantEligibleForSector(servantId: string, sectorId: string) {
+  private async ensureServantEligibleForSector(servantId: string, sectorId: string, serviceId?: string) {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
       select: {
         id: true,
         status: true,
         trainingStatus: true,
+        approvalStatus: true,
         mainSectorId: true,
         servantSectors: {
           where: { sectorId },
           select: { id: true },
+        },
+        talents: {
+          take: 1,
+          orderBy: { updatedAt: 'desc' },
+          select: { stage: true },
         },
       },
     });
@@ -1700,6 +1847,29 @@ export class SchedulesService {
       });
     }
 
+    if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
+      throw new UnprocessableEntityException({
+        code: 'SERVANT_NOT_ELIGIBLE',
+        message: 'Servo ainda nao foi aprovado para atuar no ministerio.',
+        details: {
+          servantId: servant.id,
+          approvalStatus: servant.approvalStatus,
+        },
+      });
+    }
+
+    const latestTalent = servant.talents[0];
+    if (latestTalent?.stage === TalentStage.REPROVADO) {
+      throw new UnprocessableEntityException({
+        code: 'SERVANT_NOT_ELIGIBLE',
+        message: 'Servo com talento reprovado pendente de reavaliacao administrativa.',
+        details: {
+          servantId: servant.id,
+          stage: latestTalent.stage,
+        },
+      });
+    }
+
     const belongsToSector =
       servant.mainSectorId === sectorId || servant.servantSectors.length > 0;
 
@@ -1716,6 +1886,53 @@ export class SchedulesService {
         },
       });
     }
+
+    if (serviceId) {
+      const service = await this.prisma.worshipService.findUnique({
+        where: { id: serviceId },
+        select: { id: true, serviceDate: true, startTime: true },
+      });
+
+      if (!service) {
+        throw new NotFoundException('Worship service not found');
+      }
+
+      const weekday = getSaoPauloWeekday(service.serviceDate);
+      const shift = this.resolveShiftFromStartTime(service.startTime);
+      const unavailability = await this.prisma.servantAvailability.findFirst({
+        where: {
+          servantId,
+          dayOfWeek: weekday,
+          shift,
+          available: false,
+        },
+        select: { id: true },
+      });
+
+      if (unavailability) {
+        throw new UnprocessableEntityException({
+          code: 'SERVANT_NOT_ELIGIBLE',
+          message: 'Servo indisponivel para o horario do culto.',
+          details: {
+            servantId,
+            serviceId,
+            weekday,
+            shift,
+          },
+        });
+      }
+    }
+  }
+
+  private resolveShiftFromStartTime(startTime: string): Shift {
+    const hour = Number(startTime.split(':')[0] ?? 0);
+    if (hour < 12) {
+      return Shift.MORNING;
+    }
+    if (hour < 18) {
+      return Shift.AFTERNOON;
+    }
+    return Shift.EVENING;
   }
 
   private async resolveAllowedSectorIds(actor: JwtPayload, requestedSectorIds?: string[]) {
@@ -1758,7 +1975,7 @@ export class SchedulesService {
       return;
     }
 
-    if (actor.role !== Role.COORDENADOR && actor.role !== Role.LIDER) {
+    if (actor.role !== Role.COORDENADOR) {
       throw new ForbiddenException('You do not have permission for this schedule');
     }
 
@@ -1809,6 +2026,8 @@ export class SchedulesService {
         worshipServiceTitle: schedule.service?.title ?? null,
         servantName: schedule.servant?.name ?? null,
         sectorName: schedule.sector?.name ?? null,
+        ministryId: (schedule as { sectorId?: string }).sectorId ?? null,
+        ministryName: schedule.sector?.name ?? null,
         teamId,
         teamName,
       };

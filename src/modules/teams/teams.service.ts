@@ -343,8 +343,8 @@ export class TeamsService {
       throw new NotFoundException('Leader user not found');
     }
 
-    if (leaderUser.role !== Role.LIDER) {
-      throw new BadRequestException('Selected user must have role LIDER');
+    if (leaderUser.role !== Role.COORDENADOR) {
+      throw new BadRequestException('Selected user must have role COORDENADOR');
     }
 
     const currentLed = await this.prisma.team.findFirst({

@@ -103,8 +103,7 @@ const ROLE_RANK: Record<Role, number> = {
   [Role.ADMIN]: 1,
   [Role.PASTOR]: 2,
   [Role.COORDENADOR]: 3,
-  [Role.LIDER]: 4,
-  [Role.SERVO]: 5,
+  [Role.SERVO]: 4,
 };
 
 @Injectable()
@@ -767,14 +766,6 @@ export class UsersService {
 
     if (scopeType === UserScope.EQUIPE && sectorIds.length === 0 && teamIds.length === 0) {
       throw new BadRequestException('scopeType=EQUIPE requires teamIds and/or sectorIds');
-    }
-
-    if (targetRole === Role.LIDER && scopeType === UserScope.EQUIPE && teamIds.length === 0) {
-      throw new BadRequestException('LIDER scope requires at least one teamId');
-    }
-
-    if (targetRole === Role.LIDER && scopeType !== UserScope.EQUIPE) {
-      throw new BadRequestException('LIDER user scopeType must be EQUIPE');
     }
 
     if (scopeType === UserScope.SELF && sectorIds.length > 0) {

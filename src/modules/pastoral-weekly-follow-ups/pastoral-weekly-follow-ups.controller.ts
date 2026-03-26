@@ -12,7 +12,7 @@ import { PastoralWeeklyFollowUpsService } from './pastoral-weekly-follow-ups.ser
 @ApiTags('Pastoral Weekly Follow-Ups')
 @ApiBearerAuth()
 @Controller('pastoral-weekly-follow-ups')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
 export class PastoralWeeklyFollowUpsController {
   constructor(private readonly pastoralWeeklyFollowUpsService: PastoralWeeklyFollowUpsService) {}
 

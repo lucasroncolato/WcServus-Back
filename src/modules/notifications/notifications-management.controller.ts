@@ -41,6 +41,7 @@ export class NotificationsManagementController {
   }
 
   @Patch('users/:userId/preferences')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.SERVO)
   updateUserPreferences(
     @Param('userId') userId: string,
     @Body() dto: UpdateNotificationManagementPreferencesDto,

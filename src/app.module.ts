@@ -21,6 +21,9 @@ import { TeamsModule } from './modules/teams/teams.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { PastoralWeeklyFollowUpsModule } from './modules/pastoral-weekly-follow-ups/pastoral-weekly-follow-ups.module';
 import { SpiritualDisciplinesModule } from './modules/spiritual-disciplines/spiritual-disciplines.module';
+import { SupportRequestsModule } from './modules/support-requests/support-requests.module';
+import { RewardsModule } from './modules/rewards/rewards.module';
+import { MinistriesModule } from './modules/ministries/ministries.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 
@@ -49,6 +52,9 @@ import { HealthController } from './health.controller';
     SettingsModule,
     PastoralWeeklyFollowUpsModule,
     SpiritualDisciplinesModule,
+    SupportRequestsModule,
+    RewardsModule,
+    MinistriesModule,
   ],
   controllers: [HealthController],
   providers: [

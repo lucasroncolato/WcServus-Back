@@ -9,7 +9,7 @@ import { DashboardService } from './dashboard.service';
 @ApiTags('Dashboard')
 @ApiBearerAuth()
 @Controller('dashboard')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 

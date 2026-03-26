@@ -27,6 +27,11 @@ export class ListServantsQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  ministryId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   teamId?: string;
 
   @ApiPropertyOptional()

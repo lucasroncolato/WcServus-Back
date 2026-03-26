@@ -459,7 +459,7 @@ export class AuthService {
       return {
         scope,
         canManageUsers: false,
-        canManageServants: true,
+        canManageServants: false,
         canManageSchedules: false,
         canViewReports: true,
         canViewPastoralData: true,
@@ -474,17 +474,6 @@ export class AuthService {
         canManageSchedules: true,
         canViewReports: true,
         canViewPastoralData: true,
-      };
-    }
-
-    if (role === Role.LIDER) {
-      return {
-        scope,
-        canManageUsers: false,
-        canManageServants: true,
-        canManageSchedules: true,
-        canViewReports: false,
-        canViewPastoralData: false,
       };
     }
 

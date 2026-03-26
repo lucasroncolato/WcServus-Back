@@ -108,6 +108,7 @@ export class MeService {
   }
 
   async updateProfile(actor: JwtPayload, dto: UpdateMeDto) {
+    this.assertPastorReadOnly(actor);
     if (dto.currentPassword !== undefined || dto.newPassword !== undefined) {
       throw new BadRequestException('Use PATCH /me/password to change password');
     }
@@ -169,6 +170,7 @@ export class MeService {
   }
 
   async changePassword(actor: JwtPayload, dto: ChangePasswordDto) {
+    this.assertPastorReadOnly(actor);
     const currentUser = await this.prisma.user.findUnique({
       where: { id: actor.sub },
       select: {
@@ -233,6 +235,7 @@ export class MeService {
   }
 
   async updateMyServant(actor: JwtPayload, dto: UpdateMyServantDto) {
+    this.assertPastorReadOnly(actor);
     const servantId = await this.requireLinkedServant(actor);
 
     const updated = await this.prisma.servant.update({
@@ -394,6 +397,7 @@ export class MeService {
   }
 
   async readMyNotification(actor: JwtPayload, notificationId: string) {
+    this.assertPastorReadOnly(actor);
     return this.notificationsService.markRead(notificationId, actor.sub);
   }
 
@@ -417,6 +421,7 @@ export class MeService {
   }
 
   async putMyAvailability(actor: JwtPayload, dto: PutMyAvailabilityDto) {
+    this.assertPastorReadOnly(actor);
     const servantId = this.requireServant(actor);
 
     const deduplicated = new Map<string, { dayOfWeek: number; shift: Shift; available: boolean; notes?: string }>();
@@ -449,6 +454,7 @@ export class MeService {
   }
 
   async respondMySchedule(actor: JwtPayload, scheduleId: string, dto: RespondMyScheduleDto) {
+    this.assertPastorReadOnly(actor);
     const servantId = this.requireServant(actor);
 
     if (
@@ -562,5 +568,11 @@ export class MeService {
     }
 
     return actor.servantId;
+  }
+
+  private assertPastorReadOnly(actor: JwtPayload) {
+    if (actor.role === Role.PASTOR) {
+      throw new ForbiddenException('PASTOR profile is read-only for data mutations');
+    }
   }
 }

@@ -1,14 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
-export class CreateScheduleDto {
+export class ListEligibleScheduleServantsQueryDto {
   @ApiProperty()
   @IsString()
   serviceId: string;
-
-  @ApiProperty()
-  @IsString()
-  servantId: string;
 
   @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
   @IsOptional()
@@ -20,8 +17,9 @@ export class CreateScheduleDto {
   @IsString()
   ministryId?: string;
 
-  @ApiPropertyOptional({ description: 'ID relacional da equipe (canonico).' })
+  @ApiPropertyOptional({ default: false })
   @IsOptional()
-  @IsString()
-  teamId?: string;
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeReasons?: boolean;
 }

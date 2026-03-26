@@ -1,5 +1,5 @@
 ﻿import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AlertStatus, AttendanceStatus, AuditAction, Prisma, Role } from '@prisma/client';
+import { AlertStatus, AttendanceStatus, AuditAction, Prisma, RewardSource, Role } from '@prisma/client';
 import {
   assertServantAccess,
   getAttendanceAccessWhere,
@@ -9,6 +9,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RewardsService } from '../rewards/rewards.service';
 import { BatchAttendanceDto } from './dto/batch-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { ListAttendancesQueryDto } from './dto/list-attendances-query.dto';
@@ -20,6 +21,7 @@ export class AttendancesService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly rewardsService: RewardsService,
   ) {}
 
   async findAll(query: ListAttendancesQueryDto, actor: JwtPayload) {
@@ -90,6 +92,7 @@ export class AttendancesService {
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
+    await this.maybeGrantAttendanceReward(attendance.servantId, attendance.id, attendance.status, actor.sub);
 
     return attendance;
   }
@@ -143,6 +146,7 @@ export class AttendancesService {
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
+    await this.maybeGrantAttendanceReward(attendance.servantId, attendance.id, attendance.status, actor.sub);
 
     return attendance;
   }
@@ -300,6 +304,27 @@ export class AttendancesService {
         attendanceId,
         status,
       },
+    });
+  }
+
+  private async maybeGrantAttendanceReward(
+    servantId: string,
+    attendanceId: string,
+    status: AttendanceStatus,
+    actorUserId: string,
+  ) {
+    if (status !== AttendanceStatus.PRESENTE) {
+      return;
+    }
+
+    await this.rewardsService.grantReward({
+      servantId,
+      source: RewardSource.ATTENDANCE_PRESENT,
+      points: 5,
+      title: 'Presenca em culto',
+      description: 'Recompensa por presenca registrada em culto.',
+      referenceId: attendanceId,
+      grantedByUserId: actorUserId,
     });
   }
 }

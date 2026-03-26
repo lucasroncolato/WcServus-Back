@@ -45,7 +45,7 @@ describe('UsersService - updateRole', () => {
   });
 
   it('bloqueia ADMIN de alterar role mesmo para usuario abaixo do seu nivel', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: Role.LIDER });
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: Role.COORDENADOR });
 
     await expect(service.updateRole('user-1', { role: Role.SERVO }, adminActor)).rejects.toBeInstanceOf(
       ForbiddenException,
@@ -54,7 +54,7 @@ describe('UsersService - updateRole', () => {
   });
 
   it('bloqueia ADMIN promover para ADMIN (mesmo nivel)', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: Role.LIDER });
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: Role.COORDENADOR });
 
     await expect(service.updateRole('user-1', { role: Role.ADMIN }, adminActor)).rejects.toBeInstanceOf(
       ForbiddenException,

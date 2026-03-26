@@ -50,10 +50,21 @@ export class UpdateServantDto {
   @IsString({ each: true })
   sectorIds?: string[];
 
+  @ApiPropertyOptional({ type: [String], description: 'Nomenclatura oficial do dominio.' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  ministryIds?: string[];
+
   @ApiPropertyOptional({ description: 'Retrocompatibilidade.' })
   @IsOptional()
   @IsString()
   mainSectorId?: string;
+
+  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @IsOptional()
+  @IsString()
+  mainMinistryId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

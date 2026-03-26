@@ -22,13 +22,13 @@ export class PastoralVisitsController {
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   create(@Body() dto: CreatePastoralVisitDto, @CurrentUser() user: JwtPayload) {
     return this.pastoralVisitsService.create(dto, user);
   }
 
   @Patch(':id/resolve')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   resolve(
     @Param('id') id: string,
     @Body() dto: ResolvePastoralVisitDto,

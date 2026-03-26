@@ -21,6 +21,7 @@ import { GenerateServiceScheduleDto } from './dto/generate-service-schedule.dto'
 import { GenerateServicesScheduleDto } from './dto/generate-services-schedule.dto';
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
+import { ListEligibleScheduleServantsQueryDto } from './dto/list-eligible-schedule-servants-query.dto';
 import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
@@ -33,13 +34,19 @@ export class SchedulesController {
   constructor(private readonly schedulesService: SchedulesService) {}
 
   @Get()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   findAll(@Query() query: ListSchedulesQueryDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.findAll(query, user);
   }
 
+  @Get('eligible-servants')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  eligibleServants(@Query() query: ListEligibleScheduleServantsQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.listEligibleServants(query, user);
+  }
+
   @Get(':id/history')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   history(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.history(id, user);
   }
@@ -119,7 +126,7 @@ export class SchedulesController {
   }
 
   @Get('swap-history')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   swapHistory(@Query() query: ListSwapHistoryQueryDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.swapHistory(query, user);
   }

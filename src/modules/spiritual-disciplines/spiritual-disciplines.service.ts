@@ -4,11 +4,13 @@ import {
   DevotionalStatus,
   MonthlyFastingStatus,
   Prisma,
+  RewardSource,
 } from '@prisma/client';
 import { assertServantAccess, getServantAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
+import { RewardsService } from '../rewards/rewards.service';
 import { ListDailyDevotionalsQueryDto } from './dto/list-daily-devotionals-query.dto';
 import { ListMonthlyFastingsQueryDto } from './dto/list-monthly-fastings-query.dto';
 import { RegisterDailyDevotionalDto } from './dto/register-daily-devotional.dto';
@@ -36,6 +38,7 @@ export class SpiritualDisciplinesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly rewardsService: RewardsService,
   ) {}
 
   async registerDailyDevotional(dto: RegisterDailyDevotionalDto, actor: JwtPayload) {
@@ -78,6 +81,18 @@ export class SpiritualDisciplinesService {
         status: dto.status ?? DevotionalStatus.DONE,
       },
     });
+
+    if ((dto.status ?? DevotionalStatus.DONE) === DevotionalStatus.DONE) {
+      await this.rewardsService.grantReward({
+        servantId: dto.servantId,
+        source: RewardSource.DEVOTIONAL_DAILY,
+        points: 2,
+        title: 'Devocional diario',
+        description: 'Recompensa por disciplina devocional diaria.',
+        referenceId: record.id,
+        grantedByUserId: actor.sub,
+      });
+    }
 
     return record;
   }
@@ -172,6 +187,18 @@ export class SpiritualDisciplinesService {
         status,
       },
     });
+
+    if (status === MonthlyFastingStatus.COMPLETED) {
+      await this.rewardsService.grantReward({
+        servantId: dto.servantId,
+        source: RewardSource.FASTING_MONTHLY,
+        points: 10,
+        title: 'Jejum mensal',
+        description: 'Recompensa por conclusao de jejum mensal.',
+        referenceId: record.id,
+        grantedByUserId: actor.sub,
+      });
+    }
 
     return record;
   }

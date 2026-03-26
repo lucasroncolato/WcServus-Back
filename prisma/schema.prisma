@@ -12,7 +12,6 @@ enum Role {
   ADMIN
   PASTOR
   COORDENADOR
-  LIDER
   SERVO
 }
 
@@ -137,6 +136,13 @@ enum TalentStage {
   REPROVADO
 }
 
+enum TalentReviewStatus {
+  NOT_REQUIRED
+  PENDING_ADMIN_REVIEW
+  ADMIN_CONFIRMED_REJECTION
+  ADMIN_REVERSED_REJECTION
+}
+
 enum AlertStatus {
   OPEN
   RESOLVED
@@ -179,6 +185,28 @@ enum NotificationProvider {
   META_CLOUD
 }
 
+enum SupportRequestType {
+  GERAL
+  DADOS
+  AUTORIZACAO
+  OUTRO
+}
+
+enum SupportRequestStatus {
+  ABERTO
+  EM_ANALISE
+  RESOLVIDO
+}
+
+enum RewardSource {
+  DEVOTIONAL_DAILY
+  FASTING_MONTHLY
+  ATTENDANCE_PRESENT
+  SCHEDULE_CONFIRMED
+  TASK_COMPLETED
+  MANUAL
+}
+
 model User {
   id                     String              @id @default(cuid())
   name                   String
@@ -212,6 +240,11 @@ model User {
   pastoralWeeklyFollowUps   PastoralWeeklyFollowUp[] @relation("PastoralWeeklyFollowUpResponsible")
   registeredDevotionals     DailyDevotional[] @relation("DailyDevotionalRegisteredBy")
   registeredFastings        MonthlyFasting[]  @relation("MonthlyFastingRegisteredBy")
+  rejectedTalents           Talent[]          @relation("TalentRejectedBy")
+  reviewedTalents           Talent[]          @relation("TalentReviewedBy")
+  supportRequests           SupportRequest[]  @relation("SupportRequestAuthor")
+  handledSupportRequests    SupportRequest[]  @relation("SupportRequestHandler")
+  grantedRewards            ServantReward[]   @relation("ServantRewardGrantedBy")
   auditLogs              AuditLog[]
   scopeBindings          UserScopeBinding[]
   permissionOverrides    UserPermissionOverride[]
@@ -270,6 +303,7 @@ model Sector {
   schedules         Schedule[]
   teams             Team[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
+  responsibilities  MinistryResponsibility[]
 
   @@index([coordinatorUserId])
 }
@@ -328,6 +362,8 @@ model Servant {
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   devotionals       DailyDevotional[]
   monthlyFastings   MonthlyFasting[]
+  responsibilities  MinistryResponsibility[] @relation("ResponsibilityOwnerServant")
+  rewards           ServantReward[]
   talents           Talent[]
   statusHistory     ServantStatusHistory[]
   userAccount       User?
@@ -586,14 +622,84 @@ model Talent {
   id         String      @id @default(cuid())
   servantId  String
   stage      TalentStage
+  reviewStatus TalentReviewStatus @default(NOT_REQUIRED)
+  rejectionReason String?
+  rejectedByUserId String?
+  rejectedAt  DateTime?
+  reviewedByUserId String?
+  reviewedAt  DateTime?
+  reviewNotes String?
   notes      String?
   approvedAt DateTime?
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   servant    Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  rejectedBy User?       @relation("TalentRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  reviewedBy User?       @relation("TalentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
 
   @@index([servantId])
   @@index([stage])
+  @@index([reviewStatus])
+  @@index([rejectedByUserId])
+  @@index([reviewedByUserId])
+}
+
+model SupportRequest {
+  id             String               @id @default(cuid())
+  type           SupportRequestType
+  subject        String
+  description    String
+  reference      String?
+  status         SupportRequestStatus @default(ABERTO)
+  authorUserId   String
+  handledByUserId String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  handledAt      DateTime?
+  author         User                 @relation("SupportRequestAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
+  handledBy      User?                @relation("SupportRequestHandler", fields: [handledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([authorUserId, createdAt])
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+}
+
+model MinistryResponsibility {
+  id                  String   @id @default(cuid())
+  ministryId          String
+  title               String
+  activity            String?
+  functionName        String?
+  description         String?
+  responsibleServantId String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  ministry            Sector   @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  responsibleServant  Servant? @relation("ResponsibilityOwnerServant", fields: [responsibleServantId], references: [id], onDelete: SetNull)
+
+  @@index([ministryId, active])
+  @@index([responsibleServantId])
+}
+
+model ServantReward {
+  id              String       @id @default(cuid())
+  servantId       String
+  source          RewardSource
+  points          Int
+  title           String
+  description     String?
+  referenceId     String?
+  grantedByUserId String?
+  rewardedAt      DateTime     @default(now())
+  createdAt       DateTime     @default(now())
+  servant         Servant      @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  grantedBy       User?        @relation("ServantRewardGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([servantId, rewardedAt])
+  @@index([source, rewardedAt])
+  @@index([grantedByUserId])
+  @@unique([servantId, source, referenceId])
 }
 
 model AuditLog {

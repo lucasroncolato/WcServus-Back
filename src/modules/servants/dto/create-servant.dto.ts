@@ -54,10 +54,21 @@ export class CreateServantDto {
   @IsString({ each: true })
   sectorIds?: string[];
 
+  @ApiPropertyOptional({ type: [String], description: 'Nomenclatura oficial do dominio.' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  ministryIds?: string[];
+
   @ApiPropertyOptional({ description: 'Retrocompatibilidade. Se enviado sem sectorIds, vira setor principal.' })
   @IsOptional()
   @IsString()
   mainSectorId?: string;
+
+  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @IsOptional()
+  @IsString()
+  mainMinistryId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

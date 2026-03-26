@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AuditAction,
   Aptitude,
@@ -53,6 +54,7 @@ type ServantWithRelations = Servant & {
 export class ServantsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -183,7 +185,7 @@ export class ServantsService {
     return {
       contractVersion: '2026-03-26',
       summary: {
-        required: ['name', 'user.email', 'user.password'],
+        required: ['name', 'user.email'],
         optional: [
           'phone',
           'gender',
@@ -196,6 +198,7 @@ export class ServantsService {
           'joinedAt',
           'user.name',
           'user.phone',
+          'user.password (legacy ignored)',
         ],
       },
       sections: [
@@ -212,7 +215,7 @@ export class ServantsService {
         {
           key: 'account',
           title: 'Conta de acesso',
-          fields: ['user.email', 'user.password', 'user.name', 'user.phone'],
+          fields: ['user.email', 'user.name', 'user.phone'],
         },
       ],
       options: {
@@ -245,7 +248,6 @@ export class ServantsService {
         joinedAt: null,
         user: {
           email: '',
-          password: '',
           name: null,
           phone: null,
           role: Role.SERVO,
@@ -295,10 +297,19 @@ export class ServantsService {
     if (dto.user.role && dto.user.role !== Role.SERVO) {
       throw new BadRequestException('Every new servant user account must use role SERVO');
     }
+    if (dto.user.password) {
+      throw new BadRequestException(
+        'Manual password is not allowed. New servant password is defined automatically by backend.',
+      );
+    }
 
     const targetRole = Role.SERVO;
 
-    const passwordHash = await bcrypt.hash(dto.user.password, 10);
+    const initialPassword = this.configService.get<string>(
+      'ONBOARDING_DEFAULT_PASSWORD',
+      'Servus@123',
+    );
+    const passwordHash = await bcrypt.hash(initialPassword, 10);
 
     const servant = await this.prisma.$transaction(async (tx) => {
       const createdServant = await tx.servant.create({

@@ -21,10 +21,15 @@ export class CreateServantUserDto {
   @IsEmail()
   email: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'Campo legado. A senha inicial do novo servo e definida automaticamente pelo backend.',
+  })
+  @IsOptional()
   @IsString()
   @MinLength(6)
-  password: string;
+  password?: string;
 
   @ApiPropertyOptional({ enum: Role, default: Role.SERVO })
   @IsOptional()

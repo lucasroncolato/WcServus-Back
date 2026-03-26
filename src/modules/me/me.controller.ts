@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { AllowWhenPasswordChangeRequired } from 'src/common/decorators/allow-password-change-required.decorator';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -30,6 +31,7 @@ export class MeController {
   }
 
   @Patch('password')
+  @AllowWhenPasswordChangeRequired()
   changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {
     return this.meService.changePassword(user, dto);
   }

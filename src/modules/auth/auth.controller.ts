@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { AllowWhenPasswordChangeRequired } from 'src/common/decorators/allow-password-change-required.decorator';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Public } from 'src/common/decorators/public.decorator';
 import { AuthService } from './auth.service';
@@ -29,6 +30,7 @@ export class AuthController {
 
   @ApiBearerAuth()
   @Post('logout')
+  @AllowWhenPasswordChangeRequired()
   logout(@Body() dto: RefreshTokenDto, @CurrentUser() user: JwtPayload) {
     return this.authService.logout(dto, user.sub);
   }
@@ -47,12 +49,14 @@ export class AuthController {
 
   @ApiBearerAuth()
   @Get('me')
+  @AllowWhenPasswordChangeRequired()
   me(@CurrentUser() user: JwtPayload) {
     return this.authService.me(user.sub);
   }
 
   @ApiBearerAuth()
   @Post('change-password')
+  @AllowWhenPasswordChangeRequired()
   changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user.sub, dto);
   }

@@ -5,5 +5,6 @@ export type JwtPayload = {
   email: string;
   role: Role;
   servantId?: string | null;
+  mustChangePassword?: boolean;
   tid?: string;
 };

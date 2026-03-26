@@ -11,7 +11,7 @@ import { SectorsService } from './sectors.service';
 @ApiTags('Sectors')
 @ApiBearerAuth()
 @Controller('sectors')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
 export class SectorsController {
   constructor(private readonly sectorsService: SectorsService) {}
 

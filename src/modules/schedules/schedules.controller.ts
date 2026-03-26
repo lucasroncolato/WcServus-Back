@@ -33,6 +33,7 @@ export class SchedulesController {
   constructor(private readonly schedulesService: SchedulesService) {}
 
   @Get()
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
   findAll(@Query() query: ListSchedulesQueryDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.findAll(query, user);
   }
@@ -45,36 +46,42 @@ export class SchedulesController {
 
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @ApiOperation({ summary: 'Criacao manual de escala (slot especifico)' })
   create(@Body() dto: CreateScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.create(dto, user);
   }
 
   @Post('generate-month')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @ApiOperation({ summary: 'Geracao automatica por mes (ano/mes)' })
   generateMonth(@Body() dto: GenerateMonthScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.generateMonth(dto, user);
   }
 
   @Post('generate-period')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @ApiOperation({ summary: 'Geracao automatica por periodo (data inicial/final)' })
   generatePeriod(@Body() dto: GeneratePeriodScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.generatePeriod(dto, user);
   }
 
   @Post('generate-service')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @ApiOperation({ summary: 'Geracao automatica para um culto/data especifica' })
   generateService(@Body() dto: GenerateServiceScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.generateService(dto, user);
   }
 
   @Post('generate-services')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @ApiOperation({ summary: 'Geracao automatica para uma lista de cultos' })
   generateServices(@Body() dto: GenerateServicesScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.generateServices(dto, user);
   }
 
   @Post('generate-year')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @ApiOperation({ summary: 'Geracao automatica anual (todos os cultos do ano)' })
   generateYear(@Body() dto: GenerateYearScheduleDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.generateYear(dto, user);
   }

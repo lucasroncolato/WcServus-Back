@@ -45,6 +45,7 @@ export class MeController {
   }
 
   @Get('schedules')
+  @Roles(Role.SERVO)
   listMySchedules(@CurrentUser() user: JwtPayload, @Query() query: MySchedulesQueryDto) {
     return this.meService.listMySchedules(user, query);
   }

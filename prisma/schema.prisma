@@ -174,7 +174,6 @@ model User {
   servantId              String?             @unique
   phone                  String?
   avatarUrl              String?
-  sectorTeam             String?
   lastLoginAt            DateTime?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
@@ -282,7 +281,6 @@ model Servant {
   status            ServantStatus        @default(RECRUTAMENTO)
   trainingStatus    TrainingStatus       @default(PENDING)
   aptitude          Aptitude?
-  classGroup        String?
   mainSectorId      String?
   teamId            String?
   notes             String?
@@ -360,7 +358,6 @@ model Schedule {
   serviceId        String
   servantId        String
   sectorId         String
-  classGroup       String?
   assignedByUserId String
   status           ScheduleStatus @default(ASSIGNED)
   responseStatus   ScheduleResponseStatus @default(PENDING)
@@ -521,7 +518,6 @@ model UserScopeBinding {
   userId    String
   sectorId  String?
   teamId    String?
-  teamName  String?
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   sector    Sector?  @relation(fields: [sectorId], references: [id], onDelete: Cascade)
@@ -530,7 +526,6 @@ model UserScopeBinding {
   @@index([userId])
   @@index([sectorId])
   @@index([teamId])
-  @@index([teamName])
   @@unique([userId, sectorId, teamId])
 }
 

@@ -82,7 +82,6 @@ describe('UsersService - updateRole', () => {
       status: UserStatus.ACTIVE,
       mustChangePassword: false,
       phone: null,
-      sectorTeam: null,
       servantId: null,
       lastLoginAt: null,
       servant: null,
@@ -167,9 +166,9 @@ describe('UsersService - compatibility safeguards', () => {
   });
 
   it('PATCH /users/:id bloqueia mudanca de role fora do endpoint dedicado', async () => {
-    await expect(service.update('user-1', { role: Role.SUPER_ADMIN }, adminActor.sub)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      service.update('user-1', { role: Role.SUPER_ADMIN } as unknown as any, adminActor.sub),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 
@@ -216,7 +215,6 @@ describe('UsersService - resetPassword', () => {
       status: UserStatus.ACTIVE,
       mustChangePassword: true,
       phone: null,
-      sectorTeam: null,
       servantId: null,
       lastLoginAt: null,
       servant: null,

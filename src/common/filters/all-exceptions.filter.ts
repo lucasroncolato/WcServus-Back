@@ -26,14 +26,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
         : null;
 
     const rawMessage = responseObject?.message;
+    const isInternalError = status >= HttpStatus.INTERNAL_SERVER_ERROR;
     const message =
-      typeof exceptionResponse === 'string'
+      isInternalError
+        ? 'Internal server error'
+        : typeof exceptionResponse === 'string'
         ? exceptionResponse
         : Array.isArray(rawMessage)
           ? rawMessage.join('; ')
           : typeof rawMessage === 'string'
             ? rawMessage
             : 'Internal server error';
+
+    const isProduction = process.env.NODE_ENV === 'production';
 
     response.status(status).json({
       statusCode: status,
@@ -42,10 +47,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
         (typeof responseObject?.errorCode === 'string' && responseObject.errorCode) ||
         (typeof responseObject?.code === 'string' && responseObject.code) ||
         undefined,
-      details: responseObject?.errors ?? responseObject?.details ?? undefined,
+      details: isInternalError ? undefined : (responseObject?.errors ?? responseObject?.details ?? undefined),
       path: request.url,
       timestamp: new Date().toISOString(),
-      error: responseObject ?? exceptionResponse ?? 'Internal server error',
+      ...(isProduction
+        ? {}
+        : {
+            debug:
+              responseObject ??
+              (typeof exceptionResponse === 'string' ? exceptionResponse : 'Internal server error'),
+          }),
     });
   }
 }

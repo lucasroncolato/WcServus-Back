@@ -7,7 +7,7 @@ Autenticacao: `Bearer <token>`
 
 ### 1.1 Ler status global do WhatsApp
 - `GET /notifications/settings/whatsapp-global`
-- Perfis: `SUPER_ADMIN`, `ADMIN`, `PASTOR`, `COORDENADOR`
+- Perfis: `SUPER_ADMIN`
 
 Resposta:
 ```json
@@ -20,7 +20,7 @@ Resposta:
 
 ### 1.2 Atualizar status global do WhatsApp
 - `PATCH /notifications/settings/whatsapp-global`
-- Perfis: `SUPER_ADMIN`, `ADMIN`
+- Perfis: `SUPER_ADMIN`
 
 Body:
 ```json
@@ -191,10 +191,11 @@ Resposta:
 - Configuracoes admin:
   - Ler: `GET /notifications/settings/whatsapp-global`
   - Salvar: `PATCH /notifications/settings/whatsapp-global`
+  - Operacional (admin): `GET/PATCH /notifications/settings/operational`
+  - Compat legado: `GET/PATCH /settings/global` e `GET/PATCH /settings/operational`
 - Templates:
   - Fonte unica: `/notifications/templates`
 - Logs:
   - Fonte: `/notifications/whatsapp/logs`
 - Test send:
   - Fonte: `/notifications/whatsapp/test-send`
-

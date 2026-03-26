@@ -1,4 +1,4 @@
-import {
+﻿import {
   Aptitude,
   AlertStatus,
   AuditAction,
@@ -41,7 +41,6 @@ async function upsertUserByEmail(params: {
   scope?: UserScope;
   status?: UserStatus;
   phone?: string | null;
-  sectorTeam?: string | null;
   servantId?: string | null;
 }) {
   return prisma.user.upsert({
@@ -53,7 +52,6 @@ async function upsertUserByEmail(params: {
       scope: params.scope,
       status: params.status,
       phone: params.phone ?? null,
-      sectorTeam: params.sectorTeam ?? null,
       servantId: params.servantId ?? null,
     },
     create: {
@@ -64,7 +62,6 @@ async function upsertUserByEmail(params: {
       scope: params.scope,
       status: params.status,
       phone: params.phone ?? null,
-      sectorTeam: params.sectorTeam ?? null,
       servantId: params.servantId ?? null,
     },
   });
@@ -92,7 +89,6 @@ async function upsertServantByName(params: {
   status?: ServantStatus;
   trainingStatus?: TrainingStatus;
   aptitude?: Aptitude;
-  classGroup?: string;
   teamId?: string;
   mainSectorId?: string;
   notes?: string;
@@ -115,7 +111,6 @@ async function upsertServantByName(params: {
         status: params.status,
         trainingStatus: params.trainingStatus,
         aptitude: params.aptitude,
-        classGroup: params.classGroup,
         teamId: params.teamId,
         mainSectorId: params.mainSectorId,
         notes: params.notes,
@@ -135,7 +130,6 @@ async function upsertServantByName(params: {
       status: params.status,
       trainingStatus: params.trainingStatus,
       aptitude: params.aptitude,
-      classGroup: params.classGroup,
       teamId: params.teamId,
       mainSectorId: params.mainSectorId,
       notes: params.notes,
@@ -198,7 +192,6 @@ async function main() {
       role: Role.LIDER,
       scope: UserScope.EQUIPE,
       status: UserStatus.ACTIVE,
-      sectorTeam: 'A',
     });
 
     const servo = await upsertUserByEmail({
@@ -322,7 +315,6 @@ async function main() {
       status: ServantStatus.ATIVO,
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.SOCIAL,
-      classGroup: 'A',
       teamId: recepcaoEquipeA.id,
       mainSectorId: recepcao.id,
       notes: 'Comunicativo e responsavel na recepcao.',
@@ -337,7 +329,6 @@ async function main() {
       status: ServantStatus.ATIVO,
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.TECNICO,
-      classGroup: 'B',
       teamId: midiaEquipeB.id,
       mainSectorId: midia.id,
       notes: 'Referencia em transmissao e projecao.',
@@ -351,7 +342,6 @@ async function main() {
       status: ServantStatus.RECICLAGEM,
       trainingStatus: TrainingStatus.PENDING,
       aptitude: Aptitude.APOIO,
-      classGroup: 'A',
       teamId: recepcaoEquipeA.id,
       mainSectorId: recepcao.id,
       notes: 'Em processo de reciclagem.',
@@ -366,7 +356,6 @@ async function main() {
       status: ServantStatus.ATIVO,
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.LIDERANCA,
-      classGroup: 'C',
       teamId: intercessaoEquipeC.id,
       mainSectorId: intercessao.id,
       notes: 'Perfil de lideranca e cuidado pastoral.',
@@ -379,7 +368,6 @@ async function main() {
       status: ServantStatus.AFASTADO,
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.OPERACIONAL,
-      classGroup: 'B',
       teamId: midiaEquipeB.id,
       mainSectorId: midia.id,
       notes: 'Afastado temporariamente por questoes pessoais.',
@@ -459,12 +447,12 @@ async function main() {
 
     await prisma.user.update({
       where: { id: coordenador.id },
-      data: { servantId: bruna.id, scope: UserScope.SETOR, sectorTeam: recepcao.name },
+      data: { servantId: bruna.id, scope: UserScope.SETOR },
     });
 
     await prisma.user.update({
       where: { id: lider.id },
-      data: { servantId: lucas.id, scope: UserScope.EQUIPE, sectorTeam: 'A' },
+      data: { servantId: lucas.id, scope: UserScope.EQUIPE },
     });
 
     await prisma.user.update({
@@ -483,13 +471,11 @@ async function main() {
           userId: coordenador.id,
           sectorId: recepcao.id,
           teamId: null,
-          teamName: null,
         },
         {
           userId: lider.id,
           sectorId: recepcao.id,
           teamId: recepcaoEquipeA.id,
-          teamName: recepcaoEquipeA.name,
         },
       ],
       skipDuplicates: true,
@@ -577,7 +563,6 @@ async function main() {
         },
       },
       update: {
-        classGroup: 'A',
         assignedByUserId: admin.id,
         responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
         responseAt: new Date('2026-03-07T17:10:00Z'),
@@ -587,7 +572,6 @@ async function main() {
         serviceId: cultoDomingoManha.id,
         servantId: lucas.id,
         sectorId: recepcao.id,
-        classGroup: 'A',
         assignedByUserId: admin.id,
         responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
         responseAt: new Date('2026-03-07T17:10:00Z'),
@@ -603,7 +587,6 @@ async function main() {
         },
       },
       update: {
-        classGroup: 'B',
         assignedByUserId: admin.id,
         responseStatus: SCHEDULE_RESPONSE.DECLINED,
         responseAt: new Date('2026-03-11T20:40:00Z'),
@@ -613,7 +596,6 @@ async function main() {
         serviceId: cultoQuintaNoite.id,
         servantId: carla.id,
         sectorId: midia.id,
-        classGroup: 'B',
         assignedByUserId: admin.id,
         responseStatus: SCHEDULE_RESPONSE.DECLINED,
         responseAt: new Date('2026-03-11T20:40:00Z'),
@@ -629,12 +611,11 @@ async function main() {
           sectorId: intercessao.id,
         },
       },
-      update: { classGroup: 'C', assignedByUserId: admin.id },
+      update: { assignedByUserId: admin.id },
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: bruna.id,
         sectorId: intercessao.id,
-        classGroup: 'C',
         assignedByUserId: admin.id,
       },
     });
@@ -648,7 +629,6 @@ async function main() {
         },
       },
       update: {
-        classGroup: 'A',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
         responseStatus: SCHEDULE_RESPONSE.PENDING,
@@ -659,7 +639,6 @@ async function main() {
         serviceId: cultoDomingoNoite.id,
         servantId: lucas.id,
         sectorId: recepcao.id,
-        classGroup: 'A',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
         responseStatus: SCHEDULE_RESPONSE.PENDING,
@@ -675,7 +654,6 @@ async function main() {
         },
       },
       update: {
-        classGroup: 'B',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
         responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
@@ -686,7 +664,6 @@ async function main() {
         serviceId: cultoDomingoNoite.id,
         servantId: carla.id,
         sectorId: midia.id,
-        classGroup: 'B',
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
         responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
@@ -963,3 +940,4 @@ async function main() {
 }
 
 void main();
+

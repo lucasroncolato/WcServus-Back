@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
+import { PasswordResetToken, Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -92,7 +92,11 @@ export class AuthService {
       throw new UnauthorizedException('SERVO account must be linked to a servant');
     }
 
-    const matchedToken = await this.findValidRefreshTokenRecord(user.id, dto.refreshToken);
+    const matchedToken = await this.findValidRefreshTokenRecord(
+      user.id,
+      dto.refreshToken,
+      payload.tid,
+    );
 
     if (!matchedToken) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -113,7 +117,11 @@ export class AuthService {
       throw new ForbiddenException('Refresh token does not belong to authenticated user');
     }
 
-    const matchedToken = await this.findValidRefreshTokenRecord(payload.sub, dto.refreshToken);
+    const matchedToken = await this.findValidRefreshTokenRecord(
+      payload.sub,
+      dto.refreshToken,
+      payload.tid,
+    );
     if (!matchedToken) {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -171,11 +179,11 @@ export class AuthService {
       return { message: 'If this email exists, a reset token was generated.' };
     }
 
-    const rawToken = randomBytes(32).toString('hex');
-    const tokenHash = await bcrypt.hash(rawToken, 10);
+    const rawTokenSecret = randomBytes(32).toString('hex');
+    const tokenHash = await bcrypt.hash(rawTokenSecret, 10);
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
 
-    await this.prisma.passwordResetToken.create({
+    const resetRecord = await this.prisma.passwordResetToken.create({
       data: {
         userId: user.id,
         tokenHash,
@@ -183,32 +191,16 @@ export class AuthService {
       },
     });
 
+    // Canonical reset token format: <resetTokenId>.<rawSecret>.
+    // Delivery is handled outside this service; legacy fallback remains supported in resetPassword.
+    void `${resetRecord.id}.${rawTokenSecret}`;
+
     return { message: 'If this email exists, a reset token was generated.' };
   }
 
   async resetPassword(dto: ResetPasswordDto) {
-    const tokenRecords = await this.prisma.passwordResetToken.findMany({
-      where: {
-        usedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      include: { user: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    let matchedRecordId: string | null = null;
-    let userId: string | null = null;
-
-    for (const record of tokenRecords) {
-      const valid = await bcrypt.compare(dto.token, record.tokenHash);
-      if (valid) {
-        matchedRecordId = record.id;
-        userId = record.userId;
-        break;
-      }
-    }
-
-    if (!matchedRecordId || !userId) {
+    const matchedRecord = await this.findValidPasswordResetRecord(dto.token);
+    if (!matchedRecord) {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
@@ -216,21 +208,21 @@ export class AuthService {
 
     await this.prisma.$transaction([
       this.prisma.user.update({
-        where: { id: userId },
+        where: { id: matchedRecord.userId },
         data: { passwordHash: newHash, mustChangePassword: false },
       }),
       this.prisma.passwordResetToken.update({
-        where: { id: matchedRecordId },
+        where: { id: matchedRecord.id },
         data: { usedAt: new Date() },
       }),
       this.prisma.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
+        where: { userId: matchedRecord.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
     ]);
 
     await this.notificationsService.create({
-      userId,
+      userId: matchedRecord.userId,
       type: 'USER_PASSWORD_RESET',
       title: 'Senha redefinida',
       message: 'Sua senha foi redefinida com sucesso.',
@@ -253,7 +245,6 @@ export class AuthService {
         mustChangePassword: true,
         phone: true,
         avatarUrl: true,
-        sectorTeam: true,
         servantId: true,
         servant: {
           select: {
@@ -293,6 +284,24 @@ export class AuthService {
             name: true,
           },
         },
+        scopeBindings: {
+          select: {
+            sectorId: true,
+            teamId: true,
+            sector: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            team: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },
@@ -304,6 +313,21 @@ export class AuthService {
       account.coordinatedSectors[0] ??
       null;
 
+    const sectorIds = [
+      ...new Set(
+        account.scopeBindings
+          .map((binding) => binding.sectorId ?? binding.sector?.id ?? null)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ];
+    const teamIds = [
+      ...new Set(
+        account.scopeBindings
+          .map((binding) => binding.teamId ?? binding.team?.id ?? null)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ];
+
     return {
       id: account.id,
       name: account.name,
@@ -311,11 +335,14 @@ export class AuthService {
       role: account.role,
       scope: account.scope,
       scopeType: account.scope,
+      sectorIds,
+      teamIds,
+      sectorId: account.servant?.mainSectorId ?? sectorIds[0] ?? null,
+      teamId: account.servant?.teamId ?? teamIds[0] ?? null,
       status: account.status,
       mustChangePassword: account.mustChangePassword,
       phone: account.phone,
       avatarUrl: account.avatarUrl,
-      sectorTeam: account.sectorTeam,
       servantId: account.servantId,
       servant: account.servant
         ? {
@@ -326,6 +353,7 @@ export class AuthService {
               account.servant.status === ServantStatus.ATIVO ? 'ACTIVE' : 'INACTIVE',
             trainingStatus: account.servant.trainingStatus,
             teamId: account.servant.teamId,
+            teamName: account.servant.team?.name ?? null,
             team: account.servant.team,
             mainSectorId: account.servant.mainSectorId,
             sectors: account.servant.servantSectors.map((x) => x.sector),
@@ -367,21 +395,35 @@ export class AuthService {
       expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),
     });
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.get<string>('JWT_REFRESH_SECRET', 'refresh-secret'),
-      expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
-    });
-
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     const refreshExpiresInMs = this.getRefreshExpirationMillis(
       this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
     );
-
-    await this.prisma.refreshToken.create({
+    const refreshTokenRecord = await this.prisma.refreshToken.create({
       data: {
         userId: user.id,
-        tokenHash: refreshTokenHash,
+        tokenHash: '__PENDING_HASH__',
         expiresAt: new Date(Date.now() + refreshExpiresInMs),
+      },
+      select: { id: true },
+    });
+
+    const refreshToken = await this.jwtService.signAsync(
+      {
+        ...payload,
+        tid: refreshTokenRecord.id,
+      },
+      {
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET', 'refresh-secret'),
+      expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
+      },
+    );
+
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+
+    await this.prisma.refreshToken.update({
+      where: { id: refreshTokenRecord.id },
+      data: {
+        tokenHash: refreshTokenHash,
       },
     });
 
@@ -476,7 +518,34 @@ export class AuthService {
     }
   }
 
-  private async findValidRefreshTokenRecord(userId: string, rawToken: string) {
+  private async findValidRefreshTokenRecord(
+    userId: string,
+    rawToken: string,
+    tokenId?: string,
+  ) {
+    if (tokenId) {
+      const token = await this.prisma.refreshToken.findFirst({
+        where: {
+          id: tokenId,
+          userId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      });
+
+      if (token) {
+        const valid = await bcrypt.compare(rawToken, token.tokenHash);
+        if (valid) {
+          return token;
+        }
+      }
+
+      // Canonical refresh tokens include `tid` and must match the same DB record.
+      // Do not fallback to "any active token" lookup, otherwise a revoked token
+      // could be validated against another active token hash from the same user.
+      return null;
+    }
+
     const tokens = await this.prisma.refreshToken.findMany({
       where: {
         userId,
@@ -494,5 +563,55 @@ export class AuthService {
     }
 
     return null;
+  }
+
+  private async findValidPasswordResetRecord(rawToken: string): Promise<PasswordResetToken | null> {
+    const parsedToken = this.parseResetToken(rawToken);
+    if (parsedToken) {
+      const token = await this.prisma.passwordResetToken.findFirst({
+        where: {
+          id: parsedToken.tokenId,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      });
+
+      if (token) {
+        const valid = await bcrypt.compare(parsedToken.secret, token.tokenHash);
+        if (valid) {
+          return token;
+        }
+      }
+    }
+
+    const tokenRecords = await this.prisma.passwordResetToken.findMany({
+      where: {
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    for (const record of tokenRecords) {
+      const valid = await bcrypt.compare(rawToken, record.tokenHash);
+      if (valid) {
+        return record;
+      }
+    }
+
+    return null;
+  }
+
+  private parseResetToken(rawToken: string): { tokenId: string; secret: string } | null {
+    const separator = rawToken.indexOf('.');
+    if (separator <= 0 || separator >= rawToken.length - 1) {
+      return null;
+    }
+
+    return {
+      tokenId: rawToken.slice(0, separator),
+      secret: rawToken.slice(separator + 1),
+    };
   }
 }

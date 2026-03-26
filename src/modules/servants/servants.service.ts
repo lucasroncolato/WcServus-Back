@@ -156,7 +156,7 @@ export class ServantsService {
   async createWithUser(dto: CreateServantWithUserDto, actor: JwtPayload) {
     const sectorIds = await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true);
     await this.assertCanManageSectorSet(actor, sectorIds);
-    const teamId = await this.resolveAndValidateTeamId(dto.teamId, sectorIds, dto.classGroup);
+    const teamId = await this.resolveAndValidateTeamId(dto.teamId, sectorIds);
 
     const email = dto.user.email.toLowerCase();
     const existingByEmail = await this.prisma.user.findUnique({
@@ -186,7 +186,6 @@ export class ServantsService {
           status: this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
           trainingStatus: TrainingStatus.PENDING,
           aptitude: dto.aptitude,
-          classGroup: dto.classGroup ?? null,
           teamId,
           mainSectorId: sectorIds[0],
           notes: dto.notes,
@@ -310,7 +309,6 @@ export class ServantsService {
         id: true,
         name: true,
         phone: true,
-        classGroup: true,
         team: { select: { id: true, name: true } },
         userAccount: {
           select: { id: true },
@@ -353,7 +351,6 @@ export class ServantsService {
         role: Role.SERVO,
         scope: UserScope.SELF,
         status: dto.status ?? UserStatus.ACTIVE,
-        sectorTeam: servant.team?.name ?? servant.classGroup ?? null,
         phone: servant.phone ?? null,
         servantId,
         mustChangePassword: true,
@@ -365,7 +362,6 @@ export class ServantsService {
         role: true,
         status: true,
         scope: true,
-        sectorTeam: true,
         servantId: true,
       },
     });
@@ -435,8 +431,8 @@ export class ServantsService {
         ...existing.servantSectors.map((item) => item.sectorId),
       ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
     const resolvedTeamId =
-      dto.teamId !== undefined || dto.classGroup !== undefined || resolvedSectorIds !== undefined
-        ? await this.resolveAndValidateTeamId(dto.teamId, fallbackSectorIds, dto.classGroup)
+      dto.teamId !== undefined || resolvedSectorIds !== undefined
+        ? await this.resolveAndValidateTeamId(dto.teamId, fallbackSectorIds)
         : undefined;
 
     const explicitStatus = dto.status ? this.mapDtoStatus(dto.status) : undefined;
@@ -459,7 +455,6 @@ export class ServantsService {
           status: nextStatus,
           trainingStatus: dto.trainingStatus,
           aptitude: dto.aptitude,
-          classGroup: dto.classGroup,
           teamId: resolvedTeamId,
           mainSectorId: resolvedSectorIds ? resolvedSectorIds[0] : undefined,
           notes: dto.notes,
@@ -702,7 +697,8 @@ export class ServantsService {
       sectorId: sectorIds[0] ?? null,
       sectorName: sectorNames[0] ?? null,
       teamId: servant.team?.id ?? servant.teamId ?? null,
-      teamName: servant.team?.name ?? servant.classGroup ?? null,
+      teamName: servant.team?.name ?? null,
+      teamIds: servant.team?.id ? [servant.team.id] : servant.teamId ? [servant.teamId] : [],
     };
   }
 
@@ -742,9 +738,8 @@ export class ServantsService {
   private async resolveAndValidateTeamId(
     teamId: string | undefined,
     sectorIds: string[],
-    legacyClassGroup?: string,
   ) {
-    if (!teamId && !legacyClassGroup?.trim()) {
+    if (!teamId) {
       return null;
     }
 
@@ -771,15 +766,7 @@ export class ServantsService {
       return team.id;
     }
 
-    const teamByLegacyName = await this.prisma.team.findFirst({
-      where: {
-        sectorId: sectorIds[0],
-        name: legacyClassGroup?.trim(),
-      },
-      select: { id: true },
-    });
-
-    return teamByLegacyName?.id ?? null;
+    return null;
   }
 
   private async ensureExists(id: string) {

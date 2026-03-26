@@ -71,7 +71,6 @@ describe('SchedulesService - duplicate', () => {
       serviceId: 'service-a',
       servantId: 'servant-1',
       sectorId: 'sector-1',
-      classGroup: 'A',
       service: { id: 'service-a' },
     });
     prisma.worshipService.findUnique.mockResolvedValue({ id: 'service-b' });
@@ -113,7 +112,6 @@ describe('SchedulesService - duplicate', () => {
       id: 'schedule-1',
       servantId: 'servant-1',
       sectorId: 'sector-1',
-      classGroup: 'A',
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue({ id: 'schedule-1' });
@@ -129,7 +127,6 @@ describe('SchedulesService - duplicate', () => {
       id: 'schedule-1',
       servantId: 'servant-1',
       sectorId: 'sector-1',
-      classGroup: 'A',
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue({ id: 'existing-schedule' });
@@ -154,7 +151,6 @@ describe('SchedulesService - duplicate', () => {
       id: 'schedule-1',
       servantId: 'servant-1',
       sectorId: 'sector-1',
-      classGroup: 'A',
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue(null);

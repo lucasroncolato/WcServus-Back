@@ -2,7 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role, UserScope, UserStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
+  ArrayUnique,
   IsEmail,
+  IsArray,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -70,13 +72,54 @@ export class CreateUserDto {
   @IsEnum(UserScope)
   scope?: UserScope;
 
+  @ApiPropertyOptional({ enum: UserScope, default: UserScope.GLOBAL })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsEnum(UserScope)
+  scopeType?: UserScope;
+
   @ApiPropertyOptional({
-    description: 'Nome da equipe/setor para escopo operacional',
-    example: 'Multimidia Noite',
+    type: [String],
+    description: 'Vinculos de escopo por setor (IDs de Sector).',
   })
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
-  @MaxLength(120)
-  sectorTeam?: string;
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+    return String(value)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  })
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  sectorIds?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Vinculos de escopo por equipe (IDs de Team).',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+    return String(value)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  })
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  teamIds?: string[];
+
 }

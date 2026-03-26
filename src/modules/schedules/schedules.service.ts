@@ -59,7 +59,7 @@ type GenerationOptions = {
   serviceIds?: string[];
   weekdays?: number[];
   sectorIds?: string[];
-  classGroup?: string;
+  teamIds?: string[];
   respectFairnessRules?: boolean;
   dryRun?: boolean;
   force?: boolean;
@@ -69,6 +69,7 @@ type GenerationOptions = {
 
 type EligibleCandidate = {
   servantId: string;
+  teamId: string | null;
   sectorId: string;
   isMainSector: boolean;
   assignedCountMonth: number;
@@ -168,7 +169,6 @@ export class SchedulesService {
         id: schedule.id,
         serviceId: schedule.serviceId,
         sectorId: schedule.sectorId,
-        classGroup: schedule.classGroup,
         status: schedule.status,
         responseStatus: schedule.responseStatus,
         responseAt: schedule.responseAt,
@@ -195,7 +195,6 @@ export class SchedulesService {
         serviceId: dto.serviceId,
         sectorId: dto.sectorId,
         servantId: dto.servantId,
-        classGroup: dto.classGroup,
         assignedByUserId: actor.sub,
       },
       include: {
@@ -243,7 +242,7 @@ export class SchedulesService {
       year: dto.year,
       month: dto.month,
       sectorIds: dto.sectorIds,
-      classGroup: dto.classGroup,
+      teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
       allowMultiSectorSameService: dto.allowMultiSectorSameService,
@@ -270,7 +269,7 @@ export class SchedulesService {
       year: Number(dto.startDate.slice(0, 4)),
       weekdays: dto.weekdays,
       sectorIds: dto.sectorIds,
-      classGroup: dto.classGroup,
+      teamIds: dto.teamIds,
       respectFairnessRules: dto.respectFairnessRules,
       dryRun: dto.dryRun,
       force: dto.force,
@@ -305,7 +304,7 @@ export class SchedulesService {
       month: serviceDate.getUTCMonth() + 1,
       serviceIds: [service.id],
       sectorIds: dto.sectorIds,
-      classGroup: dto.classGroup,
+      teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
       allowMultiSectorSameService: dto.allowMultiSectorSameService,
@@ -369,7 +368,7 @@ export class SchedulesService {
       year: startServiceDate.getUTCFullYear(),
       serviceIds,
       sectorIds: dto.sectorIds,
-      classGroup: dto.classGroup,
+      teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
       allowMultiSectorSameService: dto.allowMultiSectorSameService,
@@ -391,7 +390,7 @@ export class SchedulesService {
       mode: 'generate-year',
       year: dto.year,
       sectorIds: dto.sectorIds,
-      classGroup: dto.classGroup,
+      teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
       allowMultiSectorSameService: dto.allowMultiSectorSameService,
@@ -619,12 +618,11 @@ export class SchedulesService {
     if (
       dto.servantId === undefined &&
       dto.sectorId === undefined &&
-      dto.classGroup === undefined &&
+      dto.teamId === undefined &&
       dto.status === undefined
     ) {
       throw new BadRequestException('Nothing to update in schedule');
     }
-
     const nextServantId = dto.servantId ?? existing.servantId;
     const nextSectorId = dto.sectorId ?? existing.sectorId;
 
@@ -656,7 +654,6 @@ export class SchedulesService {
       data: {
         servantId: dto.servantId,
         sectorId: dto.sectorId,
-        classGroup: dto.classGroup,
         status: dto.status,
       },
       include: {
@@ -733,7 +730,6 @@ export class SchedulesService {
         serviceId: dto.worshipServiceId,
         servantId: source.servantId,
         sectorId: source.sectorId,
-        classGroup: source.classGroup,
         status: ScheduleStatus.ASSIGNED,
         assignedByUserId: actor.sub,
       },
@@ -928,6 +924,19 @@ export class SchedulesService {
     const weights = this.normalizeGenerationWeights(options.weights);
 
     const scopedSectorIds = await this.resolveAllowedSectorIds(actor, options.sectorIds);
+    const teamFilter = await this.resolveGenerationTeamFilter(options.teamIds);
+    const teamSectorIds = [
+      ...new Set(teamFilter.teams.map((team) => team.sectorId).filter((value): value is string => Boolean(value))),
+    ];
+
+    const targetSectorIds = teamSectorIds.length
+      ? scopedSectorIds.filter((sectorId) => teamSectorIds.includes(sectorId))
+      : scopedSectorIds;
+
+    if (options.teamIds?.length && targetSectorIds.length === 0) {
+      throw new ForbiddenException('You can only generate schedules for your allowed sectors');
+    }
+
     const servicesInPeriod = await this.prisma.worshipService.findMany({
       where: {
         serviceDate: { gte: start, lte: end },
@@ -967,7 +976,7 @@ export class SchedulesService {
     }
 
     const sectors = await this.prisma.sector.findMany({
-      where: { id: { in: scopedSectorIds } },
+      where: { id: { in: targetSectorIds } },
       orderBy: [{ id: 'asc' }],
       select: { id: true, name: true },
     });
@@ -980,7 +989,7 @@ export class SchedulesService {
 
     const candidatesBySector = await this.buildEligibleCandidatesBySector(
       sectors.map((sector) => sector.id),
-      options.classGroup,
+      teamFilter.teamIds,
     );
 
     const totalSlotsPerSector = new Map<string, number>();
@@ -1009,14 +1018,13 @@ export class SchedulesService {
       const existingSchedules = await this.prisma.schedule.findMany({
         where: { serviceId: service.id },
         orderBy: [{ createdAt: 'asc' }],
-        select: {
-          id: true,
-          serviceId: true,
-          sectorId: true,
-          servantId: true,
-          classGroup: true,
-        },
-      });
+          select: {
+            id: true,
+            serviceId: true,
+            sectorId: true,
+            servantId: true,
+          },
+        });
 
       const assignedInServiceCount = new Map<string, number>();
       for (const schedule of existingSchedules) {
@@ -1027,11 +1035,7 @@ export class SchedulesService {
       }
 
       for (const sector of sectors) {
-        const existing = this.findExistingScheduleForSlot(
-          existingSchedules,
-          sector.id,
-          options.classGroup,
-        );
+          const existing = this.findExistingScheduleForSlot(existingSchedules, sector.id);
 
         if (existing && !force) {
           result.summary.skipped += 1;
@@ -1108,6 +1112,7 @@ export class SchedulesService {
 
           return {
             servantId: candidate.servantId,
+            teamId: candidate.teamId,
             sectorId: sector.id,
             isMainSector: candidate.isMainSector,
             assignedCountMonth: candidateAssignedCount,
@@ -1184,7 +1189,6 @@ export class SchedulesService {
             data: {
               servantId: winner.servantId,
               status: ScheduleStatus.ASSIGNED,
-              classGroup: options.classGroup ?? existing.classGroup,
             },
             select: { id: true },
           });
@@ -1219,7 +1223,6 @@ export class SchedulesService {
               sectorId: sector.id,
               servantId: winner.servantId,
               status: ScheduleStatus.ASSIGNED,
-              classGroup: options.classGroup ?? null,
               assignedByUserId: actor.sub,
             },
             select: { id: true },
@@ -1285,8 +1288,8 @@ export class SchedulesService {
         respectFairnessRules,
         weekdays: options.weekdays,
         allowMultiSectorSameService,
-        classGroup: options.classGroup,
-        sectorIds: scopedSectorIds,
+        teamIds: teamFilter.teamIds,
+        sectorIds: targetSectorIds,
         summary: result.summary,
         weights,
       },
@@ -1352,16 +1355,25 @@ export class SchedulesService {
     });
   }
 
-  private async buildEligibleCandidatesBySector(sectorIds: string[], classGroup?: string) {
+  private async buildEligibleCandidatesBySector(
+    sectorIds: string[],
+    teamIds: string[],
+  ) {
     const servants = await this.prisma.servant.findMany({
       where: {
         status: ServantStatus.ATIVO,
         trainingStatus: TrainingStatus.COMPLETED,
-        classGroup: classGroup ?? undefined,
+        teamId: teamIds.length ? { in: teamIds } : undefined,
         OR: [{ mainSectorId: { in: sectorIds } }, { servantSectors: { some: { sectorId: { in: sectorIds } } } }],
       },
       select: {
         id: true,
+        teamId: true,
+        team: {
+          select: {
+            name: true,
+          },
+        },
         mainSectorId: true,
         servantSectors: {
           select: { sectorId: true },
@@ -1370,7 +1382,10 @@ export class SchedulesService {
       orderBy: [{ id: 'asc' }],
     });
 
-    const map = new Map<string, Array<{ servantId: string; isMainSector: boolean }>>();
+    const map = new Map<
+      string,
+      Array<{ servantId: string; teamId: string | null; isMainSector: boolean }>
+    >();
     for (const sectorId of sectorIds) {
       map.set(sectorId, []);
     }
@@ -1385,9 +1400,10 @@ export class SchedulesService {
         }
         map.get(sectorId)?.push({
           servantId: servant.id,
+          teamId: servant.teamId ?? null,
           isMainSector: servant.mainSectorId === sectorId,
         });
-      }
+        }
     }
 
     for (const [sectorId, candidates] of map) {
@@ -1483,15 +1499,35 @@ export class SchedulesService {
       id: string;
       sectorId: string;
       servantId: string;
-      classGroup: string | null;
     }>,
     sectorId: string,
-    classGroup?: string,
   ) {
-    if (classGroup !== undefined) {
-      return existingSchedules.find((item) => item.sectorId === sectorId && item.classGroup === classGroup);
-    }
     return existingSchedules.find((item) => item.sectorId === sectorId);
+  }
+
+  private async resolveGenerationTeamFilter(teamIds?: string[]) {
+    const normalizedTeamIds = [...new Set((teamIds ?? []).map((value) => value.trim()).filter(Boolean))];
+
+    if (normalizedTeamIds.length === 0) {
+      return {
+        teamIds: [] as string[],
+        teams: [] as Array<{ id: string; name: string; sectorId: string }>,
+      };
+    }
+
+    const teams = await this.prisma.team.findMany({
+      where: { id: { in: normalizedTeamIds } },
+      select: { id: true, name: true, sectorId: true },
+    });
+
+    if (teams.length !== normalizedTeamIds.length) {
+      throw new BadRequestException('One or more teamIds are invalid');
+    }
+
+    return {
+      teamIds: normalizedTeamIds,
+      teams,
+    };
   }
 
   private isCandidateAllowedInService(
@@ -1756,17 +1792,26 @@ export class SchedulesService {
     T extends {
       serviceId: string;
       service?: { title?: string } | null;
-      servant?: { name?: string } | null;
+      servant?: {
+        name?: string;
+        teamId?: string | null;
+        team?: { id?: string | null; name?: string | null } | null;
+      } | null;
       sector?: { name?: string } | null;
     },
   >(schedule: T) {
-    return {
-      ...schedule,
-      worshipServiceId: schedule.serviceId,
-      worshipServiceTitle: schedule.service?.title ?? null,
-      servantName: schedule.servant?.name ?? null,
-      sectorName: schedule.sector?.name ?? null,
-    };
+      const teamId = schedule.servant?.team?.id ?? schedule.servant?.teamId ?? null;
+      const teamName = schedule.servant?.team?.name ?? null;
+
+      return {
+        ...schedule,
+        worshipServiceId: schedule.serviceId,
+        worshipServiceTitle: schedule.service?.title ?? null,
+        servantName: schedule.servant?.name ?? null,
+        sectorName: schedule.sector?.name ?? null,
+        teamId,
+        teamName,
+      };
   }
 
   private async notifyScheduleEvent(

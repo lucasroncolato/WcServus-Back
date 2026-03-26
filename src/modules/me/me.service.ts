@@ -51,7 +51,6 @@ export class MeService {
             trainingStatus: true,
             phone: true,
             notes: true,
-            classGroup: true,
             teamId: true,
             team: {
               select: {
@@ -84,6 +83,12 @@ export class MeService {
       phone: profile.phone,
       avatarUrl: profile.avatarUrl,
       servantId: profile.servantId,
+      sectorId: profile.servant?.mainSectorId ?? null,
+      teamId: profile.servant?.teamId ?? null,
+      sectorName: profile.servant?.mainSector?.name ?? null,
+      teamName: profile.servant?.team?.name ?? null,
+      sectorIds: profile.servant?.mainSectorId ? [profile.servant.mainSectorId] : [],
+      teamIds: profile.servant?.teamId ? [profile.servant.teamId] : [],
       servant: profile.servant
         ? {
             id: profile.servant.id,
@@ -93,8 +98,8 @@ export class MeService {
             trainingStatus: profile.servant.trainingStatus,
             phone: profile.servant.phone,
             notes: profile.servant.notes,
-            classGroup: profile.servant.classGroup,
             teamId: profile.servant.teamId,
+            teamName: profile.servant.team?.name ?? null,
             team: profile.servant.team,
             mainSector: profile.servant.mainSector,
           }
@@ -287,6 +292,16 @@ export class MeService {
               name: true,
             },
           },
+          servant: {
+            select: {
+              teamId: true,
+              team: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+          },
         },
         orderBy: [{ service: { serviceDate: 'asc' } }, { createdAt: 'asc' }],
         skip: (page - 1) * limit,
@@ -300,7 +315,8 @@ export class MeService {
         id: item.id,
         serviceId: item.serviceId,
         sectorId: item.sectorId,
-        classGroup: item.classGroup,
+        teamId: item.servant?.teamId ?? null,
+        teamName: item.servant?.team?.name ?? null,
         assignmentStatus: item.status,
         responseStatus: item.responseStatus,
         responseAt: item.responseAt,

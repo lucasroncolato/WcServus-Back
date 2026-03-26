@@ -15,11 +15,10 @@ export class UpdateScheduleDto {
   @IsString()
   sectorId?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'ID relacional da equipe (canonico).' })
   @IsOptional()
   @IsString()
-  classGroup?: string;
-
+  teamId?: string;
   @ApiPropertyOptional({ enum: ScheduleStatus, description: 'Status da escala' })
   @IsOptional()
   @Transform(({ value }) => (value === 'CONFIRMADO' ? ScheduleStatus.CONFIRMED : value))

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { NotificationSettingsController } from './notification-settings.controller';
 import { NotificationSettingsService } from './notification-settings.service';
+import { NotificationsManagementController } from './notifications-management.controller';
+import { NotificationsManagementService } from './notifications-management.service';
 import { NotificationTemplatesController } from './notification-templates.controller';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -14,12 +16,14 @@ import { WhatsappService } from './whatsapp/whatsapp.service';
 @Module({
   controllers: [
     NotificationsController,
+    NotificationsManagementController,
     NotificationTemplatesController,
     NotificationSettingsController,
     WhatsappController,
   ],
   providers: [
     NotificationsService,
+    NotificationsManagementService,
     NotificationSettingsService,
     NotificationTemplatesService,
     WhatsappService,

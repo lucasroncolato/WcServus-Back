@@ -14,8 +14,8 @@ export class CreateScheduleDto {
   @IsString()
   sectorId: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'ID relacional da equipe (canonico).' })
   @IsOptional()
   @IsString()
-  classGroup?: string;
+  teamId?: string;
 }

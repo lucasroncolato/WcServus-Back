@@ -17,6 +17,7 @@ export class AttendancesController {
   constructor(private readonly attendancesService: AttendancesService) {}
 
   @Get()
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.LIDER)
   findAll(@Query() query: ListAttendancesQueryDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.findAll(query, user);
   }

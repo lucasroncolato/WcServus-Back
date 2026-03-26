@@ -36,10 +36,11 @@ export class GeneratePeriodScheduleDto {
   @IsString({ each: true })
   sectorIds?: string[];
 
-  @ApiPropertyOptional({ example: 'A' })
+  @ApiPropertyOptional({ type: [String], example: ['team_1', 'team_2'] })
   @IsOptional()
-  @IsString()
-  classGroup?: string;
+  @IsArray()
+  @IsString({ each: true })
+  teamIds?: string[];
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()
@@ -68,4 +69,3 @@ export class GeneratePeriodScheduleDto {
   @Type(() => ScheduleGenerationWeightsDto)
   weights?: ScheduleGenerationWeightsDto;
 }
-

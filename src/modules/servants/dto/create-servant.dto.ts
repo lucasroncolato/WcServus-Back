@@ -43,11 +43,6 @@ export class CreateServantDto {
   @IsEnum(Aptitude)
   aptitude?: Aptitude;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  classGroup?: string;
-
   @ApiPropertyOptional({ description: 'ID da equipe relacional oficial.' })
   @IsOptional()
   @IsString()

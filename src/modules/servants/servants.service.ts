@@ -9,6 +9,7 @@ import {
   AuditAction,
   Prisma,
   Role,
+  ServantApprovalStatus,
   ServantStatus,
   TrainingStatus,
   UserScope,
@@ -31,6 +32,7 @@ import { LinkServantUserDto } from './dto/link-servant-user.dto';
 import { ListServantsQueryDto } from './dto/list-servants-query.dto';
 import { UpdateServantStatusDto } from './dto/update-servant-status.dto';
 import { UpdateServantDto } from './dto/update-servant.dto';
+import { ServantApprovalActionDto, UpdateServantApprovalDto } from './dto/update-servant-approval.dto';
 
 type ServantWithRelations = Servant & {
   mainSector: Sector | null;
@@ -76,6 +78,7 @@ export class ServantsService {
     const queryWhere: Prisma.ServantWhereInput = {
       status: this.mapQueryStatus(query.status),
       trainingStatus: query.trainingStatus,
+      approvalStatus: query.approvalStatus,
       teamId: query.teamId,
       OR: query.sectorId
         ? [{ mainSectorId: query.sectorId }, { servantSectors: { some: { sectorId: query.sectorId } } }]
@@ -154,7 +157,18 @@ export class ServantsService {
   }
 
   async createWithUser(dto: CreateServantWithUserDto, actor: JwtPayload) {
-    const sectorIds = await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true);
+    if (
+      actor.role !== Role.SUPER_ADMIN &&
+      actor.role !== Role.ADMIN &&
+      actor.role !== Role.COORDENADOR
+    ) {
+      throw new ForbiddenException('You do not have permission to create servants');
+    }
+
+    const isCoordinatorRequest = actor.role === Role.COORDENADOR;
+    const sectorIds = isCoordinatorRequest
+      ? await this.resolveCoordinatorCreationSectorIds(actor, dto.sectorIds, dto.mainSectorId)
+      : await this.resolveAndValidateSectorIds(dto.sectorIds, dto.mainSectorId, true);
     await this.assertCanManageSectorSet(actor, sectorIds);
     const teamId = await this.resolveAndValidateTeamId(dto.teamId, sectorIds);
 
@@ -183,8 +197,19 @@ export class ServantsService {
           phone: dto.phone,
           gender: dto.gender,
           birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-          status: this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
+          status: isCoordinatorRequest
+            ? ServantStatus.RECRUTAMENTO
+            : this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
           trainingStatus: TrainingStatus.PENDING,
+          approvalStatus: isCoordinatorRequest
+            ? ServantApprovalStatus.PENDING
+            : ServantApprovalStatus.APPROVED,
+          approvalRequestedByUserId: isCoordinatorRequest ? actor.sub : null,
+          approvedByUserId: isCoordinatorRequest ? null : actor.sub,
+          approvalUpdatedAt: new Date(),
+          approvalNotes: isCoordinatorRequest
+            ? 'Solicitacao criada por coordenador. Pendente de aprovacao administrativa.'
+            : 'Aprovado na criacao por perfil administrativo.',
           aptitude: dto.aptitude,
           teamId,
           mainSectorId: sectorIds[0],
@@ -212,9 +237,10 @@ export class ServantsService {
           passwordHash,
           role: targetRole,
           scope: UserScope.SELF,
-          status: dto.user.status ?? UserStatus.ACTIVE,
+          status: isCoordinatorRequest ? UserStatus.INACTIVE : dto.user.status ?? UserStatus.ACTIVE,
           phone: dto.user.phone ?? createdServant.phone ?? null,
           servantId: createdServant.id,
+          mustChangePassword: true,
         },
       });
 
@@ -233,6 +259,7 @@ export class ServantsService {
         sectorIds,
         teamId,
         userRole: targetRole,
+        approvalStatus: isCoordinatorRequest ? ServantApprovalStatus.PENDING : ServantApprovalStatus.APPROVED,
       },
     });
 
@@ -395,6 +422,12 @@ export class ServantsService {
   }
 
   async update(id: string, dto: UpdateServantDto, actor: JwtPayload) {
+    if (actor.role === Role.COORDENADOR) {
+      throw new ForbiddenException(
+        'COORDENADOR cannot edit servant profile fields. Use training completion endpoint only.',
+      );
+    }
+
     await this.assertCanManageServant(actor, id);
 
     const existing = await this.prisma.servant.findUnique({
@@ -504,6 +537,10 @@ export class ServantsService {
   }
 
   async updateStatus(id: string, dto: UpdateServantStatusDto, actor: JwtPayload) {
+    if (actor.role === Role.COORDENADOR) {
+      throw new ForbiddenException('COORDENADOR cannot update servant active status');
+    }
+
     await this.assertCanManageServant(actor, id);
 
     const existing = await this.prisma.servant.findUnique({ where: { id } });
@@ -547,10 +584,13 @@ export class ServantsService {
 
     const existing = await this.prisma.servant.findUnique({
       where: { id },
-      select: { id: true, status: true, trainingStatus: true },
+      select: { id: true, status: true, trainingStatus: true, approvalStatus: true },
     });
     if (!existing) {
       throw new NotFoundException('Servant not found');
+    }
+    if (existing.approvalStatus !== ServantApprovalStatus.APPROVED) {
+      throw new ForbiddenException('Only approved servants can complete training');
     }
 
     const promoteToActive = this.shouldPromoteToActiveOnTrainingCompletion(existing.status);
@@ -602,6 +642,66 @@ export class ServantsService {
     });
 
     return this.toApiServant(updated);
+  }
+
+  async updateApproval(id: string, dto: UpdateServantApprovalDto, actor: JwtPayload) {
+    const servant = await this.prisma.servant.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        approvalStatus: true,
+        userAccount: {
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!servant) {
+      throw new NotFoundException('Servant not found');
+    }
+
+    const nextStatus =
+      dto.action === ServantApprovalActionDto.APPROVE
+        ? ServantApprovalStatus.APPROVED
+        : ServantApprovalStatus.REJECTED;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.servant.update({
+        where: { id },
+        data: {
+          approvalStatus: nextStatus,
+          approvedByUserId: dto.action === ServantApprovalActionDto.APPROVE ? actor.sub : null,
+          approvalUpdatedAt: new Date(),
+          approvalNotes: dto.reason ?? null,
+        },
+      });
+
+      if (servant.userAccount?.id) {
+        await tx.user.update({
+          where: { id: servant.userAccount.id },
+          data: {
+            status:
+              dto.action === ServantApprovalActionDto.APPROVE
+                ? UserStatus.ACTIVE
+                : UserStatus.INACTIVE,
+          },
+        });
+      }
+    });
+
+    await this.auditService.log({
+      action: AuditAction.STATUS_CHANGE,
+      entity: 'ServantApproval',
+      entityId: id,
+      userId: actor.sub,
+      metadata: {
+        fromApprovalStatus: servant.approvalStatus,
+        toApprovalStatus: nextStatus,
+        reason: dto.reason,
+      },
+    });
+
+    return this.findOne(id, actor);
   }
 
   async history(id: string, actor: JwtPayload) {
@@ -733,6 +833,29 @@ export class ServantsService {
     }
 
     return merged;
+  }
+
+  private async resolveCoordinatorCreationSectorIds(
+    actor: JwtPayload,
+    requestedSectorIds?: string[],
+    requestedMainSectorId?: string,
+  ) {
+    const allowedSectorIds = await resolveScopedSectorIds(this.prisma, actor);
+    if (!allowedSectorIds.length) {
+      throw new ForbiddenException('Coordinator has no sector scope configured');
+    }
+
+    const requested = [...new Set([...(requestedSectorIds ?? []), ...(requestedMainSectorId ? [requestedMainSectorId] : [])])];
+    if (!requested.length) {
+      return [allowedSectorIds[0]];
+    }
+
+    const outOfScope = requested.some((sectorId) => !allowedSectorIds.includes(sectorId));
+    if (outOfScope) {
+      throw new ForbiddenException('You can only request servant creation inside your own sector scope');
+    }
+
+    return [requested[0]];
   }
 
   private async resolveAndValidateTeamId(

@@ -13,6 +13,7 @@ import { ListEligibleServantsQueryDto } from './dto/list-eligible-servants-query
 import { ListServantsQueryDto } from './dto/list-servants-query.dto';
 import { UpdateServantStatusDto } from './dto/update-servant-status.dto';
 import { UpdateServantDto } from './dto/update-servant.dto';
+import { UpdateServantApprovalDto } from './dto/update-servant-approval.dto';
 import { ServantsService } from './servants.service';
 
 @ApiTags('Servants')
@@ -27,7 +28,7 @@ export class ServantsController {
   }
 
   @Get('eligible')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   findEligible(@Query() query: ListEligibleServantsQueryDto, @CurrentUser() user: JwtPayload) {
     return this.servantsService.findEligible(query.userId, user);
   }
@@ -50,7 +51,7 @@ export class ServantsController {
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateServantDto,
@@ -60,7 +61,7 @@ export class ServantsController {
   }
 
   @Patch(':id/status')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateServantStatusDto,
@@ -102,5 +103,15 @@ export class ServantsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.servantsService.completeTraining(id, dto, user);
+  }
+
+  @Patch(':id/approval')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  updateApproval(
+    @Param('id') id: string,
+    @Body() dto: UpdateServantApprovalDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.servantsService.updateApproval(id, dto, user);
   }
 }

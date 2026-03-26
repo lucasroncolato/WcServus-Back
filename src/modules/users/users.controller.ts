@@ -28,7 +28,7 @@ export class UsersController {
   }
 
   @Get('eligible')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   findEligible(
     @Query() query: ListEligibleUsersQueryDto,
     @CurrentUser() user: JwtPayload,

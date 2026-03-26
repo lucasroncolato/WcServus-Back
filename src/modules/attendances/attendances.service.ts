@@ -1,6 +1,10 @@
 ﻿import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AlertStatus, AttendanceStatus, AuditAction, Prisma, Role } from '@prisma/client';
-import { assertServantAccess, getAttendanceAccessWhere } from 'src/common/auth/access-scope';
+import {
+  assertServantAccess,
+  getAttendanceAccessWhere,
+  getScheduleAccessWhere,
+} from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
@@ -45,6 +49,7 @@ export class AttendancesService {
   async checkIn(dto: CheckInDto, actor: JwtPayload) {
     await this.assertCanRegisterAttendance(actor, dto.servantId);
     await this.ensureReferences(dto.serviceId, dto.servantId);
+    await this.assertAttendanceCanBeRegisteredForSchedule(actor, dto.serviceId, dto.servantId);
 
     const attendance = await this.prisma.attendance.upsert({
       where: {
@@ -114,6 +119,7 @@ export class AttendancesService {
     }
 
     await this.assertCanRegisterAttendance(actor, current.servantId);
+    await this.assertAttendanceCanBeRegisteredForSchedule(actor, current.serviceId, current.servantId);
 
     const attendance = await this.prisma.attendance.update({
       where: { id },
@@ -248,6 +254,28 @@ export class AttendancesService {
     }
 
     await assertServantAccess(this.prisma, actor, servantId);
+  }
+
+  private async assertAttendanceCanBeRegisteredForSchedule(
+    actor: JwtPayload,
+    serviceId: string,
+    servantId: string,
+  ) {
+    const scheduleScope = await getScheduleAccessWhere(this.prisma, actor);
+    const schedule = await this.prisma.schedule.findFirst({
+      where: scheduleScope
+        ? {
+            AND: [{ serviceId, servantId }, scheduleScope],
+          }
+        : { serviceId, servantId },
+      select: { id: true },
+    });
+
+    if (!schedule) {
+      throw new ForbiddenException(
+        'Attendance can only be registered for servants scheduled in services within your scope',
+      );
+    }
   }
 
   private async notifyAttendanceChange(

@@ -57,6 +57,12 @@ enum TrainingStatus {
   COMPLETED
 }
 
+enum ServantApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum Aptitude {
   SOCIAL
   OPERACIONAL
@@ -110,6 +116,17 @@ enum PastoralVisitStatus {
   ABERTA
   EM_ANDAMENTO
   RESOLVIDA
+}
+
+enum DevotionalStatus {
+  DONE
+  NOT_DONE
+}
+
+enum MonthlyFastingStatus {
+  PENDING
+  COMPLETED
+  SKIPPED
 }
 
 enum TalentStage {
@@ -190,6 +207,11 @@ model User {
   resolvedPastoralVisits PastoralVisit[]     @relation("ResolvedPastoralVisits")
   createdAlerts          PastoralAlert[]     @relation("AlertCreatedBy")
   resolvedAlerts         PastoralAlert[]     @relation("AlertResolvedBy")
+  requestedServantApprovals Servant[]        @relation("ServantApprovalRequestedBy")
+  approvedServantApprovals  Servant[]        @relation("ServantApprovalApprovedBy")
+  pastoralWeeklyFollowUps   PastoralWeeklyFollowUp[] @relation("PastoralWeeklyFollowUpResponsible")
+  registeredDevotionals     DailyDevotional[] @relation("DailyDevotionalRegisteredBy")
+  registeredFastings        MonthlyFasting[]  @relation("MonthlyFastingRegisteredBy")
   auditLogs              AuditLog[]
   scopeBindings          UserScopeBinding[]
   permissionOverrides    UserPermissionOverride[]
@@ -247,6 +269,7 @@ model Sector {
   userScopeBindings UserScopeBinding[]
   schedules         Schedule[]
   teams             Team[]
+  pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
 
   @@index([coordinatorUserId])
 }
@@ -280,6 +303,11 @@ model Servant {
   birthDate         DateTime?
   status            ServantStatus        @default(RECRUTAMENTO)
   trainingStatus    TrainingStatus       @default(PENDING)
+  approvalStatus    ServantApprovalStatus @default(APPROVED)
+  approvalRequestedByUserId String?
+  approvedByUserId  String?
+  approvalUpdatedAt DateTime?
+  approvalNotes     String?
   aptitude          Aptitude?
   mainSectorId      String?
   teamId            String?
@@ -297,9 +325,14 @@ model Servant {
   attendances       Attendance[]
   pastoralVisits    PastoralVisit[]
   pastoralAlerts    PastoralAlert[]
+  pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
+  devotionals       DailyDevotional[]
+  monthlyFastings   MonthlyFasting[]
   talents           Talent[]
   statusHistory     ServantStatusHistory[]
   userAccount       User?
+  approvalRequestedBy User?              @relation("ServantApprovalRequestedBy", fields: [approvalRequestedByUserId], references: [id], onDelete: SetNull)
+  approvedBy        User?                @relation("ServantApprovalApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   notificationPreferences NotificationPreference[]
   notificationLogs        NotificationLog[]
   notificationQueue       NotificationQueue[]
@@ -307,6 +340,9 @@ model Servant {
   @@index([name])
   @@index([status])
   @@index([trainingStatus])
+  @@index([approvalStatus])
+  @@index([approvalRequestedByUserId])
+  @@index([approvedByUserId])
   @@index([mainSectorId])
   @@index([teamId])
 }
@@ -372,6 +408,7 @@ model Schedule {
   swapHistoryFrom  ScheduleSwapHistory[] @relation("SwapFromSchedule")
   swapHistoryTo    ScheduleSwapHistory[] @relation("SwapToSchedule")
   responseHistory  ScheduleResponseHistory[]
+  pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
 
   @@index([serviceId])
   @@index([servantId])
@@ -464,6 +501,67 @@ model PastoralVisit {
   @@index([servantId])
   @@index([status])
   @@index([openedAt])
+}
+
+model PastoralWeeklyFollowUp {
+  id                String   @id @default(cuid())
+  servantId         String
+  sectorId          String
+  scheduleId        String?
+  weekStartDate     DateTime
+  contactedAt       DateTime @default(now())
+  notes             String?
+  responsibleUserId String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  servant           Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  sector            Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  schedule          Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  responsible       User     @relation("PastoralWeeklyFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, sectorId, weekStartDate])
+  @@index([weekStartDate])
+  @@index([servantId, weekStartDate])
+  @@index([sectorId, weekStartDate])
+  @@index([scheduleId])
+  @@index([responsibleUserId])
+}
+
+model DailyDevotional {
+  id                 String           @id @default(cuid())
+  servantId          String
+  devotionalDate     DateTime
+  status             DevotionalStatus @default(DONE)
+  notes              String?
+  registeredByUserId String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  servant            Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  registeredBy       User             @relation("DailyDevotionalRegisteredBy", fields: [registeredByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, devotionalDate])
+  @@index([devotionalDate])
+  @@index([servantId, devotionalDate])
+  @@index([registeredByUserId])
+}
+
+model MonthlyFasting {
+  id                 String               @id @default(cuid())
+  servantId          String
+  referenceMonth     DateTime
+  status             MonthlyFastingStatus @default(PENDING)
+  completedAt        DateTime?
+  notes              String?
+  registeredByUserId String
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  servant            Servant              @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  registeredBy       User                 @relation("MonthlyFastingRegisteredBy", fields: [registeredByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, referenceMonth])
+  @@index([referenceMonth])
+  @@index([servantId, referenceMonth])
+  @@index([registeredByUserId])
 }
 
 model PastoralAlert {

@@ -19,6 +19,15 @@ export class WorshipServicesService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private isFullVisibilityRole(role: Role) {
+    return (
+      role === Role.SUPER_ADMIN ||
+      role === Role.ADMIN ||
+      role === Role.PASTOR ||
+      role === Role.COORDENADOR
+    );
+  }
+
   async findAll(query: ListWorshipServicesQueryDto, actor: JwtPayload) {
     if (query.windowMode && !query.startDate) {
       throw new BadRequestException('startDate is required when windowMode is informed');
@@ -35,7 +44,7 @@ export class WorshipServicesService {
 
     return this.prisma.worshipService.findMany({
       where: {
-        ...(actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
+        ...(this.isFullVisibilityRole(actor.role)
           ? {}
           : {
               OR: [
@@ -72,7 +81,7 @@ export class WorshipServicesService {
     const scheduleScope = await getScheduleAccessWhere(this.prisma, actor);
     const attendanceScope = await getAttendanceAccessWhere(this.prisma, actor);
 
-    if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN && actor.role !== Role.PASTOR) {
+    if (!this.isFullVisibilityRole(actor.role)) {
       const visible = await this.prisma.worshipService.findFirst({
         where: {
           id,
@@ -101,7 +110,7 @@ export class WorshipServicesService {
       where: { id },
       include: {
         schedules:
-          actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
+          this.isFullVisibilityRole(actor.role)
             ? true
             : {
                 where: scheduleScope
@@ -111,7 +120,7 @@ export class WorshipServicesService {
                   : undefined,
               },
         attendances:
-          actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
+          this.isFullVisibilityRole(actor.role)
             ? true
             : {
                 where: attendanceScope

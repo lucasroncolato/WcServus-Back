@@ -19,6 +19,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { MeModule } from './modules/me/me.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { PastoralWeeklyFollowUpsModule } from './modules/pastoral-weekly-follow-ups/pastoral-weekly-follow-ups.module';
+import { SpiritualDisciplinesModule } from './modules/spiritual-disciplines/spiritual-disciplines.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 
@@ -45,6 +47,8 @@ import { HealthController } from './health.controller';
     MeModule,
     TeamsModule,
     SettingsModule,
+    PastoralWeeklyFollowUpsModule,
+    SpiritualDisciplinesModule,
   ],
   controllers: [HealthController],
   providers: [

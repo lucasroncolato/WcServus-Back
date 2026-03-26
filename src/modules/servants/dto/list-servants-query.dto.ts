@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TrainingStatus } from '@prisma/client';
+import { ServantApprovalStatus, TrainingStatus } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { ServantActiveStatusDto } from './create-servant.dto';
 
@@ -13,6 +13,11 @@ export class ListServantsQueryDto {
   @IsOptional()
   @IsEnum(TrainingStatus)
   trainingStatus?: TrainingStatus;
+
+  @ApiPropertyOptional({ enum: ServantApprovalStatus })
+  @IsOptional()
+  @IsEnum(ServantApprovalStatus)
+  approvalStatus?: ServantApprovalStatus;
 
   @ApiPropertyOptional()
   @IsOptional()

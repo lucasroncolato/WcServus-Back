@@ -26,13 +26,13 @@ export class WorshipServicesController {
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   create(@Body() dto: CreateWorshipServiceDto, @CurrentUser() user: JwtPayload) {
     return this.worshipServicesService.create(dto, user.sub);
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateWorshipServiceDto,

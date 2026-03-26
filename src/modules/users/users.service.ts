@@ -859,9 +859,9 @@ export class UsersService {
   }
 
   private assertCanListEligibleUsers(role: Role) {
-    if (role !== Role.SUPER_ADMIN && role !== Role.ADMIN && role !== Role.COORDENADOR) {
+    if (role !== Role.SUPER_ADMIN && role !== Role.ADMIN) {
       throw new ForbiddenException(
-        'Only SUPER_ADMIN, ADMIN and COORDENADOR can list eligible users',
+        'Only SUPER_ADMIN and ADMIN can list eligible users',
       );
     }
   }

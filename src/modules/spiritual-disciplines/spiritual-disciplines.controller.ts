@@ -13,7 +13,7 @@ import { SpiritualDisciplinesService } from './spiritual-disciplines.service';
 @ApiTags('Spiritual Disciplines')
 @ApiBearerAuth()
 @Controller('spiritual-disciplines')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.SERVO)
 export class SpiritualDisciplinesController {
   constructor(private readonly spiritualDisciplinesService: SpiritualDisciplinesService) {}
 
@@ -26,7 +26,7 @@ export class SpiritualDisciplinesController {
   }
 
   @Get('devotionals')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.SERVO)
   listDailyDevotionals(
     @Query() query: ListDailyDevotionalsQueryDto,
     @CurrentUser() user: JwtPayload,
@@ -43,7 +43,7 @@ export class SpiritualDisciplinesController {
   }
 
   @Get('fastings')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR, Role.SERVO)
   listMonthlyFastings(
     @Query() query: ListMonthlyFastingsQueryDto,
     @CurrentUser() user: JwtPayload,

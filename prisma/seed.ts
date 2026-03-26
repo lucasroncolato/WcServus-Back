@@ -185,9 +185,9 @@ async function main() {
       status: UserStatus.ACTIVE,
     });
 
-    const lider = await upsertUserByEmail({
-      email: 'lider@servos.local',
-      name: 'Lider Maria',
+    const coordenadorApoio = await upsertUserByEmail({
+      email: 'coordenador.apoio@servos.local',
+      name: 'Coord. Maria',
       passwordHash,
       role: Role.COORDENADOR,
       scope: UserScope.SETOR,
@@ -412,7 +412,7 @@ async function main() {
     await prisma.auditLog.deleteMany();
     await prisma.servantStatusHistory.deleteMany();
     await prisma.userScopeBinding.deleteMany({
-      where: { userId: { in: [coordenador.id, lider.id] } },
+      where: { userId: { in: [coordenador.id, coordenadorApoio.id] } },
     });
     await prisma.servantSector.deleteMany({
       where: { servantId: { in: [lucas.id, carla.id, renato.id, bruna.id, mateus.id] } },
@@ -442,7 +442,7 @@ async function main() {
 
     await clearServantLinks(
       [bruna.id, lucas.id, carla.id, renato.id, mateus.id],
-      [coordenador.id, lider.id, servo.id, renatoUser.id, mateusUser.id],
+      [coordenador.id, coordenadorApoio.id, servo.id, renatoUser.id, mateusUser.id],
     );
 
     await prisma.user.update({
@@ -451,7 +451,7 @@ async function main() {
     });
 
     await prisma.user.update({
-      where: { id: lider.id },
+      where: { id: coordenadorApoio.id },
       data: { servantId: lucas.id, scope: UserScope.SETOR },
     });
 
@@ -462,7 +462,7 @@ async function main() {
 
     await prisma.team.update({
       where: { id: recepcaoEquipeA.id },
-      data: { leaderUserId: lider.id },
+      data: { leaderUserId: coordenadorApoio.id },
     });
 
     await prisma.userScopeBinding.createMany({
@@ -473,7 +473,7 @@ async function main() {
           teamId: null,
         },
         {
-          userId: lider.id,
+          userId: coordenadorApoio.id,
           sectorId: recepcao.id,
           teamId: recepcaoEquipeA.id,
         },
@@ -676,7 +676,7 @@ async function main() {
         {
           scheduleId: scheduleDomingoManhaLucas.id,
           responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
-          respondedByUserId: lider.id,
+          respondedByUserId: coordenadorApoio.id,
           respondedAt: new Date('2026-03-07T17:10:00Z'),
         },
         {
@@ -887,8 +887,8 @@ async function main() {
 
     await prisma.passwordResetToken.create({
       data: {
-        userId: lider.id,
-        tokenHash: await bcrypt.hash('seed-reset-token-lider', 10),
+        userId: coordenadorApoio.id,
+        tokenHash: await bcrypt.hash('seed-reset-token-coordenador', 10),
         expiresAt: new Date('2026-03-24T00:00:00Z'),
       },
     });
@@ -928,7 +928,7 @@ async function main() {
     console.log('Super admin login: superadmin@servos.local');
     console.log('Admin login: admin@servos.local');
     console.log(
-      `Common users: ${pastor.email}, ${coordenador.email}, ${lider.email}, ${servo.email}, renato@servos.local, mateus@servos.local`,
+      `Common users: ${pastor.email}, ${coordenador.email}, ${coordenadorApoio.email}, ${servo.email}, renato@servos.local, mateus@servos.local`,
     );
     console.log(`Super admin id: ${superAdmin.id}`);
   } catch (error) {
@@ -940,4 +940,5 @@ async function main() {
 }
 
 void main();
+
 

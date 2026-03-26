@@ -393,7 +393,7 @@ export class MeService {
   }
 
   async listMyNotifications(actor: JwtPayload, query: ListNotificationsQueryDto) {
-    return this.notificationsService.findAll(actor.sub, query);
+    return this.notificationsService.findAll(actor, query);
   }
 
   async readMyNotification(actor: JwtPayload, notificationId: string) {

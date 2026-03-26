@@ -1,12 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import {
   AuditAction,
   DevotionalStatus,
   MonthlyFastingStatus,
   Prisma,
+  Role,
   RewardSource,
 } from '@prisma/client';
-import { assertServantAccess, getServantAccessWhere } from 'src/common/auth/access-scope';
+import { assertServantAccess, getServantAccessWhere, resolveServantSelfScope } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -42,13 +43,14 @@ export class SpiritualDisciplinesService {
   ) {}
 
   async registerDailyDevotional(dto: RegisterDailyDevotionalDto, actor: JwtPayload) {
-    await assertServantAccess(this.prisma, actor, dto.servantId);
+    const servantId = await this.resolvePersonalServantTarget(actor, dto.servantId, 'devocional diario');
+    await assertServantAccess(this.prisma, actor, servantId);
     const devotionalDate = toUtcDayStart(dto.devotionalDate);
 
     const record = await this.prisma.dailyDevotional.upsert({
       where: {
         servantId_devotionalDate: {
-          servantId: dto.servantId,
+          servantId,
           devotionalDate,
         },
       },
@@ -58,7 +60,7 @@ export class SpiritualDisciplinesService {
         registeredByUserId: actor.sub,
       },
       create: {
-        servantId: dto.servantId,
+        servantId,
         devotionalDate,
         status: dto.status ?? DevotionalStatus.DONE,
         notes: dto.notes,
@@ -76,7 +78,7 @@ export class SpiritualDisciplinesService {
       entityId: record.id,
       userId: actor.sub,
       metadata: {
-        servantId: dto.servantId,
+        servantId,
         devotionalDate: devotionalDate.toISOString(),
         status: dto.status ?? DevotionalStatus.DONE,
       },
@@ -84,7 +86,7 @@ export class SpiritualDisciplinesService {
 
     if ((dto.status ?? DevotionalStatus.DONE) === DevotionalStatus.DONE) {
       await this.rewardsService.grantReward({
-        servantId: dto.servantId,
+        servantId,
         source: RewardSource.DEVOTIONAL_DAILY,
         points: 2,
         title: 'Devocional diario',
@@ -99,9 +101,10 @@ export class SpiritualDisciplinesService {
 
   async listDailyDevotionals(query: ListDailyDevotionalsQueryDto, actor: JwtPayload) {
     const servantScope = await getServantAccessWhere(this.prisma, actor);
+    const scopedServantId = await this.resolvePersonalServantFilter(actor, query.servantId, 'devocional diario');
 
     const queryWhere: Prisma.DailyDevotionalWhereInput = {
-      servantId: query.servantId,
+      servantId: scopedServantId,
       status: query.status,
       registeredByUserId: query.responsibleUserId,
       devotionalDate:
@@ -135,14 +138,15 @@ export class SpiritualDisciplinesService {
   }
 
   async registerMonthlyFasting(dto: RegisterMonthlyFastingDto, actor: JwtPayload) {
-    await assertServantAccess(this.prisma, actor, dto.servantId);
+    const servantId = await this.resolvePersonalServantTarget(actor, dto.servantId, 'jejum mensal');
+    await assertServantAccess(this.prisma, actor, servantId);
     const referenceMonth = parseReferenceMonth(dto.referenceMonth);
     const status = dto.status ?? MonthlyFastingStatus.COMPLETED;
 
     const record = await this.prisma.monthlyFasting.upsert({
       where: {
         servantId_referenceMonth: {
-          servantId: dto.servantId,
+          servantId,
           referenceMonth,
         },
       },
@@ -158,7 +162,7 @@ export class SpiritualDisciplinesService {
         registeredByUserId: actor.sub,
       },
       create: {
-        servantId: dto.servantId,
+        servantId,
         referenceMonth,
         status,
         completedAt:
@@ -182,7 +186,7 @@ export class SpiritualDisciplinesService {
       entityId: record.id,
       userId: actor.sub,
       metadata: {
-        servantId: dto.servantId,
+        servantId,
         referenceMonth: referenceMonth.toISOString(),
         status,
       },
@@ -190,7 +194,7 @@ export class SpiritualDisciplinesService {
 
     if (status === MonthlyFastingStatus.COMPLETED) {
       await this.rewardsService.grantReward({
-        servantId: dto.servantId,
+        servantId,
         source: RewardSource.FASTING_MONTHLY,
         points: 10,
         title: 'Jejum mensal',
@@ -205,6 +209,7 @@ export class SpiritualDisciplinesService {
 
   async listMonthlyFastings(query: ListMonthlyFastingsQueryDto, actor: JwtPayload) {
     const servantScope = await getServantAccessWhere(this.prisma, actor);
+    const scopedServantId = await this.resolvePersonalServantFilter(actor, query.servantId, 'jejum mensal');
 
     const rangeStart =
       query.year && query.month
@@ -221,7 +226,7 @@ export class SpiritualDisciplinesService {
           : undefined;
 
     const queryWhere: Prisma.MonthlyFastingWhereInput = {
-      servantId: query.servantId,
+      servantId: scopedServantId,
       status: query.status,
       registeredByUserId: query.responsibleUserId,
       referenceMonth:
@@ -252,5 +257,55 @@ export class SpiritualDisciplinesService {
       },
       orderBy: [{ referenceMonth: 'desc' }, { createdAt: 'desc' }],
     });
+  }
+
+  private async resolvePersonalServantTarget(
+    actor: JwtPayload,
+    requestedServantId: string | undefined,
+    disciplineName: string,
+  ) {
+    if (actor.role === Role.COORDENADOR || actor.role === Role.SERVO) {
+      const personalServantId = await this.requirePersonalServant(actor, disciplineName);
+      if (requestedServantId && requestedServantId !== personalServantId) {
+        throw new ForbiddenException(
+          `Para ${disciplineName}, ${actor.role} so pode registrar o proprio compromisso pessoal.`,
+        );
+      }
+      return personalServantId;
+    }
+
+    if (!requestedServantId) {
+      throw new BadRequestException('servantId is required for this profile');
+    }
+
+    return requestedServantId;
+  }
+
+  private async resolvePersonalServantFilter(
+    actor: JwtPayload,
+    requestedServantId: string | undefined,
+    disciplineName: string,
+  ) {
+    if (actor.role === Role.COORDENADOR || actor.role === Role.SERVO) {
+      const personalServantId = await this.requirePersonalServant(actor, disciplineName);
+      if (requestedServantId && requestedServantId !== personalServantId) {
+        throw new ForbiddenException(
+          `Para ${disciplineName}, ${actor.role} so pode consultar o proprio compromisso pessoal.`,
+        );
+      }
+      return personalServantId;
+    }
+
+    return requestedServantId;
+  }
+
+  private async requirePersonalServant(actor: JwtPayload, disciplineName: string) {
+    const servantId = await resolveServantSelfScope(this.prisma, actor);
+    if (!servantId) {
+      throw new ForbiddenException(
+        `Usuario ${actor.role} precisa estar vinculado a um cadastro de servo para registrar ${disciplineName}.`,
+      );
+    }
+    return servantId;
   }
 }

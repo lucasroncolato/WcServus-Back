@@ -3,9 +3,13 @@ import { MonthlyFastingStatus } from '@prisma/client';
 import { IsDateString, IsEnum, IsOptional, IsString, Matches } from 'class-validator';
 
 export class RegisterMonthlyFastingDto {
-  @ApiProperty()
+  @ApiPropertyOptional({
+    description:
+      'Obrigatorio para perfis administrativos. Para COORDENADOR/SERVO o backend usa sempre o proprio cadastro pessoal.',
+  })
+  @IsOptional()
   @IsString()
-  servantId: string;
+  servantId?: string;
 
   @ApiProperty({ description: 'Mes de referencia no formato YYYY-MM.', example: '2026-03' })
   @Matches(/^\d{4}-\d{2}$/)

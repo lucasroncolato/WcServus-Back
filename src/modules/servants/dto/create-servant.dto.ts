@@ -28,12 +28,22 @@ export class CreateServantDto {
   @IsDateString()
   birthDate?: string;
 
-  @ApiPropertyOptional({ enum: ServantActiveStatusDto, default: ServantActiveStatusDto.ACTIVE })
+  @ApiPropertyOptional({
+    enum: ServantActiveStatusDto,
+    default: ServantActiveStatusDto.ACTIVE,
+    deprecated: true,
+    description: 'Campo legado. O backend decide o status conforme regra de aprovacao.',
+  })
   @IsOptional()
   @IsEnum(ServantActiveStatusDto)
   status?: ServantActiveStatusDto;
 
-  @ApiPropertyOptional({ enum: TrainingStatus, default: TrainingStatus.PENDING })
+  @ApiPropertyOptional({
+    enum: TrainingStatus,
+    default: TrainingStatus.PENDING,
+    deprecated: true,
+    description: 'Campo legado. Novo servo sempre inicia com treinamento pendente.',
+  })
   @IsOptional()
   @IsEnum(TrainingStatus)
   trainingStatus?: TrainingStatus;

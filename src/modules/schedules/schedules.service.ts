@@ -15,6 +15,7 @@ import {
   Shift,
   ServantApprovalStatus,
   ServantStatus,
+  TeamStatus,
   TalentStage,
   TrainingStatus,
   WorshipServiceStatus,
@@ -44,6 +45,7 @@ import { GenerateServicesScheduleDto } from './dto/generate-services-schedule.dt
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
 import { ListEligibleScheduleServantsQueryDto } from './dto/list-eligible-schedule-servants-query.dto';
+import { ListScheduleMobileContextQueryDto } from './dto/list-schedule-mobile-context-query.dto';
 import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
@@ -283,6 +285,85 @@ export class SchedulesService {
     return query.includeReasons
       ? evaluated
       : evaluated.filter((item) => item.eligible);
+  }
+
+  async mobileContext(query: ListScheduleMobileContextQueryDto, actor: JwtPayload) {
+    const daysAhead = query.daysAhead ?? 30;
+    const sectorId = query.ministryId ?? query.sectorId;
+
+    const allowedSectorIds = await this.resolveAllowedSectorIds(
+      actor,
+      sectorId ? [sectorId] : undefined,
+    );
+
+    const [ministries, teams, services] = await Promise.all([
+      this.prisma.sector.findMany({
+        where: { id: { in: allowedSectorIds } },
+        select: { id: true, name: true },
+        orderBy: [{ name: 'asc' }],
+      }),
+      this.prisma.team.findMany({
+        where: { sectorId: { in: allowedSectorIds }, status: TeamStatus.ACTIVE },
+        select: { id: true, name: true, sectorId: true },
+        orderBy: [{ name: 'asc' }],
+      }),
+      this.prisma.worshipService.findMany({
+        where: {
+          serviceDate: {
+            gte: new Date(),
+            lte: new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000),
+          },
+          status: { in: [WorshipServiceStatus.PLANEJADO, WorshipServiceStatus.CONFIRMADO] },
+        },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          serviceDate: true,
+          startTime: true,
+          status: true,
+        },
+        orderBy: [{ serviceDate: 'asc' }, { startTime: 'asc' }],
+      }),
+    ]);
+
+    const suggestedMinistryId = sectorId ?? ministries[0]?.id;
+
+    const eligibleServants =
+      query.serviceId && suggestedMinistryId
+        ? await this.listEligibleServants(
+            {
+              serviceId: query.serviceId,
+              ministryId: suggestedMinistryId,
+              includeReasons: query.includeIneligibilityReasons ?? true,
+            },
+            actor,
+          )
+        : [];
+
+    return {
+      filters: {
+        daysAhead,
+        ministryId: suggestedMinistryId ?? null,
+        serviceId: query.serviceId ?? null,
+      },
+      ministries: ministries.map((ministry) => ({
+        id: ministry.id,
+        ministryId: ministry.id,
+        name: ministry.name,
+        ministryName: ministry.name,
+      })),
+      teams: teams.map((team) => ({
+        ...team,
+        ministryId: team.sectorId,
+      })),
+      services,
+      servants: eligibleServants,
+      shifts: Object.values(Shift),
+      notes: {
+        eligibleServantsRequires: ['serviceId', 'ministryId'],
+      },
+    };
   }
 
   async create(dto: CreateScheduleDto, actor: JwtPayload) {

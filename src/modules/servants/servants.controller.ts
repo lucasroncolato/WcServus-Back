@@ -33,6 +33,12 @@ export class ServantsController {
     return this.servantsService.findEligible(query.userId, user);
   }
 
+  @Get('new-form')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  getCreateFormMetadata(@CurrentUser() user: JwtPayload) {
+    return this.servantsService.getCreateFormMetadata(user);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.servantsService.findOne(id, user);

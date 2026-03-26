@@ -22,6 +22,7 @@ import { GenerateServicesScheduleDto } from './dto/generate-services-schedule.dt
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
 import { ListEligibleScheduleServantsQueryDto } from './dto/list-eligible-schedule-servants-query.dto';
+import { ListScheduleMobileContextQueryDto } from './dto/list-schedule-mobile-context-query.dto';
 import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
@@ -43,6 +44,12 @@ export class SchedulesController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   eligibleServants(@Query() query: ListEligibleScheduleServantsQueryDto, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.listEligibleServants(query, user);
+  }
+
+  @Get('mobile-context')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  mobileContext(@Query() query: ListScheduleMobileContextQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.mobileContext(query, user);
   }
 
   @Get(':id/history')

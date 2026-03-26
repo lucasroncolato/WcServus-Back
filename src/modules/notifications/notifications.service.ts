@@ -1,6 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
+import {
+  getAttendanceAccessWhere,
+  getPastoralVisitAccessWhere,
+  getScheduleAccessWhere,
+  getServantAccessWhere,
+} from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 
@@ -24,6 +31,23 @@ type NotificationRecord = {
   createdAt: Date;
 };
 
+type NotificationOriginType =
+  | 'SCHEDULE'
+  | 'ATTENDANCE'
+  | 'PASTORAL_VISIT'
+  | 'TALENT'
+  | 'SERVANT'
+  | 'WORSHIP_SERVICE'
+  | 'SUPPORT_REQUEST'
+  | 'SERVANT_REWARD'
+  | 'SELF_ROUTE'
+  | 'UNKNOWN';
+
+type NotificationOrigin = {
+  type: NotificationOriginType;
+  id: string | null;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -31,7 +55,8 @@ export class NotificationsService {
     private readonly whatsappService: WhatsappService,
   ) {}
 
-  async findAll(userId: string, query: ListNotificationsQueryDto) {
+  async findAll(actor: JwtPayload, query: ListNotificationsQueryDto) {
+    const userId = actor.sub;
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const isReadFilter =
@@ -59,7 +84,7 @@ export class NotificationsService {
     ]);
 
     return {
-      data: items.map((item) => this.toApiNotification(item)),
+      data: await Promise.all(items.map((item) => this.toApiNotification(item, actor))),
       page,
       limit,
       total,
@@ -90,7 +115,7 @@ export class NotificationsService {
     if (current.readAt) {
       return {
         message: 'Notification already marked as read',
-        data: this.toApiNotification(current),
+        data: await this.toApiNotification(current),
       };
     }
 
@@ -111,7 +136,7 @@ export class NotificationsService {
 
     return {
       message: 'Notification marked as read',
-      data: this.toApiNotification(updated),
+      data: await this.toApiNotification(updated),
     };
   }
 
@@ -219,7 +244,12 @@ export class NotificationsService {
     return output;
   }
 
-  private toApiNotification(notification: NotificationRecord) {
+  private async toApiNotification(notification: NotificationRecord, actor?: JwtPayload) {
+    const origin = this.resolveOrigin(notification.metadata, notification.link);
+    const canOpenOrigin = actor
+      ? await this.canOpenOriginForActor(origin, actor)
+      : false;
+
     return {
       id: notification.id,
       type: notification.type,
@@ -229,7 +259,167 @@ export class NotificationsService {
       createdAt: notification.createdAt,
       linkTo: notification.link,
       relatedId: this.resolveRelatedId(notification.metadata),
+      originType: origin.type,
+      originId: origin.id,
+      canOpenOrigin,
     };
+  }
+
+  private resolveOrigin(metadata: Prisma.JsonValue | null, link: string | null): NotificationOrigin {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      if (link && this.isSelfRoute(link)) {
+        return { type: 'SELF_ROUTE', id: null };
+      }
+      return { type: 'UNKNOWN', id: null };
+    }
+
+    const dictionary = metadata as Record<string, unknown>;
+    const map: Array<{ key: string; type: NotificationOriginType }> = [
+      { key: 'scheduleId', type: 'SCHEDULE' },
+      { key: 'attendanceId', type: 'ATTENDANCE' },
+      { key: 'pastoralVisitId', type: 'PASTORAL_VISIT' },
+      { key: 'talentId', type: 'TALENT' },
+      { key: 'servantId', type: 'SERVANT' },
+      { key: 'serviceId', type: 'WORSHIP_SERVICE' },
+      { key: 'supportRequestId', type: 'SUPPORT_REQUEST' },
+      { key: 'rewardId', type: 'SERVANT_REWARD' },
+    ];
+
+    for (const candidate of map) {
+      const value = dictionary[candidate.key];
+      if (typeof value === 'string' && value.trim() !== '') {
+        return { type: candidate.type, id: value };
+      }
+    }
+
+    if (link && this.isSelfRoute(link)) {
+      return { type: 'SELF_ROUTE', id: null };
+    }
+
+    return { type: 'UNKNOWN', id: null };
+  }
+
+  private async canOpenOriginForActor(origin: NotificationOrigin, actor: JwtPayload) {
+    if (origin.type === 'UNKNOWN') {
+      return false;
+    }
+
+    if (origin.type === 'SELF_ROUTE') {
+      return true;
+    }
+
+    if (!origin.id) {
+      return false;
+    }
+
+    if (origin.type === 'SCHEDULE') {
+      const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
+      const found = await this.prisma.schedule.findFirst({
+        where: scopeWhere ? { AND: [{ id: origin.id }, scopeWhere] } : { id: origin.id },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'ATTENDANCE') {
+      const scopeWhere = await getAttendanceAccessWhere(this.prisma, actor);
+      const found = await this.prisma.attendance.findFirst({
+        where: scopeWhere ? { AND: [{ id: origin.id }, scopeWhere] } : { id: origin.id },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'PASTORAL_VISIT') {
+      const scopeWhere = await getPastoralVisitAccessWhere(this.prisma, actor);
+      const found = await this.prisma.pastoralVisit.findFirst({
+        where: scopeWhere ? { AND: [{ id: origin.id }, scopeWhere] } : { id: origin.id },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'SERVANT') {
+      const scopeWhere = await getServantAccessWhere(this.prisma, actor);
+      const found = await this.prisma.servant.findFirst({
+        where: scopeWhere ? { AND: [{ id: origin.id }, scopeWhere] } : { id: origin.id },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'TALENT') {
+      const scopeWhere = await getServantAccessWhere(this.prisma, actor);
+      const found = await this.prisma.talent.findFirst({
+        where: scopeWhere
+          ? {
+              AND: [
+                { id: origin.id },
+                { servant: scopeWhere },
+              ],
+            }
+          : { id: origin.id },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'SERVANT_REWARD') {
+      const scopeWhere = await getServantAccessWhere(this.prisma, actor);
+      const found = await this.prisma.servantReward.findFirst({
+        where: scopeWhere
+          ? {
+              AND: [
+                { id: origin.id },
+                { servant: scopeWhere },
+              ],
+            }
+          : { id: origin.id },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'WORSHIP_SERVICE') {
+      if (
+        actor.role === Role.SUPER_ADMIN ||
+        actor.role === Role.ADMIN ||
+        actor.role === Role.PASTOR ||
+        actor.role === Role.COORDENADOR
+      ) {
+        const found = await this.prisma.worshipService.findUnique({
+          where: { id: origin.id },
+          select: { id: true },
+        });
+        return Boolean(found);
+      }
+
+      const found = await this.prisma.schedule.findFirst({
+        where: {
+          serviceId: origin.id,
+          servantId: actor.servantId ?? '__no_servant__',
+        },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    if (origin.type === 'SUPPORT_REQUEST') {
+      const found = await this.prisma.supportRequest.findFirst({
+        where:
+          actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN
+            ? { id: origin.id }
+            : { id: origin.id, authorUserId: actor.sub },
+        select: { id: true },
+      });
+      return Boolean(found);
+    }
+
+    return false;
+  }
+
+  private isSelfRoute(link: string) {
+    return link.startsWith('/me') || link.startsWith('/notifications') || link.startsWith('/auth/me');
   }
 
   private resolveRelatedId(metadata: Prisma.JsonValue | null): string | null {

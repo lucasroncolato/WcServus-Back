@@ -3,9 +3,13 @@ import { DevotionalStatus } from '@prisma/client';
 import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class RegisterDailyDevotionalDto {
-  @ApiProperty()
+  @ApiPropertyOptional({
+    description:
+      'Obrigatorio para perfis administrativos. Para COORDENADOR/SERVO o backend usa sempre o proprio cadastro pessoal.',
+  })
+  @IsOptional()
   @IsString()
-  servantId: string;
+  servantId?: string;
 
   @ApiProperty({ example: '2026-03-26' })
   @IsDateString()

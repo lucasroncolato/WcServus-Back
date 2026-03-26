@@ -13,7 +13,7 @@ export class NotificationsController {
 
   @Get()
   findAll(@CurrentUser() user: JwtPayload, @Query() query: ListNotificationsQueryDto) {
-    return this.notificationsService.findAll(user.sub, query);
+    return this.notificationsService.findAll(user, query);
   }
 
   @Patch(':id/read')

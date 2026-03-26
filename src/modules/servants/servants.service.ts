@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import {
   AuditAction,
+  Aptitude,
+  Gender,
   Prisma,
   Role,
   ServantApprovalStatus,
@@ -146,6 +148,109 @@ export class ServantsService {
 
     return {
       data: servants.map((servant) => this.toApiServant(servant)),
+    };
+  }
+
+  async getCreateFormMetadata(actor: JwtPayload) {
+    const allowedSectorIds =
+      actor.role === Role.COORDENADOR
+        ? await resolveScopedSectorIds(this.prisma, actor)
+        : undefined;
+
+    const whereSectors: Prisma.SectorWhereInput | undefined = allowedSectorIds
+      ? { id: { in: allowedSectorIds } }
+      : undefined;
+
+    const ministries = await this.prisma.sector.findMany({
+      where: whereSectors,
+      select: {
+        id: true,
+        name: true,
+      },
+      orderBy: [{ name: 'asc' }],
+    });
+
+    const teams = await this.prisma.team.findMany({
+      where: allowedSectorIds ? { sectorId: { in: allowedSectorIds } } : undefined,
+      select: {
+        id: true,
+        name: true,
+        sectorId: true,
+      },
+      orderBy: [{ name: 'asc' }],
+    });
+
+    return {
+      contractVersion: '2026-03-26',
+      summary: {
+        required: ['name', 'user.email', 'user.password'],
+        optional: [
+          'phone',
+          'gender',
+          'birthDate',
+          'aptitude',
+          'ministryIds',
+          'mainMinistryId',
+          'teamId',
+          'notes',
+          'joinedAt',
+          'user.name',
+          'user.phone',
+        ],
+      },
+      sections: [
+        {
+          key: 'basic',
+          title: 'Dados basicos',
+          fields: ['name', 'phone', 'gender', 'birthDate', 'aptitude'],
+        },
+        {
+          key: 'ministry',
+          title: 'Ministerio e equipe',
+          fields: ['mainMinistryId', 'ministryIds', 'teamId'],
+        },
+        {
+          key: 'account',
+          title: 'Conta de acesso',
+          fields: ['user.email', 'user.password', 'user.name', 'user.phone'],
+        },
+      ],
+      options: {
+        genders: Object.values(Gender),
+        aptitudes: Object.values(Aptitude),
+        ministries: ministries.map((ministry) => ({
+          id: ministry.id,
+          ministryId: ministry.id,
+          name: ministry.name,
+          ministryName: ministry.name,
+        })),
+        teams,
+      },
+      defaults: {
+        ministryIds: actor.role === Role.COORDENADOR && ministries[0] ? [ministries[0].id] : [],
+        user: {
+          role: Role.SERVO,
+        },
+      },
+      payloadTemplate: {
+        name: '',
+        phone: null,
+        gender: null,
+        birthDate: null,
+        aptitude: null,
+        mainMinistryId: null,
+        ministryIds: [],
+        teamId: null,
+        notes: null,
+        joinedAt: null,
+        user: {
+          email: '',
+          password: '',
+          name: null,
+          phone: null,
+          role: Role.SERVO,
+        },
+      },
     };
   }
 

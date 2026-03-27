@@ -15,6 +15,12 @@ export class GenerateServicesScheduleDto {
   @IsString({ each: true })
   sectorIds?: string[];
 
+  @ApiPropertyOptional({ type: [String], example: ['clx_ministry_1', 'clx_ministry_2'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  ministryIds?: string[];
+
   @ApiPropertyOptional({ type: [String], example: ['team_1', 'team_2'] })
   @IsOptional()
   @IsArray()

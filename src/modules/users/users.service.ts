@@ -758,7 +758,7 @@ export class UsersService {
     sectorIds: string[];
     teamIds: string[];
   }) {
-    const { scopeType, targetRole, sectorIds, teamIds } = input;
+    const { scopeType, sectorIds, teamIds } = input;
 
     if (scopeType === UserScope.SETOR && sectorIds.length === 0) {
       throw new BadRequestException('scopeType=SETOR requires at least one sectorId');

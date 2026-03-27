@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Role, ServantStatus, TrainingStatus, UserStatus } from '@prisma/client';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
@@ -20,6 +21,9 @@ describe('ServantsService - training completion flow', () => {
   const auditService = {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
+  const configService = {
+    get: jest.fn(),
+  } as unknown as ConfigService;
 
   const notificationsService = {
     create: jest.fn().mockResolvedValue(undefined),
@@ -43,7 +47,7 @@ describe('ServantsService - training completion flow', () => {
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
     (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset().mockResolvedValue(undefined);
-    service = new ServantsService(prisma, auditService, notificationsService);
+    service = new ServantsService(prisma, configService, auditService, notificationsService);
   });
 
   it('promotes RECRUTAMENTO to ATIVO when training is completed', async () => {
@@ -51,6 +55,7 @@ describe('ServantsService - training completion flow', () => {
       id: 'servant-1',
       status: ServantStatus.RECRUTAMENTO,
       trainingStatus: TrainingStatus.PENDING,
+      approvalStatus: 'APPROVED',
     });
 
     const tx = {
@@ -104,6 +109,7 @@ describe('ServantsService - training completion flow', () => {
       id: 'servant-2',
       status: ServantStatus.AFASTADO,
       trainingStatus: TrainingStatus.PENDING,
+      approvalStatus: 'APPROVED',
     });
 
     const tx = {
@@ -171,6 +177,9 @@ describe('ServantsService - profile update with training completion', () => {
   const auditService = {
     log: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
+  const configService = {
+    get: jest.fn(),
+  } as unknown as ConfigService;
 
   const notificationsService = {
     create: jest.fn().mockResolvedValue(undefined),
@@ -196,7 +205,7 @@ describe('ServantsService - profile update with training completion', () => {
     prisma.servantStatusHistory.create.mockReset();
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
-    service = new ServantsService(prisma, auditService, notificationsService);
+    service = new ServantsService(prisma, configService, auditService, notificationsService);
   });
 
   it('auto-promotes to ATIVO when update receives trainingStatus=COMPLETED and no explicit status', async () => {

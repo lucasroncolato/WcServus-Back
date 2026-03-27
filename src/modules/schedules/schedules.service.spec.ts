@@ -1,9 +1,10 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditAction, Role, ScheduleStatus } from '@prisma/client';
 import { SchedulesService } from './schedules.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
+import { resolveScopedSectorIds } from 'src/common/auth/access-scope';
 
 jest.mock('src/common/auth/access-scope', () => ({
   assertSectorAccess: jest.fn(),
@@ -27,6 +28,9 @@ describe('SchedulesService - duplicate', () => {
     },
     servant: {
       findUnique: jest.fn(),
+    },
+    servantAvailability: {
+      findFirst: jest.fn(),
     },
   } as any;
 
@@ -56,6 +60,7 @@ describe('SchedulesService - duplicate', () => {
     prisma.schedule.create.mockReset();
     prisma.worshipService.findUnique.mockReset();
     prisma.servant.findUnique.mockReset();
+    prisma.servantAvailability.findFirst.mockReset();
     prisma.sector.findMany.mockReset();
     (auditService.log as jest.Mock).mockReset();
     (auditService.log as jest.Mock).mockResolvedValue(undefined);
@@ -73,15 +78,22 @@ describe('SchedulesService - duplicate', () => {
       sectorId: 'sector-1',
       service: { id: 'service-a' },
     });
-    prisma.worshipService.findUnique.mockResolvedValue({ id: 'service-b' });
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-b',
+      serviceDate: new Date('2026-03-23T19:00:00.000Z'),
+      startTime: '19:00',
+    });
     prisma.servant.findUnique.mockResolvedValue({
       id: 'servant-1',
       status: 'ATIVO',
       trainingStatus: 'COMPLETED',
+      approvalStatus: 'APPROVED',
       mainSectorId: 'sector-1',
       servantSectors: [],
+      talents: [],
     });
     prisma.schedule.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    prisma.servantAvailability.findFirst.mockResolvedValue(null);
     prisma.schedule.create.mockResolvedValue({
       id: 'schedule-2',
       status: ScheduleStatus.ASSIGNED,
@@ -130,13 +142,20 @@ describe('SchedulesService - duplicate', () => {
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue({ id: 'existing-schedule' });
-    prisma.worshipService.findUnique.mockResolvedValue({ id: 'service-b' });
+    prisma.servantAvailability.findFirst.mockResolvedValue(null);
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-b',
+      serviceDate: new Date('2026-03-23T19:00:00.000Z'),
+      startTime: '19:00',
+    });
     prisma.servant.findUnique.mockResolvedValue({
       id: 'servant-1',
       status: 'ATIVO',
       trainingStatus: 'COMPLETED',
+      approvalStatus: 'APPROVED',
       mainSectorId: 'sector-1',
       servantSectors: [],
+      talents: [],
     });
 
     await expect(
@@ -292,5 +311,159 @@ describe('SchedulesService - history', () => {
     const result = await service.history('schedule-1', actor);
 
     expect(result.filter((item) => item.type === 'SWAPPED')).toHaveLength(2);
+  });
+});
+
+describe('SchedulesService - workspace context', () => {
+  const prisma = {
+    worshipService: {
+      findMany: jest.fn(),
+    },
+    scheduleSlot: {
+      findMany: jest.fn(),
+    },
+    schedule: {
+      findMany: jest.fn(),
+    },
+    sector: {
+      findMany: jest.fn(),
+    },
+  } as any;
+
+  const auditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+    createMany: jest.fn().mockResolvedValue(undefined),
+    notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
+
+  let service: SchedulesService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.worshipService.findMany.mockReset();
+    prisma.scheduleSlot.findMany.mockReset();
+    prisma.schedule.findMany.mockReset();
+    prisma.sector.findMany.mockReset();
+    prisma.sector.findMany.mockResolvedValue([]);
+    (resolveScopedSectorIds as jest.Mock).mockReset();
+    service = new SchedulesService(prisma, auditService, notificationsService);
+  });
+
+  it('infers coordinator ministry automatically when only one scope is available', async () => {
+    const actor: JwtPayload = {
+      sub: 'coord-1',
+      email: 'coord@wcservus.com',
+      role: Role.COORDENADOR,
+      servantId: null,
+    };
+
+    (resolveScopedSectorIds as jest.Mock).mockResolvedValue(['sector-1']);
+    prisma.worshipService.findMany.mockResolvedValue([]);
+    prisma.scheduleSlot.findMany.mockResolvedValue([]);
+    prisma.schedule.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.servicesOperationalStatus(
+        { startDate: '2026-03-01', endDate: '2026-03-31' },
+        actor,
+      ),
+    ).resolves.toEqual([]);
+
+    expect(resolveScopedSectorIds).toHaveBeenCalled();
+    expect(prisma.worshipService.findMany).toHaveBeenCalled();
+  });
+
+  it('returns 400 for admin when ministry context is missing', async () => {
+    const actor: JwtPayload = {
+      sub: 'admin-1',
+      email: 'admin@wcservus.com',
+      role: Role.ADMIN,
+      servantId: null,
+    };
+
+    await expect(
+      service.servicesOperationalStatus(
+        { startDate: '2026-03-01', endDate: '2026-03-31' },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('returns 400 for coordinator with multiple ministries and no explicit ministryId', async () => {
+    const actor: JwtPayload = {
+      sub: 'coord-multi',
+      email: 'coord-multi@wcservus.com',
+      role: Role.COORDENADOR,
+      servantId: null,
+    };
+
+    (resolveScopedSectorIds as jest.Mock).mockResolvedValue(['sector-1', 'sector-2']);
+
+    await expect(
+      service.servicesOperationalStatus(
+        { startDate: '2026-03-01', endDate: '2026-03-31' },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('returns 403 for coordinator when requested ministry is out of scope', async () => {
+    const actor: JwtPayload = {
+      sub: 'coord-scope',
+      email: 'coord-scope@wcservus.com',
+      role: Role.COORDENADOR,
+      servantId: null,
+    };
+
+    (resolveScopedSectorIds as jest.Mock).mockResolvedValue(['sector-1']);
+
+    await expect(
+      service.servicesOperationalStatus(
+        { startDate: '2026-03-01', endDate: '2026-03-31', ministryId: 'sector-2' },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('returns 403 for coordinator without configured ministry scope', async () => {
+    const actor: JwtPayload = {
+      sub: 'coord-empty',
+      email: 'coord-empty@wcservus.com',
+      role: Role.COORDENADOR,
+      servantId: null,
+    };
+
+    (resolveScopedSectorIds as jest.Mock).mockResolvedValue([]);
+
+    await expect(
+      service.servicesOperationalStatus(
+        { startDate: '2026-03-01', endDate: '2026-03-31' },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows admin with explicit ministryId', async () => {
+    const actor: JwtPayload = {
+      sub: 'admin-valid',
+      email: 'admin-valid@wcservus.com',
+      role: Role.ADMIN,
+      servantId: null,
+    };
+
+    prisma.worshipService.findMany.mockResolvedValue([]);
+    prisma.scheduleSlot.findMany.mockResolvedValue([]);
+    prisma.schedule.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.servicesOperationalStatus(
+        { startDate: '2026-03-01', endDate: '2026-03-31', ministryId: 'sector-1' },
+        actor,
+      ),
+    ).resolves.toEqual([]);
   });
 });

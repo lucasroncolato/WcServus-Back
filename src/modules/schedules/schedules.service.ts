@@ -7,10 +7,14 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
+  Aptitude,
   AttendanceStatus,
   AuditAction,
   Prisma,
   Role,
+  ScheduleResponseStatus,
+  ScheduleSlotChangeType,
+  ScheduleSlotStatus,
   ScheduleStatus,
   Shift,
   ServantApprovalStatus,
@@ -27,7 +31,6 @@ import {
   resolvePlanningWindow,
 } from 'src/common/utils/planning-window.utils';
 import {
-  assertSectorAccess,
   assertServantAccess,
   getScheduleAccessWhere,
   resolveScopedSectorIds,
@@ -43,9 +46,15 @@ import { GeneratePeriodScheduleDto } from './dto/generate-period-schedule.dto';
 import { GenerateServiceScheduleDto } from './dto/generate-service-schedule.dto';
 import { GenerateServicesScheduleDto } from './dto/generate-services-schedule.dto';
 import { GenerateYearScheduleDto } from './dto/generate-year-schedule.dto';
+import { AutoGenerateScheduleSlotsDto } from './dto/auto-generate-schedule-slots.dto';
+import { AssignScheduleSlotDto } from './dto/assign-schedule-slot.dto';
+import { ContextualSwapScheduleSlotDto } from './dto/contextual-swap-schedule-slot.dto';
+import { ScheduleSlotSwapContextDto } from './dto/contextual-swap-schedule-slot.dto';
+import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { ListSchedulesQueryDto } from './dto/list-schedules-query.dto';
 import { ListEligibleScheduleServantsQueryDto } from './dto/list-eligible-schedule-servants-query.dto';
 import { ListScheduleMobileContextQueryDto } from './dto/list-schedule-mobile-context-query.dto';
+import { ListScheduleWorkspaceQueryDto } from './dto/list-schedule-workspace-query.dto';
 import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
@@ -109,6 +118,15 @@ const DEFAULT_GENERATION_WEIGHTS: GenerationWeights = {
   recentAbsences: 0.15,
   sectorAffinity: 0.05,
 };
+
+const WORKSPACE_CONTEXT_ERRORS = {
+  outOfScope: 'You do not have permission for this ministry',
+  coordinatorWithoutScope: 'Coordinator has no ministry scope configured',
+  coordinatorMustChoose:
+    'ministryId is required when coordinator has multiple ministries in scope',
+  adminMustChoose: 'ministryId is required for workspace queries',
+  roleWithoutWorkspacePermission: 'You do not have permission for workspace schedules',
+} as const;
 
 @Injectable()
 export class SchedulesService {
@@ -366,6 +384,458 @@ export class SchedulesService {
     };
   }
 
+  operationModes() {
+    return {
+      modes: [
+        {
+          key: 'PLAN_PERIOD',
+          title: 'Planejar periodo',
+          description: 'Visao consolidada com resumo operacional do periodo e status por culto.',
+        },
+        {
+          key: 'BUILD_SERVICE',
+          title: 'Montar culto',
+          description: 'Montagem manual por funcao/vaga, com elegibilidade explicita por servo.',
+        },
+        {
+          key: 'ADJUST_ASSIGNMENTS',
+          title: 'Ajustar escala',
+          description: 'Troca/substituicao/fill contextualizado em vaga especifica.',
+        },
+      ],
+    };
+  }
+
+  async periodSummary(query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    const statuses = await this.servicesOperationalStatus(query, actor);
+    const summary = {
+      totalServices: statuses.length,
+      withoutSchedule: 0,
+      pending: 0,
+      confirmed: 0,
+      conflict: 0,
+      swapped: 0,
+      incomplete: 0,
+      cancelled: 0,
+      missingSlots: 0,
+      needsSwap: 0,
+      alerts: [] as string[],
+    };
+
+    for (const item of statuses) {
+      if (item.operationalStatus === 'SEM_ESCALA') {
+        summary.withoutSchedule += 1;
+      }
+      if (item.operationalStatus === 'PENDENTE') {
+        summary.pending += 1;
+      }
+      if (item.operationalStatus === 'CONFIRMADA') {
+        summary.confirmed += 1;
+      }
+      if (item.operationalStatus === 'COM_CONFLITO') {
+        summary.conflict += 1;
+      }
+      if (item.operationalStatus === 'TROCADA') {
+        summary.swapped += 1;
+      }
+      if (item.operationalStatus === 'INCOMPLETA') {
+        summary.incomplete += 1;
+      }
+      if (item.operationalStatus === 'CANCELADA') {
+        summary.cancelled += 1;
+      }
+      summary.missingSlots += item.missingRequiredSlots;
+      if (item.needsSwap) {
+        summary.needsSwap += 1;
+      }
+      for (const alert of item.alerts) {
+        summary.alerts.push(`${item.service.title}: ${alert}`);
+      }
+    }
+
+    return summary;
+  }
+
+  async servicesOperationalStatus(query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    const { services, allowedSectorIds } = await this.resolveWorkspaceContext(query, actor);
+    if (!services.length) {
+      return [];
+    }
+
+    const [slots, schedules] = await Promise.all([
+      this.prisma.scheduleSlot.findMany({
+        where: {
+          serviceId: { in: services.map((service) => service.id) },
+          sectorId: { in: allowedSectorIds },
+        },
+      }),
+      this.prisma.schedule.findMany({
+        where: {
+          serviceId: { in: services.map((service) => service.id) },
+          sectorId: { in: allowedSectorIds },
+        },
+      }),
+    ]);
+
+    return services.map((service) => {
+      const serviceSlots = slots.filter((slot) => slot.serviceId === service.id);
+      const serviceSchedules = schedules.filter((schedule) => schedule.serviceId === service.id);
+      const evaluation = this.evaluateServiceOperationalStatus(
+        service.status,
+        serviceSlots,
+        serviceSchedules,
+      );
+
+      return {
+        service: {
+          id: service.id,
+          title: service.title,
+          type: service.type,
+          serviceDate: service.serviceDate,
+          startTime: service.startTime,
+          status: service.status,
+        },
+        operationalStatus: evaluation.operationalStatus,
+        missingRequiredSlots: evaluation.missingRequiredSlots,
+        pendingCount: evaluation.pendingCount,
+        conflictCount: evaluation.conflictCount,
+        needsSwap: evaluation.needsSwap,
+        alerts: evaluation.alerts,
+      };
+    });
+  }
+
+  async serviceBoard(serviceId: string, query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    const sectorId = await this.resolveWorkspaceSectorId(query, actor);
+
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: serviceId },
+      select: { id: true, title: true, type: true, serviceDate: true, startTime: true, status: true },
+    });
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+
+    const [slots, schedules] = await Promise.all([
+      this.prisma.scheduleSlot.findMany({
+        where: { serviceId, sectorId },
+        include: {
+          responsibility: { select: { id: true, title: true, functionName: true } },
+          assignedServant: { select: { id: true, name: true, status: true, trainingStatus: true } },
+        },
+        orderBy: [{ functionName: 'asc' }, { position: 'asc' }],
+      }),
+      this.prisma.schedule.findMany({
+        where: { serviceId, sectorId },
+        include: {
+          servant: { select: { id: true, name: true, status: true, trainingStatus: true } },
+        },
+        orderBy: [{ createdAt: 'asc' }],
+      }),
+    ]);
+
+    const evaluation = this.evaluateServiceOperationalStatus(service.status, slots, schedules);
+    const slotsView = await Promise.all(
+      slots.map(async (slot) => ({
+        id: slot.id,
+        functionName: slot.functionName,
+        slotLabel: slot.slotLabel,
+        position: slot.position,
+        required: slot.required,
+        requiredTraining: slot.requiredTraining,
+        blocked: slot.blocked,
+        blockedReason: slot.blockedReason,
+        status: slot.status,
+        assignedServant: slot.assignedServant
+          ? {
+              id: slot.assignedServant.id,
+              name: slot.assignedServant.name,
+            }
+          : null,
+        responsibility: slot.responsibility,
+        eligibleServants: await this.listSlotEligibility(serviceId, sectorId, slot),
+      })),
+    );
+
+    return {
+      service,
+      ministryId: sectorId,
+      operationalStatus: evaluation.operationalStatus,
+      summary: {
+        missingRequiredSlots: evaluation.missingRequiredSlots,
+        pendingCount: evaluation.pendingCount,
+        conflictCount: evaluation.conflictCount,
+        needsSwap: evaluation.needsSwap,
+        alerts: evaluation.alerts,
+      },
+      slots: slotsView,
+      legacyAssignments: schedules.map((schedule) => this.toApiSchedule(schedule)),
+    };
+  }
+
+  async createSlot(serviceId: string, dto: CreateScheduleSlotDto, actor: JwtPayload) {
+    const sectorId = dto.ministryId ?? dto.sectorId;
+    if (!sectorId) {
+      throw new BadRequestException('sectorId or ministryId is required');
+    }
+
+    await this.assertCanManageSector(actor, sectorId);
+    await this.ensureServiceExists(serviceId);
+    await this.ensureResponsibilityMatchesSector(dto.responsibilityId, sectorId);
+
+    const slot = await this.prisma.scheduleSlot.create({
+      data: {
+        serviceId,
+        sectorId,
+        responsibilityId: dto.responsibilityId,
+        functionName: dto.functionName.trim(),
+        slotLabel: dto.slotLabel,
+        position: dto.position ?? 1,
+        required: dto.required ?? true,
+        requiredTraining: dto.requiredTraining ?? true,
+        blocked: dto.blocked ?? false,
+        blockedReason: dto.blockedReason,
+        notes: dto.notes,
+      },
+      include: {
+        assignedServant: { select: { id: true, name: true } },
+        responsibility: { select: { id: true, title: true, functionName: true } },
+      },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.CREATE,
+      entity: 'ScheduleSlot',
+      entityId: slot.id,
+      userId: actor.sub,
+      metadata: {
+        serviceId,
+        sectorId,
+        functionName: slot.functionName,
+        position: slot.position,
+      },
+    });
+
+    return slot;
+  }
+
+  async assignSlot(slotId: string, dto: AssignScheduleSlotDto, actor: JwtPayload) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      include: { service: true },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+
+    await this.assertCanManageSector(actor, slot.sectorId);
+    const eligibility = await this.evaluateServantEligibilityForSlot(
+      slot.serviceId,
+      slot.sectorId,
+      dto.servantId,
+      slot,
+    );
+    if (!eligibility.eligible) {
+      throw new UnprocessableEntityException({
+        code: 'SERVANT_NOT_ELIGIBLE',
+        message: 'Servant is not eligible for this slot',
+        reasons: eligibility.reasons,
+      });
+    }
+
+    const previousServantId = slot.assignedServantId;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedSlot = await tx.scheduleSlot.update({
+        where: { id: slotId },
+        data: {
+          assignedServantId: dto.servantId,
+          assignedByUserId: actor.sub,
+          status: ScheduleSlotStatus.PENDING,
+          blocked: false,
+          blockedReason: null,
+        },
+      });
+
+      const schedule = await tx.schedule.upsert({
+        where: {
+          serviceId_servantId_sectorId: {
+            serviceId: slot.serviceId,
+            servantId: dto.servantId,
+            sectorId: slot.sectorId,
+          },
+        },
+        update: {
+          status: ScheduleStatus.ASSIGNED,
+          responseStatus: ScheduleResponseStatus.PENDING,
+          responseAt: null,
+          declineReason: null,
+          assignedByUserId: actor.sub,
+        },
+        create: {
+          serviceId: slot.serviceId,
+          servantId: dto.servantId,
+          sectorId: slot.sectorId,
+          assignedByUserId: actor.sub,
+          status: ScheduleStatus.ASSIGNED,
+          responseStatus: ScheduleResponseStatus.PENDING,
+        },
+      });
+
+      await tx.scheduleSlot.update({
+        where: { id: slotId },
+        data: { scheduleId: schedule.id },
+      });
+
+      await tx.scheduleSlotChange.create({
+        data: {
+          slotId,
+          changeType: ScheduleSlotChangeType.ASSIGNMENT,
+          fromServantId: previousServantId,
+          toServantId: dto.servantId,
+          reason: dto.reason,
+          performedByUserId: actor.sub,
+          metadata: {
+            serviceId: slot.serviceId,
+            sectorId: slot.sectorId,
+          },
+        },
+      });
+
+      if (previousServantId && previousServantId !== dto.servantId) {
+        const hasOtherSlots = await tx.scheduleSlot.count({
+          where: {
+            serviceId: slot.serviceId,
+            sectorId: slot.sectorId,
+            assignedServantId: previousServantId,
+            NOT: { id: slotId },
+          },
+        });
+        if (hasOtherSlots === 0) {
+          await tx.schedule.deleteMany({
+            where: {
+              serviceId: slot.serviceId,
+              sectorId: slot.sectorId,
+              servantId: previousServantId,
+            },
+          });
+        }
+      }
+
+      return updatedSlot;
+    });
+
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'ScheduleSlot',
+      entityId: slotId,
+      userId: actor.sub,
+      metadata: {
+        action: 'ASSIGN_SLOT',
+        servantId: dto.servantId,
+      },
+    });
+
+    return this.prisma.scheduleSlot.findUnique({
+      where: { id: updated.id },
+      include: {
+        assignedServant: { select: { id: true, name: true } },
+        responsibility: { select: { id: true, title: true, functionName: true } },
+      },
+    });
+  }
+
+  async contextualSwapSlot(slotId: string, dto: ContextualSwapScheduleSlotDto, actor: JwtPayload) {
+    return this.swapOrFillSlot(slotId, dto, actor, false);
+  }
+
+  async fillSlot(slotId: string, dto: ContextualSwapScheduleSlotDto, actor: JwtPayload) {
+    return this.swapOrFillSlot(slotId, dto, actor, true);
+  }
+
+  async autoGenerateExplained(dto: AutoGenerateScheduleSlotsDto, actor: JwtPayload) {
+    const sectorId = dto.ministryId ?? dto.sectorId;
+    if (!sectorId) {
+      throw new BadRequestException('sectorId or ministryId is required');
+    }
+    await this.assertCanManageSector(actor, sectorId);
+    await this.ensureServiceExists(dto.serviceId);
+
+    const slots = await this.prisma.scheduleSlot.findMany({
+      where: {
+        serviceId: dto.serviceId,
+        sectorId,
+        ...(dto.functionNames?.length ? { functionName: { in: dto.functionNames } } : {}),
+        ...(dto.responsibilityIds?.length
+          ? { responsibilityId: { in: dto.responsibilityIds } }
+          : {}),
+      },
+      orderBy: [{ functionName: 'asc' }, { position: 'asc' }],
+    });
+
+    const criteria = {
+      ministryId: sectorId,
+      serviceId: dto.serviceId,
+      rules: [
+        'status ativo',
+        'aprovacao ministerial',
+        'treinamento concluido quando exigido',
+        'disponibilidade por horario',
+        'sem conflito de escala no culto',
+        'compatibilidade basica por funcao/talento',
+      ],
+      source: 'AUTO_GENERATION_V2',
+    };
+
+    const results: Array<Record<string, unknown>> = [];
+    const usedServants = new Set<string>();
+    const targetSlots = slots.filter((slot) => slot.status === ScheduleSlotStatus.OPEN || !slot.assignedServantId);
+
+    for (const slot of targetSlots) {
+      const eligible = await this.listSlotEligibility(dto.serviceId, sectorId, slot);
+      const candidate = eligible.find(
+        (item) => item.eligible && !usedServants.has(item.servantId),
+      );
+
+      if (!candidate) {
+        results.push({
+          slotId: slot.id,
+          functionName: slot.functionName,
+          action: 'SKIPPED',
+          reason: 'NO_ELIGIBLE_SERVANT',
+        });
+        continue;
+      }
+
+      usedServants.add(candidate.servantId);
+      await this.assignSlot(slot.id, { servantId: candidate.servantId, reason: 'AUTO_GENERATED' }, actor);
+      await this.prisma.scheduleSlotChange.create({
+        data: {
+          slotId: slot.id,
+          changeType: ScheduleSlotChangeType.AUTO_GENERATED,
+          fromServantId: slot.assignedServantId,
+          toServantId: candidate.servantId,
+          reason: 'Automatic assignment with explained criteria',
+          performedByUserId: actor.sub,
+          metadata: { criteria },
+        },
+      });
+
+      results.push({
+        slotId: slot.id,
+        functionName: slot.functionName,
+        action: 'ASSIGNED',
+        servantId: candidate.servantId,
+        servantName: candidate.servantName,
+      });
+    }
+
+    return {
+      criteria,
+      processedSlots: targetSlots.length,
+      details: results,
+    };
+  }
+
   async create(dto: CreateScheduleDto, actor: JwtPayload) {
     const sectorId = dto.ministryId ?? dto.sectorId;
     if (!sectorId) {
@@ -500,13 +970,17 @@ export class SchedulesService {
   }
 
   async generateServices(dto: GenerateServicesScheduleDto, actor: JwtPayload) {
-    const serviceIds = [...new Set(dto.serviceIds ?? [])].filter(Boolean);
+    const serviceIds = [...new Set((dto.serviceIds ?? []).map((value) => value.trim()).filter(Boolean))];
+    const requestedSectorIds = [
+      ...new Set([...(dto.ministryIds ?? []), ...(dto.sectorIds ?? [])].map((value) => value.trim()).filter(Boolean)),
+    ];
+
     if (!serviceIds.length) {
       throw new BadRequestException('At least one serviceId must be provided');
     }
 
-    if (dto.sectorIds?.length) {
-      for (const sectorId of dto.sectorIds) {
+    if (requestedSectorIds.length) {
+      for (const sectorId of requestedSectorIds) {
         await this.assertCanManageSector(actor, sectorId);
       }
     }
@@ -554,7 +1028,7 @@ export class SchedulesService {
       mode: 'generate-services',
       year: startServiceDate.getUTCFullYear(),
       serviceIds,
-      sectorIds: dto.sectorIds,
+      sectorIds: requestedSectorIds.length ? requestedSectorIds : undefined,
       teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
@@ -2005,6 +2479,408 @@ export class SchedulesService {
     }
   }
 
+  private async resolveWorkspaceContext(query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    const start = query.startDate
+      ? parseSaoPauloDateStart(query.startDate)
+      : new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1, 0, 0, 0));
+    const end = query.endDate
+      ? parseSaoPauloDateEnd(query.endDate)
+      : new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 59, 59));
+
+    const scopedSectorId = await this.resolveWorkspaceSectorId(query, actor);
+    const allowedSectorIds = [scopedSectorId];
+
+    const services = await this.prisma.worshipService.findMany({
+      where: {
+        serviceDate: {
+          gte: start,
+          lte: end,
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        serviceDate: true,
+        startTime: true,
+        status: true,
+      },
+      orderBy: [{ serviceDate: 'asc' }, { startTime: 'asc' }],
+    });
+
+    return { start, end, allowedSectorIds, services };
+  }
+
+  private async resolveWorkspaceSectorId(query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    const requestedSectorId = (query.ministryId ?? query.sectorId ?? '').trim();
+    if (requestedSectorId) {
+      const allowedForRequested = await this.resolveAllowedSectorIds(actor, [requestedSectorId]);
+      if (!allowedForRequested.includes(requestedSectorId)) {
+        throw new ForbiddenException(WORKSPACE_CONTEXT_ERRORS.outOfScope);
+      }
+      return requestedSectorId;
+    }
+
+    const allowedSectorIds = await this.resolveAllowedSectorIds(actor);
+    if (actor.role === Role.COORDENADOR) {
+      if (allowedSectorIds.length === 1) {
+        return allowedSectorIds[0];
+      }
+      if (allowedSectorIds.length === 0) {
+        throw new ForbiddenException(WORKSPACE_CONTEXT_ERRORS.coordinatorWithoutScope);
+      }
+      throw new BadRequestException(WORKSPACE_CONTEXT_ERRORS.coordinatorMustChoose);
+    }
+
+    if (
+      actor.role === Role.ADMIN ||
+      actor.role === Role.SUPER_ADMIN ||
+      actor.role === Role.PASTOR
+    ) {
+      throw new BadRequestException(WORKSPACE_CONTEXT_ERRORS.adminMustChoose);
+    }
+
+    throw new ForbiddenException(WORKSPACE_CONTEXT_ERRORS.roleWithoutWorkspacePermission);
+  }
+
+  private evaluateServiceOperationalStatus(
+    serviceStatus: WorshipServiceStatus,
+    slots: Array<{
+      status: ScheduleSlotStatus;
+      required: boolean;
+      assignedServantId: string | null;
+      blocked: boolean;
+    }>,
+    schedules: Array<{
+      status: ScheduleStatus;
+      responseStatus: ScheduleResponseStatus;
+      servantId: string;
+      sectorId: string;
+    }>,
+  ) {
+    const alerts: string[] = [];
+
+    if (serviceStatus === WorshipServiceStatus.CANCELADO) {
+      return {
+        operationalStatus: 'CANCELADA',
+        missingRequiredSlots: 0,
+        pendingCount: 0,
+        conflictCount: 0,
+        needsSwap: false,
+        alerts,
+      };
+    }
+
+    const hasSlots = slots.length > 0;
+    const hasSchedules = schedules.length > 0;
+    if (!hasSlots && !hasSchedules) {
+      return {
+        operationalStatus: 'SEM_ESCALA',
+        missingRequiredSlots: 0,
+        pendingCount: 0,
+        conflictCount: 0,
+        needsSwap: false,
+        alerts,
+      };
+    }
+
+    const missingRequiredSlots = slots.filter(
+      (slot) => slot.required && !slot.assignedServantId && !slot.blocked,
+    ).length;
+
+    const slotPending = slots.filter((slot) => slot.status === ScheduleSlotStatus.PENDING).length;
+    const schedulePending = schedules.filter(
+      (schedule) => schedule.responseStatus === ScheduleResponseStatus.PENDING,
+    ).length;
+    const pendingCount = slotPending + schedulePending;
+
+    const slotConflicts = slots.filter((slot) => slot.status === ScheduleSlotStatus.CONFLICT).length;
+    const duplicateServants = new Set<string>();
+    const seenServants = new Set<string>();
+    for (const schedule of schedules) {
+      const key = schedule.servantId;
+      if (seenServants.has(key)) {
+        duplicateServants.add(key);
+      } else {
+        seenServants.add(key);
+      }
+    }
+    const conflictCount = slotConflicts + duplicateServants.size;
+    if (conflictCount > 0) {
+      alerts.push('Conflitos operacionais detectados para este culto.');
+    }
+
+    const hasSwap =
+      slots.some((slot) => slot.status === ScheduleSlotStatus.SWAPPED) ||
+      schedules.some((schedule) => schedule.status === ScheduleStatus.SWAPPED);
+    const hasDeclined = schedules.some(
+      (schedule) => schedule.responseStatus === ScheduleResponseStatus.DECLINED,
+    );
+    const needsSwap = hasDeclined || hasSwap;
+
+    if (missingRequiredSlots > 0) {
+      alerts.push(`Existem ${missingRequiredSlots} vaga(s) obrigatoria(s) sem preenchimento.`);
+    }
+    if (needsSwap) {
+      alerts.push('Existem trocas/substituicoes pendentes de ajuste.');
+    }
+
+    let operationalStatus = 'CONFIRMADA';
+    if (conflictCount > 0) {
+      operationalStatus = 'COM_CONFLITO';
+    } else if (missingRequiredSlots > 0) {
+      operationalStatus = 'INCOMPLETA';
+    } else if (needsSwap) {
+      operationalStatus = 'TROCADA';
+    } else if (pendingCount > 0) {
+      operationalStatus = 'PENDENTE';
+    }
+
+    return {
+      operationalStatus,
+      missingRequiredSlots,
+      pendingCount,
+      conflictCount,
+      needsSwap,
+      alerts,
+    };
+  }
+
+  private async listSlotEligibility(
+    serviceId: string,
+    sectorId: string,
+    slot: {
+      id: string;
+      functionName: string;
+      requiredTraining: boolean;
+      blocked: boolean;
+      blockedReason: string | null;
+      assignedServantId?: string | null;
+    },
+  ) {
+    const [service, servants] = await Promise.all([
+      this.prisma.worshipService.findUnique({
+        where: { id: serviceId },
+        select: { id: true, serviceDate: true, startTime: true },
+      }),
+      this.prisma.servant.findMany({
+        where: {
+          OR: [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }],
+        },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          trainingStatus: true,
+          approvalStatus: true,
+          aptitude: true,
+          mainSectorId: true,
+        },
+        orderBy: [{ name: 'asc' }],
+      }),
+    ]);
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+
+    const weekday = getSaoPauloWeekday(service.serviceDate);
+    const shift = this.resolveShiftFromStartTime(service.startTime);
+
+    const unavailability = await this.prisma.servantAvailability.findMany({
+      where: {
+        servantId: { in: servants.map((servant) => servant.id) },
+        dayOfWeek: weekday,
+        shift,
+        available: false,
+      },
+      select: { servantId: true },
+    });
+    const unavailableSet = new Set(unavailability.map((item) => item.servantId));
+
+    const schedules = await this.prisma.schedule.findMany({
+      where: { serviceId, servantId: { in: servants.map((servant) => servant.id) } },
+      select: { servantId: true, sectorId: true },
+    });
+    const conflictsByServant = new Map(schedules.map((schedule) => [schedule.servantId, schedule.sectorId]));
+    const requiredAptitude = this.mapFunctionToAptitude(slot.functionName);
+
+    return servants.map((servant) => {
+      const reasons: string[] = [];
+      if (slot.blocked) {
+        reasons.push(slot.blockedReason || 'SLOT_BLOCKED');
+      }
+      if (servant.status !== ServantStatus.ATIVO) {
+        reasons.push('INACTIVE');
+      }
+      if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
+        reasons.push('PENDING_APPROVAL');
+      }
+      if (slot.requiredTraining && servant.trainingStatus !== TrainingStatus.COMPLETED) {
+        reasons.push('WITHOUT_TRAINING');
+      }
+      if (unavailableSet.has(servant.id)) {
+        reasons.push('UNAVAILABLE_AT_SERVICE_TIME');
+      }
+      if (requiredAptitude && servant.aptitude && servant.aptitude !== requiredAptitude) {
+        reasons.push('OUTSIDE_FUNCTION_TALENT');
+      }
+      const conflictSector = conflictsByServant.get(servant.id);
+      if (conflictSector && conflictSector !== sectorId) {
+        reasons.push('ALREADY_SCHEDULED_OTHER_MINISTRY');
+      }
+      if (conflictSector && conflictSector === sectorId && slot.assignedServantId !== servant.id) {
+        reasons.push('ALREADY_SCHEDULED_SAME_MINISTRY');
+      }
+
+      return {
+        servantId: servant.id,
+        servantName: servant.name,
+        eligible: reasons.length === 0,
+        reasons,
+      };
+    });
+  }
+
+  private async evaluateServantEligibilityForSlot(
+    serviceId: string,
+    sectorId: string,
+    servantId: string,
+    slot: {
+      id: string;
+      functionName: string;
+      requiredTraining: boolean;
+      blocked: boolean;
+      blockedReason: string | null;
+      assignedServantId?: string | null;
+    },
+  ) {
+    const eligibilities = await this.listSlotEligibility(serviceId, sectorId, slot);
+    const item = eligibilities.find((entry) => entry.servantId === servantId);
+    if (!item) {
+      return {
+        eligible: false,
+        reasons: ['OUTSIDE_MINISTRY'],
+      };
+    }
+
+    return item;
+  }
+
+  private async ensureServiceExists(serviceId: string) {
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: serviceId },
+      select: { id: true },
+    });
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+  }
+
+  private async ensureResponsibilityMatchesSector(responsibilityId: string | undefined, sectorId: string) {
+    if (!responsibilityId) {
+      return;
+    }
+    const responsibility = await this.prisma.ministryResponsibility.findUnique({
+      where: { id: responsibilityId },
+      select: { id: true, ministryId: true },
+    });
+    if (!responsibility) {
+      throw new NotFoundException('Ministry responsibility not found');
+    }
+    if (responsibility.ministryId !== sectorId) {
+      throw new BadRequestException('Responsibility does not belong to informed ministry');
+    }
+  }
+
+  private async swapOrFillSlot(
+    slotId: string,
+    dto: ContextualSwapScheduleSlotDto,
+    actor: JwtPayload,
+    forceFill: boolean,
+  ) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      include: {
+        service: { select: { id: true } },
+      },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+
+    await this.assertCanManageSector(actor, slot.sectorId);
+    if (!forceFill && !slot.assignedServantId) {
+      throw new BadRequestException('Slot is not currently assigned. Use fill endpoint instead.');
+    }
+
+    const eligibility = await this.evaluateServantEligibilityForSlot(
+      slot.serviceId,
+      slot.sectorId,
+      dto.substituteServantId,
+      slot,
+    );
+    if (!eligibility.eligible) {
+      throw new UnprocessableEntityException({
+        code: 'SERVANT_NOT_ELIGIBLE',
+        message: 'Substitute servant is not eligible for this slot',
+        reasons: eligibility.reasons,
+      });
+    }
+
+    const oldServantId = slot.assignedServantId;
+    await this.assignSlot(slotId, { servantId: dto.substituteServantId, reason: dto.reason }, actor);
+    const updated = await this.prisma.scheduleSlot.update({
+      where: { id: slotId },
+      data: { status: ScheduleSlotStatus.SWAPPED },
+    });
+
+    const mappedChangeType =
+      dto.context === ScheduleSlotSwapContextDto.ABSENCE_REPLACEMENT
+        ? ScheduleSlotChangeType.ABSENCE_REPLACEMENT
+        : dto.context === ScheduleSlotSwapContextDto.FILL_OPEN_SLOT
+          ? ScheduleSlotChangeType.FILL_OPEN_SLOT
+          : ScheduleSlotChangeType.REPLACEMENT;
+
+    await this.prisma.scheduleSlotChange.create({
+      data: {
+        slotId,
+        changeType: mappedChangeType,
+        fromServantId: oldServantId,
+        toServantId: dto.substituteServantId,
+        reason: dto.reason,
+        performedByUserId: actor.sub,
+      },
+    });
+
+    return this.prisma.scheduleSlot.findUnique({
+      where: { id: updated.id },
+      include: {
+        assignedServant: { select: { id: true, name: true } },
+        responsibility: { select: { id: true, title: true, functionName: true } },
+      },
+    });
+  }
+
+  private mapFunctionToAptitude(functionName: string): Aptitude | null {
+    const normalized = functionName.toLowerCase();
+    if (normalized.includes('tecn')) {
+      return Aptitude.TECNICO;
+    }
+    if (normalized.includes('oper')) {
+      return Aptitude.OPERACIONAL;
+    }
+    if (normalized.includes('social')) {
+      return Aptitude.SOCIAL;
+    }
+    if (normalized.includes('apoio')) {
+      return Aptitude.APOIO;
+    }
+    if (normalized.includes('lider')) {
+      return Aptitude.LIDERANCA;
+    }
+    return null;
+  }
+
   private resolveShiftFromStartTime(startTime: string): Shift {
     const hour = Number(startTime.split(':')[0] ?? 0);
     if (hour < 12) {
@@ -2044,7 +2920,14 @@ export class SchedulesService {
     }
 
     if (actor.role === Role.COORDENADOR) {
-      await assertSectorAccess(this.prisma, actor, sectorId);
+      const allowedSectorIds = await resolveScopedSectorIds(this.prisma, actor);
+      if (!allowedSectorIds.includes(sectorId)) {
+        throw new ForbiddenException({
+          message: 'You do not have permission for this sector',
+          sectorId,
+          allowedSectorIds,
+        });
+      }
       return;
     }
 

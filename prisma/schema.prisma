@@ -99,6 +99,25 @@ enum ScheduleResponseStatus {
   DECLINED
 }
 
+enum ScheduleSlotStatus {
+  OPEN
+  ASSIGNED
+  PENDING
+  CONFIRMED
+  CONFLICT
+  SWAPPED
+  CANCELLED
+}
+
+enum ScheduleSlotChangeType {
+  ASSIGNMENT
+  REPLACEMENT
+  ABSENCE_REPLACEMENT
+  FILL_OPEN_SLOT
+  AUTO_GENERATED
+  STATUS_UPDATE
+}
+
 enum Shift {
   MORNING
   AFTERNOON
@@ -228,6 +247,8 @@ model User {
   coordinatedSectors     Sector[]
   ledTeams               Team[]              @relation("TeamLeader")
   assignedSchedules      Schedule[]          @relation("AssignedSchedules")
+  assignedScheduleSlots  ScheduleSlot[]      @relation("AssignedScheduleSlots")
+  performedScheduleSlotChanges ScheduleSlotChange[] @relation("PerformedScheduleSlotChanges")
   scheduleResponses      ScheduleResponseHistory[] @relation("RespondedScheduleAssignments")
   scheduleSwapHistory    ScheduleSwapHistory[] @relation("SwappedByUser")
   registeredAttendances  Attendance[]        @relation("RegisteredAttendances")
@@ -301,6 +322,7 @@ model Sector {
   servantSectors    ServantSector[]
   userScopeBindings UserScopeBinding[]
   schedules         Schedule[]
+  scheduleSlots     ScheduleSlot[]
   teams             Team[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   responsibilities  MinistryResponsibility[]
@@ -355,6 +377,7 @@ model Servant {
   team              Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
   servantSectors    ServantSector[]
   schedules         Schedule[]
+  scheduleSlots     ScheduleSlot[]
   availabilities    ServantAvailability[]
   attendances       Attendance[]
   pastoralVisits    PastoralVisit[]
@@ -418,6 +441,7 @@ model WorshipService {
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   schedules   Schedule[]
+  scheduleSlots ScheduleSlot[]
   attendances Attendance[]
 
   @@index([serviceDate])
@@ -445,6 +469,7 @@ model Schedule {
   swapHistoryTo    ScheduleSwapHistory[] @relation("SwapToSchedule")
   responseHistory  ScheduleResponseHistory[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
+  scheduleSlots ScheduleSlot[]
 
   @@index([serviceId])
   @@index([servantId])
@@ -452,6 +477,59 @@ model Schedule {
   @@index([status])
   @@index([responseStatus])
   @@unique([serviceId, servantId, sectorId])
+}
+
+model ScheduleSlot {
+  id                String             @id @default(cuid())
+  serviceId         String
+  sectorId          String
+  scheduleId        String?
+  responsibilityId  String?
+  functionName      String
+  slotLabel         String?
+  position          Int                @default(1)
+  required          Boolean            @default(true)
+  requiredTraining  Boolean            @default(true)
+  blocked           Boolean            @default(false)
+  blockedReason     String?
+  status            ScheduleSlotStatus @default(OPEN)
+  assignedServantId String?
+  assignedByUserId  String?
+  notes             String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  service           WorshipService     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  sector            Sector             @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  schedule          Schedule?          @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  responsibility    MinistryResponsibility? @relation(fields: [responsibilityId], references: [id], onDelete: SetNull)
+  assignedServant   Servant?           @relation(fields: [assignedServantId], references: [id], onDelete: SetNull)
+  assignedBy        User?              @relation("AssignedScheduleSlots", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  changes           ScheduleSlotChange[]
+
+  @@index([serviceId, sectorId])
+  @@index([status])
+  @@index([assignedServantId])
+  @@index([responsibilityId])
+  @@index([scheduleId])
+  @@unique([serviceId, sectorId, functionName, position])
+}
+
+model ScheduleSlotChange {
+  id                String                 @id @default(cuid())
+  slotId            String
+  changeType        ScheduleSlotChangeType
+  fromServantId     String?
+  toServantId       String?
+  reason            String?
+  metadata          Json?
+  performedByUserId String
+  createdAt         DateTime               @default(now())
+  slot              ScheduleSlot           @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  performedBy       User                   @relation("PerformedScheduleSlotChanges", fields: [performedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([slotId, createdAt])
+  @@index([changeType, createdAt])
+  @@index([performedByUserId])
 }
 
 model ScheduleResponseHistory {
@@ -677,6 +755,7 @@ model MinistryResponsibility {
   updatedAt           DateTime @updatedAt
   ministry            Sector   @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   responsibleServant  Servant? @relation("ResponsibilityOwnerServant", fields: [responsibleServantId], references: [id], onDelete: SetNull)
+  scheduleSlots       ScheduleSlot[]
 
   @@index([ministryId, active])
   @@index([responsibleServantId])

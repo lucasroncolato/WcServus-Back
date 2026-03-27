@@ -32,6 +32,14 @@ describe('SchedulesService - duplicate', () => {
     servantAvailability: {
       findFirst: jest.fn(),
     },
+    pastoralVisit: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
+    pastoralAlert: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
   } as any;
 
   const auditService = {
@@ -62,6 +70,14 @@ describe('SchedulesService - duplicate', () => {
     prisma.servant.findUnique.mockReset();
     prisma.servantAvailability.findFirst.mockReset();
     prisma.sector.findMany.mockReset();
+    prisma.pastoralVisit.count.mockReset();
+    prisma.pastoralVisit.findMany.mockReset();
+    prisma.pastoralAlert.count.mockReset();
+    prisma.pastoralAlert.findMany.mockReset();
+    prisma.pastoralVisit.count.mockResolvedValue(0);
+    prisma.pastoralVisit.findMany.mockResolvedValue([]);
+    prisma.pastoralAlert.count.mockResolvedValue(0);
+    prisma.pastoralAlert.findMany.mockResolvedValue([]);
     (auditService.log as jest.Mock).mockReset();
     (auditService.log as jest.Mock).mockResolvedValue(undefined);
     (notificationsService.create as jest.Mock).mockReset();
@@ -465,5 +481,110 @@ describe('SchedulesService - workspace context', () => {
         actor,
       ),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('SchedulesService - slot eligibility rules', () => {
+  const prisma = {
+    worshipService: {
+      findUnique: jest.fn(),
+    },
+    servant: {
+      findMany: jest.fn(),
+    },
+    schedule: {
+      findMany: jest.fn(),
+    },
+    pastoralVisit: {
+      findMany: jest.fn(),
+    },
+    pastoralAlert: {
+      findMany: jest.fn(),
+    },
+  } as any;
+
+  const auditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+
+  const notificationsService = {
+    create: jest.fn().mockResolvedValue(undefined),
+    createMany: jest.fn().mockResolvedValue(undefined),
+    notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
+
+  const actor: JwtPayload = {
+    sub: 'admin-1',
+    email: 'admin@wcservus.com',
+    role: Role.ADMIN,
+    servantId: null,
+  };
+
+  let service: SchedulesService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.worshipService.findUnique.mockReset();
+    prisma.servant.findMany.mockReset();
+    prisma.schedule.findMany.mockReset();
+    prisma.pastoralVisit.findMany.mockReset();
+    prisma.pastoralAlert.findMany.mockReset();
+    service = new SchedulesService(prisma, auditService, notificationsService);
+  });
+
+  it('returns pastoral pending and cross-ministry conflict reasons in eligible-servants endpoint', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'svc-1',
+      serviceDate: new Date('2026-03-27T22:00:00.000Z'),
+      startTime: '19:00',
+    });
+    prisma.servant.findMany.mockResolvedValue([
+      {
+        id: 'servant-a',
+        name: 'Servo A',
+        status: 'ATIVO',
+        trainingStatus: 'COMPLETED',
+        approvalStatus: 'APPROVED',
+        mainSectorId: 'sector-1',
+        servantSectors: [],
+        availabilities: [],
+        talents: [],
+      },
+      {
+        id: 'servant-b',
+        name: 'Servo B',
+        status: 'ATIVO',
+        trainingStatus: 'COMPLETED',
+        approvalStatus: 'APPROVED',
+        mainSectorId: 'sector-1',
+        servantSectors: [],
+        availabilities: [],
+        talents: [],
+      },
+    ]);
+    prisma.schedule.findMany.mockResolvedValue([
+      { servantId: 'servant-b', sectorId: 'sector-2' },
+    ]);
+    prisma.pastoralVisit.findMany.mockResolvedValue([
+      { servantId: 'servant-a' },
+    ]);
+    prisma.pastoralAlert.findMany.mockResolvedValue([]);
+
+    const result = await service.listEligibleServants(
+      {
+        serviceId: 'svc-1',
+        ministryId: 'sector-1',
+        includeReasons: true,
+      },
+      actor,
+    );
+
+    const servantA = result.find((item) => item.servantId === 'servant-a');
+    const servantB = result.find((item) => item.servantId === 'servant-b');
+
+    expect(servantA?.eligible).toBe(false);
+    expect(servantA?.reasons).toContain('PASTORAL_PENDING');
+    expect(servantB?.eligible).toBe(false);
+    expect(servantB?.reasons).toContain('ALREADY_SCHEDULED_IN_OTHER_MINISTRY');
   });
 });

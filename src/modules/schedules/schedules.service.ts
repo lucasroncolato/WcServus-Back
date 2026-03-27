@@ -7,9 +7,11 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
+  AlertStatus,
   Aptitude,
   AttendanceStatus,
   AuditAction,
+  PastoralVisitStatus,
   Prisma,
   Role,
   ScheduleResponseStatus,
@@ -258,17 +260,29 @@ export class SchedulesService {
       orderBy: [{ name: 'asc' }],
     });
 
-    const conflicts = await this.prisma.schedule.findMany({
-      where: {
-        serviceId: service.id,
-        servantId: { in: servants.map((item) => item.id) },
-      },
-      select: { servantId: true, sectorId: true },
-    });
-    const conflictMap = new Map(conflicts.map((item) => [item.servantId, item.sectorId]));
+    const servantIds = servants.map((item) => item.id);
+    const [conflicts, servantsWithPastoralPending] = await Promise.all([
+      this.prisma.schedule.findMany({
+        where: {
+          serviceId: service.id,
+          servantId: { in: servantIds },
+        },
+        select: { servantId: true, sectorId: true },
+      }),
+      this.getServantsWithActivePastoralPendencies(servantIds),
+    ]);
+    const conflictsByServant = new Map<string, Set<string>>();
+    for (const item of conflicts) {
+      const sectors = conflictsByServant.get(item.servantId) ?? new Set<string>();
+      sectors.add(item.sectorId);
+      conflictsByServant.set(item.servantId, sectors);
+    }
 
     const evaluated = servants.map((servant) => {
       const reasons: string[] = [];
+      if (servantsWithPastoralPending.has(servant.id)) {
+        reasons.push('PASTORAL_PENDING');
+      }
       if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
         reasons.push('PENDING_MINISTRY_APPROVAL');
       }
@@ -285,8 +299,8 @@ export class SchedulesService {
       if (servant.availabilities.some((availability) => !availability.available)) {
         reasons.push('UNAVAILABLE_FOR_SERVICE_SHIFT');
       }
-      const conflictSector = conflictMap.get(servant.id);
-      if (conflictSector && conflictSector !== sectorId) {
+      const conflictSectors = conflictsByServant.get(servant.id);
+      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== sectorId)) {
         reasons.push('ALREADY_SCHEDULED_IN_OTHER_MINISTRY');
       }
 
@@ -2032,6 +2046,16 @@ export class SchedulesService {
             stage: TalentStage.REPROVADO,
           },
         },
+        pastoralVisits: {
+          none: {
+            status: { in: [PastoralVisitStatus.ABERTA, PastoralVisitStatus.EM_ANDAMENTO] },
+          },
+        },
+        pastoralAlerts: {
+          none: {
+            status: AlertStatus.OPEN,
+          },
+        },
         teamId: teamIds.length ? { in: teamIds } : undefined,
         OR: [{ mainSectorId: { in: sectorIds } }, { servantSectors: { some: { sectorId: { in: sectorIds } } } }],
       },
@@ -2377,6 +2401,17 @@ export class SchedulesService {
     if (!servant) {
       throw new NotFoundException('Servant not found');
     }
+    if (await this.hasActivePastoralPending(servant.id)) {
+      throw new UnprocessableEntityException({
+        code: 'SERVANT_NOT_ELIGIBLE',
+        message: 'Servo com pendencia pastoral ativa nao pode ser escalado.',
+        details: {
+          servantId: servant.id,
+          reason: 'PASTORAL_PENDING',
+        },
+        reasons: ['PASTORAL_PENDING'],
+      });
+    }
 
     if (servant.status !== ServantStatus.ATIVO) {
       throw new UnprocessableEntityException({
@@ -2697,17 +2732,29 @@ export class SchedulesService {
     });
     const unavailableSet = new Set(unavailability.map((item) => item.servantId));
 
-    const schedules = await this.prisma.schedule.findMany({
-      where: { serviceId, servantId: { in: servants.map((servant) => servant.id) } },
-      select: { servantId: true, sectorId: true },
-    });
-    const conflictsByServant = new Map(schedules.map((schedule) => [schedule.servantId, schedule.sectorId]));
+    const servantIds = servants.map((servant) => servant.id);
+    const [schedules, servantsWithPastoralPending] = await Promise.all([
+      this.prisma.schedule.findMany({
+        where: { serviceId, servantId: { in: servantIds } },
+        select: { servantId: true, sectorId: true },
+      }),
+      this.getServantsWithActivePastoralPendencies(servantIds),
+    ]);
+    const conflictsByServant = new Map<string, Set<string>>();
+    for (const schedule of schedules) {
+      const sectors = conflictsByServant.get(schedule.servantId) ?? new Set<string>();
+      sectors.add(schedule.sectorId);
+      conflictsByServant.set(schedule.servantId, sectors);
+    }
     const requiredAptitude = this.mapFunctionToAptitude(slot.functionName);
 
     return servants.map((servant) => {
       const reasons: string[] = [];
       if (slot.blocked) {
         reasons.push(slot.blockedReason || 'SLOT_BLOCKED');
+      }
+      if (servantsWithPastoralPending.has(servant.id)) {
+        reasons.push('PASTORAL_PENDING');
       }
       if (servant.status !== ServantStatus.ATIVO) {
         reasons.push('INACTIVE');
@@ -2724,11 +2771,15 @@ export class SchedulesService {
       if (requiredAptitude && servant.aptitude && servant.aptitude !== requiredAptitude) {
         reasons.push('OUTSIDE_FUNCTION_TALENT');
       }
-      const conflictSector = conflictsByServant.get(servant.id);
-      if (conflictSector && conflictSector !== sectorId) {
+      const conflictSectors = conflictsByServant.get(servant.id);
+      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== sectorId)) {
         reasons.push('ALREADY_SCHEDULED_OTHER_MINISTRY');
       }
-      if (conflictSector && conflictSector === sectorId && slot.assignedServantId !== servant.id) {
+      if (
+        conflictSectors &&
+        conflictSectors.has(sectorId) &&
+        slot.assignedServantId !== servant.id
+      ) {
         reasons.push('ALREADY_SCHEDULED_SAME_MINISTRY');
       }
 
@@ -2879,6 +2930,54 @@ export class SchedulesService {
       return Aptitude.LIDERANCA;
     }
     return null;
+  }
+
+  private async getServantsWithActivePastoralPendencies(servantIds: string[]) {
+    if (!servantIds.length) {
+      return new Set<string>();
+    }
+
+    const [visits, alerts] = await Promise.all([
+      this.prisma.pastoralVisit.findMany({
+        where: {
+          servantId: { in: servantIds },
+          status: { in: [PastoralVisitStatus.ABERTA, PastoralVisitStatus.EM_ANDAMENTO] },
+        },
+        select: { servantId: true },
+        distinct: ['servantId'],
+      }),
+      this.prisma.pastoralAlert.findMany({
+        where: {
+          servantId: { in: servantIds },
+          status: AlertStatus.OPEN,
+        },
+        select: { servantId: true },
+        distinct: ['servantId'],
+      }),
+    ]);
+
+    return new Set<string>([
+      ...visits.map((item) => item.servantId),
+      ...alerts.map((item) => item.servantId),
+    ]);
+  }
+
+  private async hasActivePastoralPending(servantId: string) {
+    const [openVisits, openAlerts] = await Promise.all([
+      this.prisma.pastoralVisit.count({
+        where: {
+          servantId,
+          status: { in: [PastoralVisitStatus.ABERTA, PastoralVisitStatus.EM_ANDAMENTO] },
+        },
+      }),
+      this.prisma.pastoralAlert.count({
+        where: {
+          servantId,
+          status: AlertStatus.OPEN,
+        },
+      }),
+    ]);
+    return openVisits > 0 || openAlerts > 0;
   }
 
   private resolveShiftFromStartTime(startTime: string): Shift {

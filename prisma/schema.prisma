@@ -258,6 +258,7 @@ model User {
   resolvedAlerts         PastoralAlert[]     @relation("AlertResolvedBy")
   requestedServantApprovals Servant[]        @relation("ServantApprovalRequestedBy")
   approvedServantApprovals  Servant[]        @relation("ServantApprovalApprovedBy")
+  reviewedServantSectorTrainings ServantSector[] @relation("ServantSectorTrainingReviewedBy")
   pastoralWeeklyFollowUps   PastoralWeeklyFollowUp[] @relation("PastoralWeeklyFollowUpResponsible")
   registeredDevotionals     DailyDevotional[] @relation("DailyDevotionalRegisteredBy")
   registeredFastings        MonthlyFasting[]  @relation("MonthlyFastingRegisteredBy")
@@ -410,12 +411,19 @@ model ServantSector {
   id        String   @id @default(cuid())
   servantId String
   sectorId  String
+  trainingStatus TrainingStatus @default(PENDING)
+  trainingCompletedAt DateTime?
+  trainingReviewedByUserId String?
+  trainingNotes String?
   createdAt DateTime @default(now())
   servant   Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
   sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  trainingReviewedBy User? @relation("ServantSectorTrainingReviewedBy", fields: [trainingReviewedByUserId], references: [id], onDelete: SetNull)
 
   @@unique([servantId, sectorId])
   @@index([sectorId])
+  @@index([sectorId, trainingStatus])
+  @@index([trainingReviewedByUserId])
 }
 
 model ServantStatusHistory {

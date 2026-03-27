@@ -12,6 +12,10 @@ describe('ServantsService - training completion flow', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    servantSector: {
+      update: jest.fn(),
+      findMany: jest.fn(),
+    },
     servantStatusHistory: {
       create: jest.fn(),
     },
@@ -43,6 +47,8 @@ describe('ServantsService - training completion flow', () => {
     jest.clearAllMocks();
     prisma.servant.findUnique.mockReset();
     prisma.servant.update.mockReset();
+    prisma.servantSector.update.mockReset();
+    prisma.servantSector.findMany.mockReset();
     prisma.servantStatusHistory.create.mockReset();
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
@@ -56,6 +62,8 @@ describe('ServantsService - training completion flow', () => {
       status: ServantStatus.RECRUTAMENTO,
       trainingStatus: TrainingStatus.PENDING,
       approvalStatus: 'APPROVED',
+      mainSectorId: 'sector-1',
+      servantSectors: [{ id: 'ss-1', sectorId: 'sector-1', trainingStatus: TrainingStatus.PENDING }],
     });
 
     const tx = {
@@ -72,6 +80,15 @@ describe('ServantsService - training completion flow', () => {
           userAccount: null,
         }),
       },
+      servantSector: {
+        update: jest.fn().mockResolvedValue({
+          id: 'ss-1',
+          servantId: 'servant-1',
+          sectorId: 'sector-1',
+          trainingStatus: TrainingStatus.COMPLETED,
+        }),
+        findMany: jest.fn().mockResolvedValue([{ trainingStatus: TrainingStatus.COMPLETED }]),
+      },
       servantStatusHistory: {
         create: jest.fn().mockResolvedValue({ id: 'history-1' }),
       },
@@ -80,7 +97,7 @@ describe('ServantsService - training completion flow', () => {
       callback(tx),
     );
 
-    const result = await service.completeTraining('servant-1', {}, actor);
+    const result = await service.completeTraining('servant-1', { ministryId: 'sector-1' }, actor);
 
     expect(tx.servant.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -110,6 +127,8 @@ describe('ServantsService - training completion flow', () => {
       status: ServantStatus.AFASTADO,
       trainingStatus: TrainingStatus.PENDING,
       approvalStatus: 'APPROVED',
+      mainSectorId: 'sector-2',
+      servantSectors: [{ id: 'ss-2', sectorId: 'sector-2', trainingStatus: TrainingStatus.PENDING }],
     });
 
     const tx = {
@@ -129,12 +148,21 @@ describe('ServantsService - training completion flow', () => {
       servantStatusHistory: {
         create: jest.fn().mockResolvedValue({ id: 'history-2' }),
       },
+      servantSector: {
+        update: jest.fn().mockResolvedValue({
+          id: 'ss-2',
+          servantId: 'servant-2',
+          sectorId: 'sector-2',
+          trainingStatus: TrainingStatus.COMPLETED,
+        }),
+        findMany: jest.fn().mockResolvedValue([{ trainingStatus: TrainingStatus.COMPLETED }]),
+      },
     };
     prisma.$transaction.mockImplementation(async (callback: (trx: typeof tx) => Promise<unknown>) =>
       callback(tx),
     );
 
-    const result = await service.completeTraining('servant-2', {}, actor);
+    const result = await service.completeTraining('servant-2', { ministryId: 'sector-2' }, actor);
 
     expect(tx.servant.update).toHaveBeenCalledWith(
       expect.objectContaining({

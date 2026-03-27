@@ -40,7 +40,14 @@ import { ServantApprovalActionDto, UpdateServantApprovalDto } from './dto/update
 type ServantWithRelations = Servant & {
   mainSector: Sector | null;
   team: Team | null;
-  servantSectors: Array<{ sector: Sector }>;
+  servantSectors: Array<{
+    sectorId: string;
+    trainingStatus: TrainingStatus;
+    trainingCompletedAt: Date | null;
+    trainingReviewedByUserId: string | null;
+    trainingNotes: string | null;
+    sector: Sector;
+  }>;
   userAccount: {
     id: string;
     name: string;
@@ -63,7 +70,9 @@ export class ServantsService {
     mainSector: true,
     team: true,
     servantSectors: {
-      include: { sector: true },
+      include: {
+        sector: true,
+      },
     },
     userAccount: {
       select: {
@@ -561,6 +570,10 @@ export class ServantsService {
         servantSectors: {
           select: {
             sectorId: true,
+            trainingStatus: true,
+            trainingCompletedAt: true,
+            trainingReviewedByUserId: true,
+            trainingNotes: true,
           },
         },
       },
@@ -624,10 +637,42 @@ export class ServantsService {
       });
 
       if (resolvedSectorIds) {
-        await tx.servantSector.deleteMany({ where: { servantId: id } });
-        await tx.servantSector.createMany({
-          data: resolvedSectorIds.map((sectorId) => ({ servantId: id, sectorId })),
+        const existingSectorIds = new Set(existing.servantSectors.map((item) => item.sectorId));
+        const nextSectorIds = new Set(resolvedSectorIds);
+
+        await tx.servantSector.deleteMany({
+          where: {
+            servantId: id,
+            sectorId: { notIn: resolvedSectorIds },
+          },
         });
+
+        const newSectorIds = resolvedSectorIds.filter((sectorId) => !existingSectorIds.has(sectorId));
+        await tx.servantSector.createMany({
+          data: newSectorIds.map((sectorId) => ({ servantId: id, sectorId })),
+          skipDuplicates: true,
+        });
+
+        // Mantem treinamento por ministerio nos vinculos ja existentes.
+        for (const relation of existing.servantSectors) {
+          if (!nextSectorIds.has(relation.sectorId)) {
+            continue;
+          }
+          await tx.servantSector.update({
+            where: {
+              servantId_sectorId: {
+                servantId: id,
+                sectorId: relation.sectorId,
+              },
+            },
+            data: {
+              trainingStatus: relation.trainingStatus,
+              trainingCompletedAt: relation.trainingCompletedAt,
+              trainingReviewedByUserId: relation.trainingReviewedByUserId,
+              trainingNotes: relation.trainingNotes,
+            },
+          });
+        }
       }
 
       if (nextStatus && nextStatus !== existing.status) {
@@ -712,7 +757,20 @@ export class ServantsService {
 
     const existing = await this.prisma.servant.findUnique({
       where: { id },
-      select: { id: true, status: true, trainingStatus: true, approvalStatus: true },
+      select: {
+        id: true,
+        status: true,
+        trainingStatus: true,
+        approvalStatus: true,
+        mainSectorId: true,
+        servantSectors: {
+          select: {
+            id: true,
+            sectorId: true,
+            trainingStatus: true,
+          },
+        },
+      },
     });
     if (!existing) {
       throw new NotFoundException('Servant not found');
@@ -721,13 +779,54 @@ export class ServantsService {
       throw new ForbiddenException('Only approved servants can complete training');
     }
 
+    const availableSectorIds = existing.servantSectors.map((item) => item.sectorId);
+    const targetMinistryId =
+      dto.ministryId ??
+      (availableSectorIds.length === 1 ? availableSectorIds[0] : null) ??
+      (existing.mainSectorId && availableSectorIds.includes(existing.mainSectorId)
+        ? existing.mainSectorId
+        : null);
+
+    if (!targetMinistryId) {
+      throw new BadRequestException(
+        'ministryId is required when servant has more than one ministry.',
+      );
+    }
+
+    if (!availableSectorIds.includes(targetMinistryId)) {
+      throw new BadRequestException('Servant is not linked to informed ministry.');
+    }
+
     const promoteToActive = this.shouldPromoteToActiveOnTrainingCompletion(existing.status);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.servantSector.update({
+        where: {
+          servantId_sectorId: {
+            servantId: id,
+            sectorId: targetMinistryId,
+          },
+        },
+        data: {
+          trainingStatus: TrainingStatus.COMPLETED,
+          trainingCompletedAt: new Date(),
+          trainingReviewedByUserId: actor.sub,
+          trainingNotes: dto.notes ?? null,
+        },
+      });
+
+      const updatedServantSectors = await tx.servantSector.findMany({
+        where: { servantId: id },
+        select: { trainingStatus: true },
+      });
+      const allMinistriesCompleted =
+        updatedServantSectors.length > 0 &&
+        updatedServantSectors.every((entry) => entry.trainingStatus === TrainingStatus.COMPLETED);
+
       const next = await tx.servant.update({
         where: { id },
         data: {
-          trainingStatus: TrainingStatus.COMPLETED,
+          trainingStatus: allMinistriesCompleted ? TrainingStatus.COMPLETED : TrainingStatus.PENDING,
           status: promoteToActive ? ServantStatus.ATIVO : undefined,
         },
         include: this.servantInclude,
@@ -753,8 +852,9 @@ export class ServantsService {
       entityId: id,
       userId: actor.sub,
       metadata: {
+        ministryId: targetMinistryId,
         fromTrainingStatus: existing.trainingStatus,
-        toTrainingStatus: TrainingStatus.COMPLETED,
+        toTrainingStatus: updated.trainingStatus,
         fromStatus: existing.status,
         toStatus: promoteToActive ? ServantStatus.ATIVO : existing.status,
         notes: dto.notes,
@@ -861,8 +961,32 @@ export class ServantsService {
     const servants = await this.prisma.servant.findMany({
       where: {
         status: ServantStatus.ATIVO,
-        trainingStatus: TrainingStatus.COMPLETED,
-        OR: [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }],
+        AND: [
+          {
+            OR: [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }],
+          },
+          {
+            OR: [
+              {
+                servantSectors: {
+                  some: {
+                    sectorId,
+                    trainingStatus: TrainingStatus.COMPLETED,
+                  },
+                },
+              },
+              {
+                mainSectorId: sectorId,
+                trainingStatus: TrainingStatus.COMPLETED,
+                servantSectors: {
+                  none: {
+                    sectorId,
+                  },
+                },
+              },
+            ],
+          },
+        ],
       },
       include: this.servantInclude,
       orderBy: { name: 'asc' },
@@ -910,6 +1034,14 @@ export class ServantsService {
 
     const sectorIds = [...sectorsMap.keys()];
     const sectorNames = [...sectorsMap.values()];
+    const ministryTraining = servant.servantSectors.map((relation) => ({
+      ministryId: relation.sectorId,
+      sectorId: relation.sectorId,
+      trainingStatus: relation.trainingStatus,
+      trainingCompletedAt: relation.trainingCompletedAt,
+      trainingReviewedByUserId: relation.trainingReviewedByUserId,
+      trainingNotes: relation.trainingNotes,
+    }));
 
     return {
       ...servant,
@@ -922,6 +1054,9 @@ export class ServantsService {
       linkedUserStatus: servant.userAccount?.status ?? null,
       sectorIds,
       sectorNames,
+      ministryTraining,
+      ministryTrainings: ministryTraining,
+      trainingByMinistry: ministryTraining,
       ministryIds: sectorIds,
       ministryNames: sectorNames,
       ministryId: sectorIds[0] ?? null,

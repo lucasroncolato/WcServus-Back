@@ -241,7 +241,10 @@ export class SchedulesService {
         trainingStatus: true,
         approvalStatus: true,
         mainSectorId: true,
-        servantSectors: { select: { sectorId: true } },
+        servantSectors: {
+          where: { sectorId },
+          select: { sectorId: true, trainingStatus: true, trainingCompletedAt: true },
+        },
         availabilities: {
           where: {
             dayOfWeek: weekday,
@@ -289,8 +292,8 @@ export class SchedulesService {
       if (servant.status !== ServantStatus.ATIVO) {
         reasons.push('SERVANT_NOT_ACTIVE');
       }
-      if (servant.trainingStatus !== TrainingStatus.COMPLETED) {
-        reasons.push('TRAINING_NOT_COMPLETED');
+      if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
+        reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
       }
       const latestTalent = servant.talents[0];
       if (latestTalent?.stage === TalentStage.REPROVADO) {
@@ -309,6 +312,8 @@ export class SchedulesService {
         servantName: servant.name,
         ministryId: sectorId,
         sectorId,
+        ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, sectorId),
+        ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, sectorId),
         eligible: reasons.length === 0,
         reasons,
       };
@@ -792,7 +797,7 @@ export class SchedulesService {
       rules: [
         'status ativo',
         'aprovacao ministerial',
-        'treinamento concluido quando exigido',
+        'treinamento concluido no ministerio da vaga',
         'disponibilidade por horario',
         'sem conflito de escala no culto',
         'compatibilidade basica por funcao/talento',
@@ -2039,7 +2044,6 @@ export class SchedulesService {
     const servants = await this.prisma.servant.findMany({
       where: {
         status: ServantStatus.ATIVO,
-        trainingStatus: TrainingStatus.COMPLETED,
         approvalStatus: ServantApprovalStatus.APPROVED,
         talents: {
           none: {
@@ -2061,6 +2065,7 @@ export class SchedulesService {
       },
       select: {
         id: true,
+        trainingStatus: true,
         teamId: true,
         team: {
           select: {
@@ -2069,7 +2074,8 @@ export class SchedulesService {
         },
         mainSectorId: true,
         servantSectors: {
-          select: { sectorId: true },
+          where: { sectorId: { in: sectorIds } },
+          select: { sectorId: true, trainingStatus: true, trainingCompletedAt: true },
         },
       },
       orderBy: [{ id: 'asc' }],
@@ -2089,6 +2095,9 @@ export class SchedulesService {
           servant.mainSectorId === sectorId ||
           servant.servantSectors.some((servantSector) => servantSector.sectorId === sectorId);
         if (!belongsToSector) {
+          continue;
+        }
+        if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
           continue;
         }
         map.get(sectorId)?.push({
@@ -2377,6 +2386,47 @@ export class SchedulesService {
     }
   }
 
+  private resolveTrainingStatusForMinistry(
+    servant: {
+      trainingStatus: TrainingStatus;
+      mainSectorId?: string | null;
+      servantSectors?: Array<{ sectorId: string; trainingStatus?: TrainingStatus | null }>;
+    },
+    ministryId: string,
+  ) {
+    const sectorLink = servant.servantSectors?.find((relation) => relation.sectorId === ministryId);
+    if (sectorLink?.trainingStatus) {
+      return sectorLink.trainingStatus;
+    }
+    if (servant.mainSectorId === ministryId) {
+      return servant.trainingStatus;
+    }
+    return TrainingStatus.PENDING;
+  }
+
+  private resolveTrainingCompletedAtForMinistry(
+    servant: {
+      servantSectors?: Array<{ sectorId: string; trainingCompletedAt?: Date | null }>;
+    },
+    ministryId: string,
+  ) {
+    return (
+      servant.servantSectors?.find((relation) => relation.sectorId === ministryId)
+        ?.trainingCompletedAt ?? null
+    );
+  }
+
+  private hasCompletedTrainingForMinistry(
+    servant: {
+      trainingStatus: TrainingStatus;
+      mainSectorId?: string | null;
+      servantSectors?: Array<{ sectorId: string; trainingStatus?: TrainingStatus | null }>;
+    },
+    ministryId: string,
+  ) {
+    return this.resolveTrainingStatusForMinistry(servant, ministryId) === TrainingStatus.COMPLETED;
+  }
+
   private async ensureServantEligibleForSector(servantId: string, sectorId: string, serviceId?: string) {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
@@ -2388,7 +2438,7 @@ export class SchedulesService {
         mainSectorId: true,
         servantSectors: {
           where: { sectorId },
-          select: { id: true },
+          select: { id: true, sectorId: true, trainingStatus: true, trainingCompletedAt: true },
         },
         talents: {
           take: 1,
@@ -2425,15 +2475,17 @@ export class SchedulesService {
       });
     }
 
-    if (servant.trainingStatus !== TrainingStatus.COMPLETED) {
+    if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
       throw new UnprocessableEntityException({
         code: 'SERVANT_NOT_ELIGIBLE',
-        message: 'Servo em treinamento ou inativo nao pode ser escalado.',
+        message: 'Servo ainda nao concluiu o treinamento deste ministerio.',
         details: {
           servantId: servant.id,
-          status: servant.status,
-          trainingStatus: servant.trainingStatus,
+          ministryId: sectorId,
+          ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, sectorId),
+          reason: 'MINISTRY_TRAINING_NOT_COMPLETED',
         },
+        reasons: ['MINISTRY_TRAINING_NOT_COMPLETED'],
       });
     }
 
@@ -2710,6 +2762,10 @@ export class SchedulesService {
           approvalStatus: true,
           aptitude: true,
           mainSectorId: true,
+          servantSectors: {
+            where: { sectorId },
+            select: { sectorId: true, trainingStatus: true, trainingCompletedAt: true },
+          },
         },
         orderBy: [{ name: 'asc' }],
       }),
@@ -2762,8 +2818,8 @@ export class SchedulesService {
       if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
         reasons.push('PENDING_APPROVAL');
       }
-      if (slot.requiredTraining && servant.trainingStatus !== TrainingStatus.COMPLETED) {
-        reasons.push('WITHOUT_TRAINING');
+      if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
+        reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
       }
       if (unavailableSet.has(servant.id)) {
         reasons.push('UNAVAILABLE_AT_SERVICE_TIME');
@@ -2786,6 +2842,8 @@ export class SchedulesService {
       return {
         servantId: servant.id,
         servantName: servant.name,
+        ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, sectorId),
+        ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, sectorId),
         eligible: reasons.length === 0,
         reasons,
       };

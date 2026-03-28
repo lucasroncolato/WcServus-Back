@@ -1,7 +1,7 @@
-import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString } from 'class-validator';
 
-export class CreateSectorDto {
+export class CreateMinistryDto {
   @ApiProperty()
   @IsString()
   name: string;
@@ -36,7 +36,7 @@ export class CreateSectorDto {
   @IsString()
   pop?: string;
 
-  @ApiPropertyOptional({ type: [String], description: 'Vincula servos ao setor na criação' })
+  @ApiPropertyOptional({ type: [String], description: 'Vincula servos ao ministerio na criacao' })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Aptitude,
   AlertStatus,
   AuditAction,
@@ -32,6 +32,7 @@ const AVAILABILITY_SHIFT = {
   AFTERNOON: 'AFTERNOON',
   EVENING: 'EVENING',
 } as const;
+const MINISTRY_SCOPE = (UserScope as unknown as { MINISTRY?: UserScope }).MINISTRY ?? UserScope.MINISTRY;
 
 async function upsertUserByEmail(params: {
   email: string;
@@ -90,7 +91,7 @@ async function upsertServantByName(params: {
   trainingStatus?: TrainingStatus;
   aptitude?: Aptitude;
   teamId?: string;
-  mainSectorId?: string;
+  mainMinistryId?: string;
   notes?: string;
   consecutiveAbsences?: number;
   monthlyAbsences?: number;
@@ -112,7 +113,7 @@ async function upsertServantByName(params: {
         trainingStatus: params.trainingStatus,
         aptitude: params.aptitude,
         teamId: params.teamId,
-        mainSectorId: params.mainSectorId,
+        mainMinistryId: params.mainMinistryId,
         notes: params.notes,
         consecutiveAbsences: params.consecutiveAbsences,
         monthlyAbsences: params.monthlyAbsences,
@@ -131,7 +132,7 @@ async function upsertServantByName(params: {
       trainingStatus: params.trainingStatus,
       aptitude: params.aptitude,
       teamId: params.teamId,
-      mainSectorId: params.mainSectorId,
+      mainMinistryId: params.mainMinistryId,
       notes: params.notes,
       consecutiveAbsences: params.consecutiveAbsences,
       monthlyAbsences: params.monthlyAbsences,
@@ -181,7 +182,7 @@ async function main() {
       name: 'Coord. Joao',
       passwordHash,
       role: Role.COORDENADOR,
-      scope: UserScope.SETOR,
+      scope: MINISTRY_SCOPE,
       status: UserStatus.ACTIVE,
     });
 
@@ -190,7 +191,7 @@ async function main() {
       name: 'Coord. Maria',
       passwordHash,
       role: Role.COORDENADOR,
-      scope: UserScope.SETOR,
+      scope: MINISTRY_SCOPE,
       status: UserStatus.ACTIVE,
     });
 
@@ -203,8 +204,8 @@ async function main() {
       status: UserStatus.ACTIVE,
     });
 
-    console.log('Upserting sectors...');
-    const recepcao = await prisma.sector.upsert({
+    console.log('Upserting ministries...');
+    const recepcao = await prisma.ministry.upsert({
       where: { name: 'Recepcao' },
       update: {
         description: 'Primeiro contato e acolhimento',
@@ -223,7 +224,7 @@ async function main() {
       },
     });
 
-    const midia = await prisma.sector.upsert({
+    const midia = await prisma.ministry.upsert({
       where: { name: 'Midia' },
       update: {
         description: 'Som, projecao e transmissao',
@@ -240,7 +241,7 @@ async function main() {
       },
     });
 
-    const intercessao = await prisma.sector.upsert({
+    const intercessao = await prisma.ministry.upsert({
       where: { name: 'Intercessao' },
       update: {
         description: 'Cobertura espiritual e apoio pastoral',
@@ -259,7 +260,7 @@ async function main() {
 
     console.log('Upserting teams...');
     const recepcaoEquipeA = await prisma.team.upsert({
-      where: { sectorId_name: { sectorId: recepcao.id, name: 'A' } },
+      where: { ministryId_name: { ministryId: recepcao.id, name: 'A' } },
       update: {
         slug: 'a',
         description: 'Equipe A da Recepcao',
@@ -269,13 +270,13 @@ async function main() {
         name: 'A',
         slug: 'a',
         description: 'Equipe A da Recepcao',
-        sectorId: recepcao.id,
+        ministryId: recepcao.id,
         status: TeamStatus.ACTIVE,
       },
     });
 
     const midiaEquipeB = await prisma.team.upsert({
-      where: { sectorId_name: { sectorId: midia.id, name: 'B' } },
+      where: { ministryId_name: { ministryId: midia.id, name: 'B' } },
       update: {
         slug: 'b',
         description: 'Equipe B da Midia',
@@ -285,13 +286,13 @@ async function main() {
         name: 'B',
         slug: 'b',
         description: 'Equipe B da Midia',
-        sectorId: midia.id,
+        ministryId: midia.id,
         status: TeamStatus.ACTIVE,
       },
     });
 
     const intercessaoEquipeC = await prisma.team.upsert({
-      where: { sectorId_name: { sectorId: intercessao.id, name: 'C' } },
+      where: { ministryId_name: { ministryId: intercessao.id, name: 'C' } },
       update: {
         slug: 'c',
         description: 'Equipe C da Intercessao',
@@ -301,7 +302,7 @@ async function main() {
         name: 'C',
         slug: 'c',
         description: 'Equipe C da Intercessao',
-        sectorId: intercessao.id,
+        ministryId: intercessao.id,
         status: TeamStatus.ACTIVE,
       },
     });
@@ -316,7 +317,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.SOCIAL,
       teamId: recepcaoEquipeA.id,
-      mainSectorId: recepcao.id,
+      mainMinistryId: recepcao.id,
       notes: 'Comunicativo e responsavel na recepcao.',
       joinedAt: new Date('2024-03-01T00:00:00Z'),
     });
@@ -330,7 +331,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.TECNICO,
       teamId: midiaEquipeB.id,
-      mainSectorId: midia.id,
+      mainMinistryId: midia.id,
       notes: 'Referencia em transmissao e projecao.',
       joinedAt: new Date('2023-08-20T00:00:00Z'),
     });
@@ -343,7 +344,7 @@ async function main() {
       trainingStatus: TrainingStatus.PENDING,
       aptitude: Aptitude.APOIO,
       teamId: recepcaoEquipeA.id,
-      mainSectorId: recepcao.id,
+      mainMinistryId: recepcao.id,
       notes: 'Em processo de reciclagem.',
       consecutiveAbsences: 1,
       monthlyAbsences: 1,
@@ -357,7 +358,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.LIDERANCA,
       teamId: intercessaoEquipeC.id,
-      mainSectorId: intercessao.id,
+      mainMinistryId: intercessao.id,
       notes: 'Perfil de lideranca e cuidado pastoral.',
     });
 
@@ -369,7 +370,7 @@ async function main() {
       trainingStatus: TrainingStatus.COMPLETED,
       aptitude: Aptitude.OPERACIONAL,
       teamId: midiaEquipeB.id,
-      mainSectorId: midia.id,
+      mainMinistryId: midia.id,
       notes: 'Afastado temporariamente por questoes pessoais.',
       consecutiveAbsences: 2,
       monthlyAbsences: 3,
@@ -411,10 +412,10 @@ async function main() {
     await prisma.talent.deleteMany();
     await prisma.auditLog.deleteMany();
     await prisma.servantStatusHistory.deleteMany();
-    await prisma.userScopeBinding.deleteMany({
+    await prisma.userMinistryBinding.deleteMany({
       where: { userId: { in: [coordenador.id, coordenadorApoio.id] } },
     });
-    await prisma.servantSector.deleteMany({
+    await prisma.servantMinistry.deleteMany({
       where: { servantId: { in: [lucas.id, carla.id, renato.id, bruna.id, mateus.id] } },
     });
 
@@ -428,14 +429,14 @@ async function main() {
       data: { trainingStatus: TrainingStatus.PENDING },
     });
 
-    await prisma.servantSector.createMany({
+    await prisma.servantMinistry.createMany({
       data: [
-        { servantId: lucas.id, sectorId: recepcao.id },
-        { servantId: lucas.id, sectorId: intercessao.id },
-        { servantId: carla.id, sectorId: midia.id },
-        { servantId: renato.id, sectorId: recepcao.id },
-        { servantId: bruna.id, sectorId: intercessao.id },
-        { servantId: mateus.id, sectorId: midia.id },
+        { servantId: lucas.id, ministryId: recepcao.id },
+        { servantId: lucas.id, ministryId: intercessao.id },
+        { servantId: carla.id, ministryId: midia.id },
+        { servantId: renato.id, ministryId: recepcao.id },
+        { servantId: bruna.id, ministryId: intercessao.id },
+        { servantId: mateus.id, ministryId: midia.id },
       ],
       skipDuplicates: true,
     });
@@ -447,12 +448,12 @@ async function main() {
 
     await prisma.user.update({
       where: { id: coordenador.id },
-      data: { servantId: bruna.id, scope: UserScope.SETOR },
+      data: { servantId: bruna.id, scope: MINISTRY_SCOPE },
     });
 
     await prisma.user.update({
       where: { id: coordenadorApoio.id },
-      data: { servantId: lucas.id, scope: UserScope.SETOR },
+      data: { servantId: lucas.id, scope: MINISTRY_SCOPE },
     });
 
     await prisma.user.update({
@@ -465,16 +466,16 @@ async function main() {
       data: { leaderUserId: coordenadorApoio.id },
     });
 
-    await prisma.userScopeBinding.createMany({
+    await prisma.userMinistryBinding.createMany({
       data: [
         {
           userId: coordenador.id,
-          sectorId: recepcao.id,
+          ministryId: recepcao.id,
           teamId: null,
         },
         {
           userId: coordenadorApoio.id,
-          sectorId: recepcao.id,
+          ministryId: recepcao.id,
           teamId: recepcaoEquipeA.id,
         },
       ],
@@ -556,10 +557,10 @@ async function main() {
     console.log('Upserting schedules and attendances...');
     const scheduleDomingoManhaLucas = await prisma.schedule.upsert({
       where: {
-        serviceId_servantId_sectorId: {
+        serviceId_servantId_ministryId: {
           serviceId: cultoDomingoManha.id,
           servantId: lucas.id,
-          sectorId: recepcao.id,
+          ministryId: recepcao.id,
         },
       },
       update: {
@@ -571,7 +572,7 @@ async function main() {
       create: {
         serviceId: cultoDomingoManha.id,
         servantId: lucas.id,
-        sectorId: recepcao.id,
+        ministryId: recepcao.id,
         assignedByUserId: admin.id,
         responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
         responseAt: new Date('2026-03-07T17:10:00Z'),
@@ -580,10 +581,10 @@ async function main() {
 
     const scheduleQuintaNoiteCarla = await prisma.schedule.upsert({
       where: {
-        serviceId_servantId_sectorId: {
+        serviceId_servantId_ministryId: {
           serviceId: cultoQuintaNoite.id,
           servantId: carla.id,
-          sectorId: midia.id,
+          ministryId: midia.id,
         },
       },
       update: {
@@ -595,7 +596,7 @@ async function main() {
       create: {
         serviceId: cultoQuintaNoite.id,
         servantId: carla.id,
-        sectorId: midia.id,
+        ministryId: midia.id,
         assignedByUserId: admin.id,
         responseStatus: SCHEDULE_RESPONSE.DECLINED,
         responseAt: new Date('2026-03-11T20:40:00Z'),
@@ -605,27 +606,27 @@ async function main() {
 
     await prisma.schedule.upsert({
       where: {
-        serviceId_servantId_sectorId: {
+        serviceId_servantId_ministryId: {
           serviceId: cultoDomingoNoite.id,
           servantId: bruna.id,
-          sectorId: intercessao.id,
+          ministryId: intercessao.id,
         },
       },
       update: { assignedByUserId: admin.id },
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: bruna.id,
-        sectorId: intercessao.id,
+        ministryId: intercessao.id,
         assignedByUserId: admin.id,
       },
     });
 
     const scheduleDomingoNoiteLucas = await prisma.schedule.upsert({
       where: {
-        serviceId_servantId_sectorId: {
+        serviceId_servantId_ministryId: {
           serviceId: cultoDomingoNoite.id,
           servantId: lucas.id,
-          sectorId: recepcao.id,
+          ministryId: recepcao.id,
         },
       },
       update: {
@@ -638,7 +639,7 @@ async function main() {
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: lucas.id,
-        sectorId: recepcao.id,
+        ministryId: recepcao.id,
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
         responseStatus: SCHEDULE_RESPONSE.PENDING,
@@ -647,10 +648,10 @@ async function main() {
 
     const scheduleDomingoNoiteCarla = await prisma.schedule.upsert({
       where: {
-        serviceId_servantId_sectorId: {
+        serviceId_servantId_ministryId: {
           serviceId: cultoDomingoNoite.id,
           servantId: carla.id,
-          sectorId: midia.id,
+          ministryId: midia.id,
         },
       },
       update: {
@@ -663,7 +664,7 @@ async function main() {
       create: {
         serviceId: cultoDomingoNoite.id,
         servantId: carla.id,
-        sectorId: midia.id,
+        ministryId: midia.id,
         assignedByUserId: admin.id,
         status: ScheduleStatus.SWAPPED,
         responseStatus: SCHEDULE_RESPONSE.CONFIRMED,
@@ -940,5 +941,8 @@ async function main() {
 }
 
 void main();
+
+
+
 
 

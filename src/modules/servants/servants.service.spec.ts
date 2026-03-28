@@ -12,7 +12,7 @@ describe('ServantsService - training completion flow', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
-    servantSector: {
+    servantMinistry: {
       update: jest.fn(),
       findMany: jest.fn(),
     },
@@ -47,8 +47,8 @@ describe('ServantsService - training completion flow', () => {
     jest.clearAllMocks();
     prisma.servant.findUnique.mockReset();
     prisma.servant.update.mockReset();
-    prisma.servantSector.update.mockReset();
-    prisma.servantSector.findMany.mockReset();
+    prisma.servantMinistry.update.mockReset();
+    prisma.servantMinistry.findMany.mockReset();
     prisma.servantStatusHistory.create.mockReset();
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
@@ -62,8 +62,8 @@ describe('ServantsService - training completion flow', () => {
       status: ServantStatus.RECRUTAMENTO,
       trainingStatus: TrainingStatus.PENDING,
       approvalStatus: 'APPROVED',
-      mainSectorId: 'sector-1',
-      servantSectors: [{ id: 'ss-1', sectorId: 'sector-1', trainingStatus: TrainingStatus.PENDING }],
+      mainMinistryId: 'ministry-1',
+      servantMinistries: [{ id: 'ss-1', ministryId: 'ministry-1', trainingStatus: TrainingStatus.PENDING }],
     });
 
     const tx = {
@@ -74,17 +74,17 @@ describe('ServantsService - training completion flow', () => {
           status: ServantStatus.ATIVO,
           trainingStatus: TrainingStatus.COMPLETED,
           teamId: null,
-          mainSector: null,
+          mainMinistry: null,
           team: null,
-          servantSectors: [],
+          servantMinistries: [],
           userAccount: null,
         }),
       },
-      servantSector: {
+      servantMinistry: {
         update: jest.fn().mockResolvedValue({
           id: 'ss-1',
           servantId: 'servant-1',
-          sectorId: 'sector-1',
+          ministryId: 'ministry-1',
           trainingStatus: TrainingStatus.COMPLETED,
         }),
         findMany: jest.fn().mockResolvedValue([{ trainingStatus: TrainingStatus.COMPLETED }]),
@@ -97,7 +97,7 @@ describe('ServantsService - training completion flow', () => {
       callback(tx),
     );
 
-    const result = await service.completeTraining('servant-1', { ministryId: 'sector-1' }, actor);
+    const result = await service.completeTraining('servant-1', { ministryId: 'ministry-1' }, actor);
 
     expect(tx.servant.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -127,8 +127,8 @@ describe('ServantsService - training completion flow', () => {
       status: ServantStatus.AFASTADO,
       trainingStatus: TrainingStatus.PENDING,
       approvalStatus: 'APPROVED',
-      mainSectorId: 'sector-2',
-      servantSectors: [{ id: 'ss-2', sectorId: 'sector-2', trainingStatus: TrainingStatus.PENDING }],
+      mainMinistryId: 'ministry-2',
+      servantMinistries: [{ id: 'ss-2', ministryId: 'ministry-2', trainingStatus: TrainingStatus.PENDING }],
     });
 
     const tx = {
@@ -139,20 +139,20 @@ describe('ServantsService - training completion flow', () => {
           status: ServantStatus.AFASTADO,
           trainingStatus: TrainingStatus.COMPLETED,
           teamId: null,
-          mainSector: null,
+          mainMinistry: null,
           team: null,
-          servantSectors: [],
+          servantMinistries: [],
           userAccount: null,
         }),
       },
       servantStatusHistory: {
         create: jest.fn().mockResolvedValue({ id: 'history-2' }),
       },
-      servantSector: {
+      servantMinistry: {
         update: jest.fn().mockResolvedValue({
           id: 'ss-2',
           servantId: 'servant-2',
-          sectorId: 'sector-2',
+          ministryId: 'ministry-2',
           trainingStatus: TrainingStatus.COMPLETED,
         }),
         findMany: jest.fn().mockResolvedValue([{ trainingStatus: TrainingStatus.COMPLETED }]),
@@ -162,7 +162,7 @@ describe('ServantsService - training completion flow', () => {
       callback(tx),
     );
 
-    const result = await service.completeTraining('servant-2', { ministryId: 'sector-2' }, actor);
+    const result = await service.completeTraining('servant-2', { ministryId: 'ministry-2' }, actor);
 
     expect(tx.servant.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -192,7 +192,7 @@ describe('ServantsService - profile update with training completion', () => {
       update: jest.fn(),
       findUniqueOrThrow: jest.fn(),
     },
-    servantSector: {
+    servantMinistry: {
       deleteMany: jest.fn(),
       createMany: jest.fn(),
     },
@@ -228,8 +228,8 @@ describe('ServantsService - profile update with training completion', () => {
     prisma.servant.findUnique.mockReset();
     prisma.servant.update.mockReset();
     prisma.servant.findUniqueOrThrow.mockReset();
-    prisma.servantSector.deleteMany.mockReset();
-    prisma.servantSector.createMany.mockReset();
+    prisma.servantMinistry.deleteMany.mockReset();
+    prisma.servantMinistry.createMany.mockReset();
     prisma.servantStatusHistory.create.mockReset();
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
@@ -241,8 +241,8 @@ describe('ServantsService - profile update with training completion', () => {
       id: 'servant-3',
       status: ServantStatus.RECICLAGEM,
       teamId: null,
-      mainSectorId: null,
-      servantSectors: [],
+      mainMinistryId: null,
+      servantMinistries: [],
     });
 
     const tx = {
@@ -254,9 +254,9 @@ describe('ServantsService - profile update with training completion', () => {
           status: ServantStatus.ATIVO,
           trainingStatus: TrainingStatus.COMPLETED,
           teamId: null,
-          mainSector: null,
+          mainMinistry: null,
           team: null,
-          servantSectors: [],
+          servantMinistries: [],
           userAccount: {
             id: 'user-3',
             name: 'User 3',
@@ -266,7 +266,7 @@ describe('ServantsService - profile update with training completion', () => {
           },
         }),
       },
-      servantSector: {
+      servantMinistry: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
@@ -307,3 +307,5 @@ describe('ServantsService - profile update with training completion', () => {
     expect(result.trainingStatus).toBe(TrainingStatus.COMPLETED);
   });
 });
+
+

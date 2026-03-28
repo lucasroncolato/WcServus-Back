@@ -38,7 +38,7 @@ const USER_SELECT = {
       name: true,
       status: true,
       trainingStatus: true,
-      mainSectorId: true,
+      mainMinistryId: true,
       teamId: true,
       team: {
         select: {
@@ -46,16 +46,16 @@ const USER_SELECT = {
           name: true,
         },
       },
-      mainSector: {
+      mainMinistry: {
         select: {
           id: true,
           name: true,
         },
       },
-      servantSectors: {
+      servantMinistries: {
         take: 1,
         select: {
-          sector: {
+          ministry: {
             select: {
               id: true,
               name: true,
@@ -68,9 +68,9 @@ const USER_SELECT = {
   scopeBindings: {
     select: {
       id: true,
-      sectorId: true,
+      ministryId: true,
       teamId: true,
-      sector: {
+      ministry: {
         select: {
           id: true,
           name: true,
@@ -105,6 +105,7 @@ const ROLE_RANK: Record<Role, number> = {
   [Role.COORDENADOR]: 3,
   [Role.SERVO]: 4,
 };
+const MINISTRY_SCOPE = (UserScope as unknown as { MINISTRY?: UserScope }).MINISTRY ?? UserScope.MINISTRY;
 
 @Injectable()
 export class UsersService {
@@ -133,7 +134,7 @@ export class UsersService {
               { phone: { contains: search, mode: 'insensitive' } },
               { servant: { name: { contains: search, mode: 'insensitive' } } },
               { servant: { team: { name: { contains: search, mode: 'insensitive' } } } },
-              { servant: { mainSector: { name: { contains: search, mode: 'insensitive' } } } },
+              { servant: { mainMinistry: { name: { contains: search, mode: 'insensitive' } } } },
             ],
           }
         : {}),
@@ -244,14 +245,14 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const requestedScopeType = dto.scopeType ?? dto.scope ?? UserScope.GLOBAL;
     const scopeType = dto.role === Role.SERVO ? UserScope.SELF : requestedScopeType;
-    const sectorIds = [...new Set(dto.sectorIds ?? [])];
+    const ministryIds = [...new Set(dto.ministryIds ?? [])];
     const teamIds = [...new Set((dto.teamIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const finalTeamIds = [...new Set(teamIds)];
 
     await this.validateScopeBindingsInput({
       scopeType,
       targetRole: dto.role,
-      sectorIds,
+      ministryIds,
       teamIds: finalTeamIds,
     });
 
@@ -271,7 +272,7 @@ export class UsersService {
           select: USER_SELECT,
         });
 
-        await this.replaceUserScopeBindings(tx, created.id, scopeType, sectorIds, finalTeamIds);
+        await this.replaceUserScopeBindings(tx, created.id, scopeType, ministryIds, finalTeamIds);
 
         return tx.user.findUniqueOrThrow({
           where: { id: created.id },
@@ -290,7 +291,7 @@ export class UsersService {
         role: user.role,
         status: user.status,
         scopeType: user.scope,
-        sectorIds,
+        ministryIds,
         teamIds: finalTeamIds,
       },
     });
@@ -577,19 +578,19 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    const sectorIds = [...new Set(dto.sectorIds ?? [])];
+    const ministryIds = [...new Set(dto.ministryIds ?? [])];
     const teamIds = [...new Set((dto.teamIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const finalTeamIds = [...new Set(teamIds)];
 
     await this.validateScopeBindingsInput({
       scopeType: dto.scopeType,
       targetRole: target.role,
-      sectorIds,
+      ministryIds,
       teamIds: finalTeamIds,
     });
 
     const user = await this.prisma.$transaction(async (tx) => {
-      await this.replaceUserScopeBindings(tx, id, dto.scopeType, sectorIds, finalTeamIds);
+      await this.replaceUserScopeBindings(tx, id, dto.scopeType, ministryIds, finalTeamIds);
 
       return tx.user.update({
         where: { id },
@@ -606,7 +607,7 @@ export class UsersService {
       metadata: {
         targetUserId: id,
         scopeType: dto.scopeType,
-        sectorIds,
+        ministryIds,
         teamIds: finalTeamIds,
       },
     });
@@ -755,53 +756,53 @@ export class UsersService {
   private async validateScopeBindingsInput(input: {
     scopeType: UserScope;
     targetRole: Role;
-    sectorIds: string[];
+    ministryIds: string[];
     teamIds: string[];
   }) {
-    const { scopeType, sectorIds, teamIds } = input;
+    const { scopeType, ministryIds, teamIds } = input;
 
-    if (scopeType === UserScope.SETOR && sectorIds.length === 0) {
-      throw new BadRequestException('scopeType=SETOR requires at least one sectorId');
+    if (scopeType === MINISTRY_SCOPE && ministryIds.length === 0) {
+      throw new BadRequestException('scopeType=MINISTRY requires at least one ministryId');
     }
 
-    if (scopeType === UserScope.EQUIPE && sectorIds.length === 0 && teamIds.length === 0) {
-      throw new BadRequestException('scopeType=EQUIPE requires teamIds and/or sectorIds');
+    if (scopeType === UserScope.EQUIPE && ministryIds.length === 0 && teamIds.length === 0) {
+      throw new BadRequestException('scopeType=EQUIPE requires teamIds and/or ministryIds');
     }
 
-    if (scopeType === UserScope.SELF && sectorIds.length > 0) {
-      throw new BadRequestException('scopeType=SELF does not accept sectorIds');
+    if (scopeType === UserScope.SELF && ministryIds.length > 0) {
+      throw new BadRequestException('scopeType=SELF does not accept ministryIds');
     }
 
     if (scopeType === UserScope.SELF && teamIds.length > 0) {
       throw new BadRequestException('scopeType=SELF does not accept teamIds');
     }
 
-    if (sectorIds.length > 0) {
-      const sectors = await this.prisma.sector.findMany({
-        where: { id: { in: sectorIds } },
+    if (ministryIds.length > 0) {
+      const ministries = await this.prisma.ministry.findMany({
+        where: { id: { in: ministryIds } },
         select: { id: true },
       });
 
-      if (sectors.length !== sectorIds.length) {
-        throw new NotFoundException('One or more informed sectors were not found');
+      if (ministries.length !== ministryIds.length) {
+        throw new NotFoundException('One or more informed ministries were not found');
       }
     }
 
     if (teamIds.length > 0) {
       const teams = await this.prisma.team.findMany({
         where: { id: { in: teamIds } },
-        select: { id: true, sectorId: true },
+        select: { id: true, ministryId: true },
       });
 
       if (teams.length !== teamIds.length) {
         throw new NotFoundException('One or more informed teams were not found');
       }
 
-      if (sectorIds.length > 0) {
-        const sectorSet = new Set(sectorIds);
-        const invalidTeamSector = teams.some((team) => !sectorSet.has(team.sectorId));
+      if (ministryIds.length > 0) {
+        const sectorSet = new Set(ministryIds);
+        const invalidTeamSector = teams.some((team) => !sectorSet.has(team.ministryId));
         if (invalidTeamSector) {
-          throw new BadRequestException('All teamIds must belong to informed sectorIds');
+          throw new BadRequestException('All teamIds must belong to informed ministryIds');
         }
       }
     }
@@ -811,20 +812,20 @@ export class UsersService {
     tx: Prisma.TransactionClient,
     userId: string,
     scopeType: UserScope,
-    sectorIds: string[],
+    ministryIds: string[],
     teamIds: string[],
   ) {
-    await tx.userScopeBinding.deleteMany({ where: { userId } });
+    await tx.userMinistryBinding.deleteMany({ where: { userId } });
 
     if (scopeType === UserScope.GLOBAL || scopeType === UserScope.SELF) {
       return;
     }
 
-    if (sectorIds.length > 0) {
-      await tx.userScopeBinding.createMany({
-        data: sectorIds.map((sectorId) => ({
+    if (ministryIds.length > 0) {
+      await tx.userMinistryBinding.createMany({
+        data: ministryIds.map((ministryId) => ({
           userId,
-          sectorId,
+          ministryId,
           teamId: null,
         })),
         skipDuplicates: true,
@@ -832,10 +833,10 @@ export class UsersService {
     }
 
     if (teamIds.length > 0) {
-      await tx.userScopeBinding.createMany({
+      await tx.userMinistryBinding.createMany({
         data: teamIds.map((teamId) => ({
           userId,
-          sectorId: null,
+          ministryId: null,
           teamId,
         })),
         skipDuplicates: true,
@@ -1015,13 +1016,13 @@ export class UsersService {
 
   private formatUser(user: UserRecord) {
     const sectorName =
-      user.servant?.mainSector?.name ??
-      user.servant?.servantSectors[0]?.sector.name ??
+      user.servant?.mainMinistry?.name ??
+      user.servant?.servantMinistries[0]?.ministry.name ??
       null;
-    const sectorIds = [
+    const ministryIds = [
       ...new Set(
         user.scopeBindings
-          .map((item) => item.sectorId)
+          .map((item) => item.ministryId)
           .filter((value): value is string => Boolean(value)),
       ),
     ];
@@ -1032,7 +1033,7 @@ export class UsersService {
           .filter((value): value is string => Boolean(value)),
       ),
     ];
-    const primarySectorId = user.servant?.mainSectorId ?? sectorIds[0] ?? null;
+    const primarySectorId = user.servant?.mainMinistryId ?? ministryIds[0] ?? null;
     const primaryTeamId = user.servant?.team?.id ?? teamIds[0] ?? null;
     const primaryTeamName =
       user.servant?.team?.name ??
@@ -1046,9 +1047,9 @@ export class UsersService {
       role: user.role,
       scope: user.scope,
       scopeType: user.scope,
-      sectorIds,
+      ministryIds,
       teamIds,
-      sectorId: primarySectorId,
+      ministryId: primarySectorId,
       teamId: primaryTeamId,
       status: user.status,
       mustChangePassword: user.mustChangePassword,
@@ -1059,8 +1060,8 @@ export class UsersService {
       sectorName,
       teamName: primaryTeamName ?? null,
       scopeLinks: user.scopeBindings.map((item) => ({
-        sectorId: item.sectorId,
-        sectorName: item.sector?.name ?? null,
+        ministryId: item.ministryId,
+        sectorName: item.ministry?.name ?? null,
         teamId: item.teamId ?? item.team?.id ?? null,
         teamName: item.team?.name ?? null,
       })),
@@ -1077,7 +1078,7 @@ export class UsersService {
             status: user.servant.status,
             statusView: user.servant.status === ServantStatus.ATIVO ? 'ACTIVE' : 'INACTIVE',
             trainingStatus: user.servant.trainingStatus,
-            mainSectorId: user.servant.mainSectorId,
+            mainMinistryId: user.servant.mainMinistryId,
             teamId: user.servant.team?.id ?? null,
             teamName: user.servant.team?.name ?? null,
           }
@@ -1087,3 +1088,6 @@ export class UsersService {
     };
   }
 }
+
+
+

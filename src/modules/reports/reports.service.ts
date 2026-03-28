@@ -56,25 +56,25 @@ export class ReportsService {
       },
       include: {
         servant: {
-          include: { mainSector: true },
+          include: { mainMinistry: true },
         },
       },
     });
 
-    const byServant = new Map<string, { servantId: string; name: string; sector: string | null; faltas: number }>();
-    const bySector = new Map<string, { sectorId: string | null; sector: string; faltas: number }>();
+    const byServant = new Map<string, { servantId: string; name: string; ministry: string | null; faltas: number }>();
+    const bySector = new Map<string, { ministryId: string | null; ministry: string; faltas: number }>();
 
     for (const attendance of absences) {
       const servantKey = attendance.servantId;
-      const sectorName = attendance.servant.mainSector?.name ?? 'Sem setor';
-      const sectorId = attendance.servant.mainSector?.id ?? null;
+      const sectorName = attendance.servant.mainMinistry?.name ?? 'Sem setor';
+      const ministryId = attendance.servant.mainMinistry?.id ?? null;
 
       const servantCounter =
         byServant.get(servantKey) ??
         {
           servantId: attendance.servantId,
           name: attendance.servant.name,
-          sector: sectorName,
+          ministry: sectorName,
           faltas: 0,
         };
       servantCounter.faltas += 1;
@@ -83,8 +83,8 @@ export class ReportsService {
       const sectorCounter =
         bySector.get(sectorName) ??
         {
-          sectorId,
-          sector: sectorName,
+          ministryId,
+          ministry: sectorName,
           faltas: 0,
         };
       sectorCounter.faltas += 1;
@@ -165,3 +165,5 @@ export class ReportsService {
     return getServantAccessWhere(this.prisma, actor);
   }
 }
+
+

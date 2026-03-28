@@ -58,8 +58,8 @@ export class MeService {
                 name: true,
               },
             },
-            mainSectorId: true,
-            mainSector: {
+            mainMinistryId: true,
+            mainMinistry: {
               select: {
                 id: true,
                 name: true,
@@ -83,11 +83,11 @@ export class MeService {
       phone: profile.phone,
       avatarUrl: profile.avatarUrl,
       servantId: profile.servantId,
-      sectorId: profile.servant?.mainSectorId ?? null,
+      ministryId: profile.servant?.mainMinistryId ?? null,
       teamId: profile.servant?.teamId ?? null,
-      sectorName: profile.servant?.mainSector?.name ?? null,
+      sectorName: profile.servant?.mainMinistry?.name ?? null,
       teamName: profile.servant?.team?.name ?? null,
-      sectorIds: profile.servant?.mainSectorId ? [profile.servant.mainSectorId] : [],
+      ministryIds: profile.servant?.mainMinistryId ? [profile.servant.mainMinistryId] : [],
       teamIds: profile.servant?.teamId ? [profile.servant.teamId] : [],
       servant: profile.servant
         ? {
@@ -101,7 +101,7 @@ export class MeService {
             teamId: profile.servant.teamId,
             teamName: profile.servant.team?.name ?? null,
             team: profile.servant.team,
-            mainSector: profile.servant.mainSector,
+            mainMinistry: profile.servant.mainMinistry,
           }
         : null,
     };
@@ -221,7 +221,7 @@ export class MeService {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
       include: {
-        mainSector: {
+        mainMinistry: {
           select: { id: true, name: true },
         },
       },
@@ -248,7 +248,7 @@ export class MeService {
         notes: dto.notes,
       },
       include: {
-        mainSector: {
+        mainMinistry: {
           select: { id: true, name: true },
         },
       },
@@ -289,7 +289,7 @@ export class MeService {
         where,
         include: {
           service: true,
-          sector: {
+          ministry: {
             select: {
               id: true,
               name: true,
@@ -317,7 +317,7 @@ export class MeService {
       data: items.map((item) => ({
         id: item.id,
         serviceId: item.serviceId,
-        sectorId: item.sectorId,
+        ministryId: item.ministryId,
         teamId: item.servant?.teamId ?? null,
         teamName: item.servant?.team?.name ?? null,
         assignmentStatus: item.status,
@@ -332,7 +332,7 @@ export class MeService {
           startTime: item.service.startTime,
           status: item.service.status,
         },
-        sector: item.sector,
+        ministry: item.ministry,
       })),
       page,
       limit,
@@ -509,7 +509,7 @@ export class MeService {
               startTime: true,
             },
           },
-          sector: {
+          ministry: {
             select: {
               id: true,
               name: true,
@@ -537,7 +537,7 @@ export class MeService {
       responseAt: updated.responseAt,
       declineReason: updated.declineReason,
       service: updated.service,
-      sector: updated.sector,
+      ministry: updated.ministry,
     };
   }
 
@@ -576,3 +576,5 @@ export class MeService {
     }
   }
 }
+
+

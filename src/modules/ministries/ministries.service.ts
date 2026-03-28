@@ -6,30 +6,30 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, Role, ServantStatus, TrainingStatus } from '@prisma/client';
-import { assertSectorAccess, getSectorAccessWhere } from 'src/common/auth/access-scope';
+import { assertMinistryAccess, getMinistryAccessWhere } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { CreateMinistryResponsibilityDto } from './dto/create-ministry-responsibility.dto';
-import { CreateSectorDto } from './dto/create-sector.dto';
+import { CreateMinistryDto } from './dto/create-ministry.dto';
 import { UpdateMinistryResponsibilityDto } from './dto/update-ministry-responsibility.dto';
-import { UpdateSectorDto } from './dto/update-sector.dto';
+import { UpdateMinistryDto } from './dto/update-ministry.dto';
 
 @Injectable()
-export class SectorsService {
+export class MinistriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
   ) {}
 
   async findAll(actor: JwtPayload) {
-    const scopeWhere = await getSectorAccessWhere(this.prisma, actor);
+    const scopeWhere = await getMinistryAccessWhere(this.prisma, actor);
 
-    const sectors = await this.prisma.sector.findMany({
+    const ministries = await this.prisma.ministry.findMany({
       where: scopeWhere,
       include: {
         coordinator: { select: { id: true, name: true, email: true } },
-        servantSectors: {
+        servantMinistries: {
           include: {
             servant: {
               select: {
@@ -44,15 +44,15 @@ export class SectorsService {
       orderBy: { name: 'asc' },
     });
 
-    return sectors.map((sector) => {
-      const members = sector.servantSectors.map((x) => x.servant);
+    return ministries.map((ministry) => {
+      const members = ministry.servantMinistries.map((x) => x.servant);
       const activeMembers = members.filter((m) => m.status === ServantStatus.ATIVO).length;
       const pendingTrainingMembers = members.filter(
         (m) => m.trainingStatus === TrainingStatus.PENDING,
       ).length;
 
       return {
-        ...this.toApiMinistry(sector),
+        ...this.toApiMinistry(ministry),
         membersCount: members.length,
         activeMembersCount: activeMembers,
         pendingTrainingCount: pendingTrainingMembers,
@@ -61,24 +61,24 @@ export class SectorsService {
   }
 
   async findOne(id: string, actor: JwtPayload) {
-    await assertSectorAccess(this.prisma, actor, id);
+    await assertMinistryAccess(this.prisma, actor, id);
 
-    const sector = await this.prisma.sector.findUniqueOrThrow({
+    const ministry = await this.prisma.ministry.findUniqueOrThrow({
       where: { id },
       include: {
         coordinator: { select: { id: true, name: true, email: true } },
       },
     });
 
-    return this.toApiMinistry(sector);
+    return this.toApiMinistry(ministry);
   }
 
-  async create(dto: CreateSectorDto, actor: JwtPayload) {
+  async create(dto: CreateMinistryDto, actor: JwtPayload) {
     if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
       throw new ForbiddenException('Only SUPER_ADMIN and ADMIN can create ministries');
     }
 
-    const duplicated = await this.prisma.sector.findUnique({
+    const duplicated = await this.prisma.ministry.findUnique({
       where: { name: dto.name },
       select: { id: true },
     });
@@ -91,8 +91,8 @@ export class SectorsService {
       await this.ensureServantsExist(dto.servantIds);
     }
 
-    const sector = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.sector.create({
+    const ministry = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.ministry.create({
         data: {
           name: dto.name,
           description: dto.description,
@@ -104,8 +104,8 @@ export class SectorsService {
       });
 
       if (dto.servantIds?.length) {
-        await tx.servantSector.createMany({
-          data: dto.servantIds.map((servantId) => ({ servantId, sectorId: created.id })),
+        await tx.servantMinistry.createMany({
+          data: dto.servantIds.map((servantId: string) => ({ servantId, ministryId: created.id })),
           skipDuplicates: true,
         });
       }
@@ -116,15 +116,15 @@ export class SectorsService {
     await this.auditService.log({
       action: AuditAction.CREATE,
       entity: 'Ministry',
-      entityId: sector.id,
+      entityId: ministry.id,
       userId: actor.sub,
       metadata: { servantIds: dto.servantIds },
     });
 
-    return this.toApiMinistry(sector);
+    return this.toApiMinistry(ministry);
   }
 
-  async update(id: string, dto: UpdateSectorDto, actor: JwtPayload) {
+  async update(id: string, dto: UpdateMinistryDto, actor: JwtPayload) {
     if (
       actor.role !== Role.SUPER_ADMIN &&
       actor.role !== Role.ADMIN &&
@@ -134,13 +134,13 @@ export class SectorsService {
     }
 
     if (actor.role === Role.COORDENADOR) {
-      await assertSectorAccess(this.prisma, actor, id);
+      await assertMinistryAccess(this.prisma, actor, id);
     }
 
     await this.ensureExists(id);
 
     if (dto.name) {
-      const duplicated = await this.prisma.sector.findFirst({
+      const duplicated = await this.prisma.ministry.findFirst({
         where: { name: dto.name, NOT: { id } },
         select: { id: true },
       });
@@ -154,8 +154,8 @@ export class SectorsService {
       await this.ensureServantsExist(dto.servantIds);
     }
 
-    const sector = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.sector.update({
+    const ministry = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.ministry.update({
         where: { id },
         data: {
           name: dto.name,
@@ -168,11 +168,11 @@ export class SectorsService {
       });
 
       if (dto.servantIds) {
-        await tx.servantSector.deleteMany({ where: { sectorId: id } });
+        await tx.servantMinistry.deleteMany({ where: { ministryId: id } });
 
         if (dto.servantIds.length > 0) {
-          await tx.servantSector.createMany({
-            data: dto.servantIds.map((servantId) => ({ servantId, sectorId: id })),
+          await tx.servantMinistry.createMany({
+            data: dto.servantIds.map((servantId: string) => ({ servantId, ministryId: id })),
             skipDuplicates: true,
           });
         }
@@ -189,52 +189,45 @@ export class SectorsService {
       metadata: dto as unknown as Record<string, unknown>,
     });
 
-    return this.toApiMinistry(sector);
+    return this.toApiMinistry(ministry);
   }
 
-  async listServants(sectorId: string, actor: JwtPayload) {
-    await this.ensureExists(sectorId);
-    await assertSectorAccess(this.prisma, actor, sectorId);
+  async listServants(ministryId: string, actor: JwtPayload) {
+    await this.ensureExists(ministryId);
+    await assertMinistryAccess(this.prisma, actor, ministryId);
 
-    const servantSectors = await this.prisma.servantSector.findMany({
-      where: { sectorId },
+    const servantMinistries = await this.prisma.servantMinistry.findMany({
+      where: { ministryId },
       include: {
         servant: {
           include: {
-            mainSector: true,
-            servantSectors: { include: { sector: true } },
+            mainMinistry: true,
+            servantMinistries: { include: { ministry: true } },
           },
         },
       },
       orderBy: { servant: { name: 'asc' } },
     });
 
-    return servantSectors.map((relation) => ({
+    return servantMinistries.map((relation) => ({
       ...relation.servant,
       status: relation.servant.status === ServantStatus.ATIVO ? 'ACTIVE' : 'INACTIVE',
-      sectorIds: relation.servant.servantSectors.map((item) => item.sectorId),
-      sectorNames: relation.servant.servantSectors.map((item) => item.sector.name),
-      sectorId: relation.servant.servantSectors[0]?.sectorId ?? relation.servant.mainSector?.id ?? null,
-      sectorName:
-        relation.servant.servantSectors[0]?.sector.name ??
-        relation.servant.mainSector?.name ??
-        null,
-      ministryIds: relation.servant.servantSectors.map((item) => item.sectorId),
-      ministryNames: relation.servant.servantSectors.map((item) => item.sector.name),
-      ministryId: relation.servant.servantSectors[0]?.sectorId ?? relation.servant.mainSector?.id ?? null,
+      ministryIds: relation.servant.servantMinistries.map((item) => item.ministryId),
+      ministryNames: relation.servant.servantMinistries.map((item) => item.ministry.name),
+      ministryId: relation.servant.servantMinistries[0]?.ministryId ?? relation.servant.mainMinistry?.id ?? null,
       ministryName:
-        relation.servant.servantSectors[0]?.sector.name ??
-        relation.servant.mainSector?.name ??
+        relation.servant.servantMinistries[0]?.ministry.name ??
+        relation.servant.mainMinistry?.name ??
         null,
     }));
   }
 
-  async listResponsibilities(sectorId: string, actor: JwtPayload) {
-    await this.ensureExists(sectorId);
-    await assertSectorAccess(this.prisma, actor, sectorId);
+  async listResponsibilities(ministryId: string, actor: JwtPayload) {
+    await this.ensureExists(ministryId);
+    await assertMinistryAccess(this.prisma, actor, ministryId);
 
     return this.prisma.ministryResponsibility.findMany({
-      where: { ministryId: sectorId },
+      where: { ministryId: ministryId },
       include: {
         responsibleServant: {
           select: { id: true, name: true },
@@ -244,17 +237,17 @@ export class SectorsService {
     });
   }
 
-  async createResponsibility(sectorId: string, dto: CreateMinistryResponsibilityDto, actor: JwtPayload) {
-    await this.ensureExists(sectorId);
-    await assertSectorAccess(this.prisma, actor, sectorId);
+  async createResponsibility(ministryId: string, dto: CreateMinistryResponsibilityDto, actor: JwtPayload) {
+    await this.ensureExists(ministryId);
+    await assertMinistryAccess(this.prisma, actor, ministryId);
 
     if (dto.responsibleServantId) {
-      await this.ensureServantBelongsToSector(dto.responsibleServantId, sectorId);
+      await this.ensureServantBelongsToSector(dto.responsibleServantId, ministryId);
     }
 
     const created = await this.prisma.ministryResponsibility.create({
       data: {
-        ministryId: sectorId,
+        ministryId: ministryId,
         title: dto.title,
         activity: dto.activity,
         functionName: dto.functionName,
@@ -274,7 +267,7 @@ export class SectorsService {
       entity: 'MinistryResponsibility',
       entityId: created.id,
       userId: actor.sub,
-      metadata: { ministryId: sectorId },
+      metadata: { ministryId: ministryId },
     });
 
     return created;
@@ -294,7 +287,7 @@ export class SectorsService {
       throw new NotFoundException('Ministry responsibility not found');
     }
 
-    await assertSectorAccess(this.prisma, actor, current.ministryId);
+    await assertMinistryAccess(this.prisma, actor, current.ministryId);
 
     if (dto.responsibleServantId) {
       await this.ensureServantBelongsToSector(dto.responsibleServantId, current.ministryId);
@@ -341,20 +334,20 @@ export class SectorsService {
   }
 
   private async ensureExists(id: string) {
-    const sector = await this.prisma.sector.findUnique({ where: { id }, select: { id: true } });
-    if (!sector) {
+    const ministry = await this.prisma.ministry.findUnique({ where: { id }, select: { id: true } });
+    if (!ministry) {
       throw new NotFoundException('Ministry not found');
     }
   }
 
-  private async ensureServantBelongsToSector(servantId: string, sectorId: string) {
+  private async ensureServantBelongsToSector(servantId: string, ministryId: string) {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
       select: {
         id: true,
-        mainSectorId: true,
-        servantSectors: {
-          select: { sectorId: true },
+        mainMinistryId: true,
+        servantMinistries: {
+          select: { ministryId: true },
         },
       },
     });
@@ -363,23 +356,26 @@ export class SectorsService {
       throw new NotFoundException('Servant not found');
     }
 
-    const belongsToSector =
-      servant.mainSectorId === sectorId || servant.servantSectors.some((item) => item.sectorId === sectorId);
+    const belongsToMinistry =
+      servant.mainMinistryId === ministryId || servant.servantMinistries.some((item) => item.ministryId === ministryId);
 
-    if (!belongsToSector) {
+    if (!belongsToMinistry) {
       throw new BadRequestException('Responsible servant must belong to this ministry');
     }
   }
 
   private toApiMinistry<
     T extends { id: string; name: string; description?: string | null; popText?: string | null },
-  >(sector: T) {
+  >(ministry: T) {
     return {
-      ...sector,
-      pop: sector.popText ?? sector.description ?? null,
-      ministryId: sector.id,
-      ministryName: sector.name,
-      ministryDescription: sector.description ?? null,
+      ...ministry,
+      pop: ministry.popText ?? ministry.description ?? null,
+      ministryId: ministry.id,
+      ministryName: ministry.name,
+      ministryDescription: ministry.description ?? null,
     };
   }
 }
+
+
+

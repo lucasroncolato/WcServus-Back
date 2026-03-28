@@ -2,12 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class CreateScheduleSlotDto {
-  @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'Ministerio da vaga.' })
   @IsOptional()
   @IsString()
   ministryId?: string;

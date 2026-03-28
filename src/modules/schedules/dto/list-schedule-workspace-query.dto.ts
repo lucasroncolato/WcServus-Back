@@ -12,12 +12,7 @@ export class ListScheduleWorkspaceQueryDto {
   @IsDateString()
   endDate?: string;
 
-  @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'Ministerio do contexto operacional.' })
   @IsOptional()
   @IsString()
   ministryId?: string;

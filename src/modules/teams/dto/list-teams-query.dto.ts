@@ -14,7 +14,7 @@ export class ListTeamsQueryDto {
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  sectorId?: string;
+  ministryId?: string;
 
   @ApiPropertyOptional({ enum: TeamStatus })
   @IsOptional()

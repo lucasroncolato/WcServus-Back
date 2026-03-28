@@ -3,7 +3,7 @@ import { AlertStatus, AttendanceStatus, PastoralVisitStatus, ServantStatus } fro
 import {
   getAttendanceAccessWhere,
   getPastoralVisitAccessWhere,
-  getSectorAccessWhere,
+  getMinistryAccessWhere,
   getServantAccessWhere,
 } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -21,7 +21,7 @@ export class DashboardService {
       getServantAccessWhere(this.prisma, actor),
       getAttendanceAccessWhere(this.prisma, actor),
       getPastoralVisitAccessWhere(this.prisma, actor),
-      getSectorAccessWhere(this.prisma, actor),
+      getMinistryAccessWhere(this.prisma, actor),
     ]);
 
     const [
@@ -71,7 +71,7 @@ export class DashboardService {
           ...(attendanceScope ? { AND: [attendanceScope] } : {}),
         },
       }),
-      this.prisma.sector.findMany({
+      this.prisma.ministry.findMany({
         where: sectorScope,
         select: {
           id: true,
@@ -131,3 +131,5 @@ export class DashboardService {
     });
   }
 }
+
+

@@ -22,7 +22,7 @@ enum UserStatus {
 
 enum UserScope {
   GLOBAL
-  SETOR
+  MINISTRY
   EQUIPE
   SELF
 }
@@ -227,53 +227,53 @@ enum RewardSource {
 }
 
 model User {
-  id                     String              @id @default(cuid())
-  name                   String
-  email                  String              @unique
-  passwordHash           String
-  role                   Role
-  scope                  UserScope           @default(GLOBAL)
-  status                 UserStatus          @default(ACTIVE)
-  mustChangePassword     Boolean             @default(false)
-  servantId              String?             @unique
-  phone                  String?
-  avatarUrl              String?
-  lastLoginAt            DateTime?
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
-  servant                Servant?            @relation(fields: [servantId], references: [id], onDelete: SetNull)
-  refreshTokens          RefreshToken[]
-  passwordResetTokens    PasswordResetToken[]
-  coordinatedSectors     Sector[]
-  ledTeams               Team[]              @relation("TeamLeader")
-  assignedSchedules      Schedule[]          @relation("AssignedSchedules")
-  assignedScheduleSlots  ScheduleSlot[]      @relation("AssignedScheduleSlots")
-  performedScheduleSlotChanges ScheduleSlotChange[] @relation("PerformedScheduleSlotChanges")
-  scheduleResponses      ScheduleResponseHistory[] @relation("RespondedScheduleAssignments")
-  scheduleSwapHistory    ScheduleSwapHistory[] @relation("SwappedByUser")
-  registeredAttendances  Attendance[]        @relation("RegisteredAttendances")
-  createdPastoralVisits  PastoralVisit[]     @relation("CreatedPastoralVisits")
-  resolvedPastoralVisits PastoralVisit[]     @relation("ResolvedPastoralVisits")
-  createdAlerts          PastoralAlert[]     @relation("AlertCreatedBy")
-  resolvedAlerts         PastoralAlert[]     @relation("AlertResolvedBy")
-  requestedServantApprovals Servant[]        @relation("ServantApprovalRequestedBy")
-  approvedServantApprovals  Servant[]        @relation("ServantApprovalApprovedBy")
-  reviewedServantSectorTrainings ServantSector[] @relation("ServantSectorTrainingReviewedBy")
-  pastoralWeeklyFollowUps   PastoralWeeklyFollowUp[] @relation("PastoralWeeklyFollowUpResponsible")
-  registeredDevotionals     DailyDevotional[] @relation("DailyDevotionalRegisteredBy")
-  registeredFastings        MonthlyFasting[]  @relation("MonthlyFastingRegisteredBy")
-  rejectedTalents           Talent[]          @relation("TalentRejectedBy")
-  reviewedTalents           Talent[]          @relation("TalentReviewedBy")
-  supportRequests           SupportRequest[]  @relation("SupportRequestAuthor")
-  handledSupportRequests    SupportRequest[]  @relation("SupportRequestHandler")
-  grantedRewards            ServantReward[]   @relation("ServantRewardGrantedBy")
-  auditLogs              AuditLog[]
-  scopeBindings          UserScopeBinding[]
-  permissionOverrides    UserPermissionOverride[]
-  notifications          Notification[]
-  notificationPreferences NotificationPreference[]
-  notificationLogs        NotificationLog[]
-  notificationQueue       NotificationQueue[]
+  id                               String                    @id @default(cuid())
+  name                             String
+  email                            String                    @unique
+  passwordHash                     String
+  role                             Role
+  scope                            UserScope                 @default(GLOBAL)
+  status                           UserStatus                @default(ACTIVE)
+  mustChangePassword               Boolean                   @default(false)
+  servantId                        String?                   @unique
+  phone                            String?
+  avatarUrl                        String?
+  lastLoginAt                      DateTime?
+  createdAt                        DateTime                  @default(now())
+  updatedAt                        DateTime                  @updatedAt
+  servant                          Servant?                  @relation(fields: [servantId], references: [id], onDelete: SetNull)
+  refreshTokens                    RefreshToken[]
+  passwordResetTokens              PasswordResetToken[]
+  coordinatedMinistries            Ministry[]
+  ledTeams                         Team[]                    @relation("TeamLeader")
+  assignedSchedules                Schedule[]                @relation("AssignedSchedules")
+  assignedScheduleSlots            ScheduleSlot[]            @relation("AssignedScheduleSlots")
+  performedScheduleSlotChanges     ScheduleSlotChange[]      @relation("PerformedScheduleSlotChanges")
+  scheduleResponses                ScheduleResponseHistory[] @relation("RespondedScheduleAssignments")
+  scheduleSwapHistory              ScheduleSwapHistory[]     @relation("SwappedByUser")
+  registeredAttendances            Attendance[]              @relation("RegisteredAttendances")
+  createdPastoralVisits            PastoralVisit[]           @relation("CreatedPastoralVisits")
+  resolvedPastoralVisits           PastoralVisit[]           @relation("ResolvedPastoralVisits")
+  createdAlerts                    PastoralAlert[]           @relation("AlertCreatedBy")
+  resolvedAlerts                   PastoralAlert[]           @relation("AlertResolvedBy")
+  requestedServantApprovals        Servant[]                 @relation("ServantApprovalRequestedBy")
+  approvedServantApprovals         Servant[]                 @relation("ServantApprovalApprovedBy")
+  reviewedServantMinistryTrainings ServantMinistry[]         @relation("ServantMinistryTrainingReviewedBy")
+  pastoralWeeklyFollowUps          PastoralWeeklyFollowUp[]  @relation("PastoralWeeklyFollowUpResponsible")
+  registeredDevotionals            DailyDevotional[]         @relation("DailyDevotionalRegisteredBy")
+  registeredFastings               MonthlyFasting[]          @relation("MonthlyFastingRegisteredBy")
+  rejectedTalents                  Talent[]                  @relation("TalentRejectedBy")
+  reviewedTalents                  Talent[]                  @relation("TalentReviewedBy")
+  supportRequests                  SupportRequest[]          @relation("SupportRequestAuthor")
+  handledSupportRequests           SupportRequest[]          @relation("SupportRequestHandler")
+  grantedRewards                   ServantReward[]           @relation("ServantRewardGrantedBy")
+  auditLogs                        AuditLog[]
+  scopeBindings                    UserMinistryBinding[]
+  permissionOverrides              UserPermissionOverride[]
+  notifications                    Notification[]
+  notificationPreferences          NotificationPreference[]
+  notificationLogs                 NotificationLog[]
+  notificationQueue                NotificationQueue[]
 
   @@index([role])
   @@index([scope])
@@ -283,119 +283,119 @@ model User {
 }
 
 model RefreshToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   tokenHash String
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   revokedAt DateTime?
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
 }
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   tokenHash String
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
 }
 
-model Sector {
-  id                String    @id @default(cuid())
-  name              String    @unique
-  description       String?
-  color             String?
-  icon              String?
-  popText           String?
-  coordinatorUserId String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  coordinator       User?     @relation(fields: [coordinatorUserId], references: [id])
-  servants          Servant[]
-  servantSectors    ServantSector[]
-  userScopeBindings UserScopeBinding[]
-  schedules         Schedule[]
-  scheduleSlots     ScheduleSlot[]
-  teams             Team[]
+model Ministry {
+  id                      String                   @id @default(cuid())
+  name                    String                   @unique
+  description             String?
+  color                   String?
+  icon                    String?
+  popText                 String?
+  coordinatorUserId       String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  coordinator             User?                    @relation(fields: [coordinatorUserId], references: [id])
+  servants                Servant[]
+  servantMinistries       ServantMinistry[]
+  userScopeBindings       UserMinistryBinding[]
+  schedules               Schedule[]
+  scheduleSlots           ScheduleSlot[]
+  teams                   Team[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
-  responsibilities  MinistryResponsibility[]
+  responsibilities        MinistryResponsibility[]
 
   @@index([coordinatorUserId])
 }
 
 model Team {
-  id                String      @id @default(cuid())
+  id                String                @id @default(cuid())
   name              String
   slug              String?
   description       String?
-  sectorId          String
+  ministryId        String
   leaderUserId      String?
-  status            TeamStatus  @default(ACTIVE)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  sector            Sector      @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  leader            User?       @relation("TeamLeader", fields: [leaderUserId], references: [id], onDelete: SetNull)
+  status            TeamStatus            @default(ACTIVE)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  ministry          Ministry              @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  leader            User?                 @relation("TeamLeader", fields: [leaderUserId], references: [id], onDelete: SetNull)
   servants          Servant[]
-  userScopeBindings UserScopeBinding[]
+  userScopeBindings UserMinistryBinding[]
 
-  @@index([sectorId])
+  @@unique([ministryId, name])
+  @@index([ministryId])
   @@index([leaderUserId])
   @@index([status])
-  @@unique([sectorId, name])
 }
 
 model Servant {
-  id                String               @id @default(cuid())
-  name              String
-  phone             String?
-  gender            Gender?
-  birthDate         DateTime?
-  status            ServantStatus        @default(RECRUTAMENTO)
-  trainingStatus    TrainingStatus       @default(PENDING)
-  approvalStatus    ServantApprovalStatus @default(APPROVED)
+  id                        String                   @id @default(cuid())
+  name                      String
+  phone                     String?
+  gender                    Gender?
+  birthDate                 DateTime?
+  status                    ServantStatus            @default(RECRUTAMENTO)
+  trainingStatus            TrainingStatus           @default(PENDING)
+  approvalStatus            ServantApprovalStatus    @default(APPROVED)
   approvalRequestedByUserId String?
-  approvedByUserId  String?
-  approvalUpdatedAt DateTime?
-  approvalNotes     String?
-  aptitude          Aptitude?
-  mainSectorId      String?
-  teamId            String?
-  notes             String?
-  joinedAt          DateTime?
-  consecutiveAbsences Int                @default(0)
-  monthlyAbsences   Int                  @default(0)
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  mainSector        Sector?              @relation(fields: [mainSectorId], references: [id])
-  team              Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  servantSectors    ServantSector[]
-  schedules         Schedule[]
-  scheduleSlots     ScheduleSlot[]
-  availabilities    ServantAvailability[]
-  attendances       Attendance[]
-  pastoralVisits    PastoralVisit[]
-  pastoralAlerts    PastoralAlert[]
-  pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
-  devotionals       DailyDevotional[]
-  monthlyFastings   MonthlyFasting[]
-  responsibilities  MinistryResponsibility[] @relation("ResponsibilityOwnerServant")
-  rewards           ServantReward[]
-  talents           Talent[]
-  statusHistory     ServantStatusHistory[]
-  userAccount       User?
-  approvalRequestedBy User?              @relation("ServantApprovalRequestedBy", fields: [approvalRequestedByUserId], references: [id], onDelete: SetNull)
-  approvedBy        User?                @relation("ServantApprovalApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  notificationPreferences NotificationPreference[]
-  notificationLogs        NotificationLog[]
-  notificationQueue       NotificationQueue[]
+  approvedByUserId          String?
+  approvalUpdatedAt         DateTime?
+  approvalNotes             String?
+  aptitude                  Aptitude?
+  mainMinistryId            String?
+  teamId                    String?
+  notes                     String?
+  joinedAt                  DateTime?
+  consecutiveAbsences       Int                      @default(0)
+  monthlyAbsences           Int                      @default(0)
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  mainMinistry              Ministry?                @relation(fields: [mainMinistryId], references: [id])
+  team                      Team?                    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  servantMinistries         ServantMinistry[]
+  schedules                 Schedule[]
+  scheduleSlots             ScheduleSlot[]
+  availabilities            ServantAvailability[]
+  attendances               Attendance[]
+  pastoralVisits            PastoralVisit[]
+  pastoralAlerts            PastoralAlert[]
+  pastoralWeeklyFollowUps   PastoralWeeklyFollowUp[]
+  devotionals               DailyDevotional[]
+  monthlyFastings           MonthlyFasting[]
+  responsibilities          MinistryResponsibility[] @relation("ResponsibilityOwnerServant")
+  rewards                   ServantReward[]
+  talents                   Talent[]
+  statusHistory             ServantStatusHistory[]
+  userAccount               User?
+  approvalRequestedBy       User?                    @relation("ServantApprovalRequestedBy", fields: [approvalRequestedByUserId], references: [id], onDelete: SetNull)
+  approvedBy                User?                    @relation("ServantApprovalApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  notificationPreferences   NotificationPreference[]
+  notificationLogs          NotificationLog[]
+  notificationQueue         NotificationQueue[]
 
   @@index([name])
   @@index([status])
@@ -403,123 +403,123 @@ model Servant {
   @@index([approvalStatus])
   @@index([approvalRequestedByUserId])
   @@index([approvedByUserId])
-  @@index([mainSectorId])
+  @@index([mainMinistryId])
   @@index([teamId])
 }
 
-model ServantSector {
-  id        String   @id @default(cuid())
-  servantId String
-  sectorId  String
-  trainingStatus TrainingStatus @default(PENDING)
-  trainingCompletedAt DateTime?
+model ServantMinistry {
+  id                       String         @id @default(cuid())
+  servantId                String
+  ministryId               String
+  trainingStatus           TrainingStatus @default(PENDING)
+  trainingCompletedAt      DateTime?
   trainingReviewedByUserId String?
-  trainingNotes String?
-  createdAt DateTime @default(now())
-  servant   Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  trainingReviewedBy User? @relation("ServantSectorTrainingReviewedBy", fields: [trainingReviewedByUserId], references: [id], onDelete: SetNull)
+  trainingNotes            String?
+  createdAt                DateTime       @default(now())
+  servant                  Servant        @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  ministry                 Ministry       @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  trainingReviewedBy       User?          @relation("ServantMinistryTrainingReviewedBy", fields: [trainingReviewedByUserId], references: [id], onDelete: SetNull)
 
-  @@unique([servantId, sectorId])
-  @@index([sectorId])
-  @@index([sectorId, trainingStatus])
+  @@unique([servantId, ministryId])
+  @@index([ministryId])
+  @@index([ministryId, trainingStatus])
   @@index([trainingReviewedByUserId])
 }
 
 model ServantStatusHistory {
-  id          String       @id @default(cuid())
-  servantId   String
-  fromStatus  ServantStatus?
-  toStatus    ServantStatus
-  reason      String?
-  createdAt   DateTime     @default(now())
-  servant     Servant      @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  id         String         @id @default(cuid())
+  servantId  String
+  fromStatus ServantStatus?
+  toStatus   ServantStatus
+  reason     String?
+  createdAt  DateTime       @default(now())
+  servant    Servant        @relation(fields: [servantId], references: [id], onDelete: Cascade)
 
   @@index([servantId, createdAt])
 }
 
 model WorshipService {
-  id          String               @id @default(cuid())
-  type        WorshipServiceType
-  title       String
-  serviceDate DateTime
-  startTime   String
-  notes       String?
-  status      WorshipServiceStatus @default(PLANEJADO)
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  schedules   Schedule[]
+  id            String               @id @default(cuid())
+  type          WorshipServiceType
+  title         String
+  serviceDate   DateTime
+  startTime     String
+  notes         String?
+  status        WorshipServiceStatus @default(PLANEJADO)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  schedules     Schedule[]
   scheduleSlots ScheduleSlot[]
-  attendances Attendance[]
+  attendances   Attendance[]
 
+  @@unique([serviceDate, startTime, title])
   @@index([serviceDate])
   @@index([type])
-  @@unique([serviceDate, startTime, title])
 }
 
 model Schedule {
-  id               String         @id @default(cuid())
-  serviceId        String
-  servantId        String
-  sectorId         String
-  assignedByUserId String
-  status           ScheduleStatus @default(ASSIGNED)
-  responseStatus   ScheduleResponseStatus @default(PENDING)
-  responseAt       DateTime?
-  declineReason    String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  service          WorshipService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  servant          Servant        @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  sector           Sector         @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  assignedBy       User           @relation("AssignedSchedules", fields: [assignedByUserId], references: [id])
-  swapHistoryFrom  ScheduleSwapHistory[] @relation("SwapFromSchedule")
-  swapHistoryTo    ScheduleSwapHistory[] @relation("SwapToSchedule")
-  responseHistory  ScheduleResponseHistory[]
+  id                      String                    @id @default(cuid())
+  serviceId               String
+  servantId               String
+  ministryId              String
+  assignedByUserId        String
+  status                  ScheduleStatus            @default(ASSIGNED)
+  responseStatus          ScheduleResponseStatus    @default(PENDING)
+  responseAt              DateTime?
+  declineReason           String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  service                 WorshipService            @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  servant                 Servant                   @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  ministry                Ministry                  @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  assignedBy              User                      @relation("AssignedSchedules", fields: [assignedByUserId], references: [id])
+  swapHistoryFrom         ScheduleSwapHistory[]     @relation("SwapFromSchedule")
+  swapHistoryTo           ScheduleSwapHistory[]     @relation("SwapToSchedule")
+  responseHistory         ScheduleResponseHistory[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
-  scheduleSlots ScheduleSlot[]
+  scheduleSlots           ScheduleSlot[]
 
+  @@unique([serviceId, servantId, ministryId])
   @@index([serviceId])
   @@index([servantId])
-  @@index([sectorId])
+  @@index([ministryId])
   @@index([status])
   @@index([responseStatus])
-  @@unique([serviceId, servantId, sectorId])
 }
 
 model ScheduleSlot {
-  id                String             @id @default(cuid())
+  id                String                  @id @default(cuid())
   serviceId         String
-  sectorId          String
+  ministryId        String
   scheduleId        String?
   responsibilityId  String?
   functionName      String
   slotLabel         String?
-  position          Int                @default(1)
-  required          Boolean            @default(true)
-  requiredTraining  Boolean            @default(true)
-  blocked           Boolean            @default(false)
+  position          Int                     @default(1)
+  required          Boolean                 @default(true)
+  requiredTraining  Boolean                 @default(true)
+  blocked           Boolean                 @default(false)
   blockedReason     String?
-  status            ScheduleSlotStatus @default(OPEN)
+  status            ScheduleSlotStatus      @default(OPEN)
   assignedServantId String?
   assignedByUserId  String?
   notes             String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  service           WorshipService     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  sector            Sector             @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  schedule          Schedule?          @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  service           WorshipService          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  ministry          Ministry                @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  schedule          Schedule?               @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   responsibility    MinistryResponsibility? @relation(fields: [responsibilityId], references: [id], onDelete: SetNull)
-  assignedServant   Servant?           @relation(fields: [assignedServantId], references: [id], onDelete: SetNull)
-  assignedBy        User?              @relation("AssignedScheduleSlots", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  assignedServant   Servant?                @relation(fields: [assignedServantId], references: [id], onDelete: SetNull)
+  assignedBy        User?                   @relation("AssignedScheduleSlots", fields: [assignedByUserId], references: [id], onDelete: SetNull)
   changes           ScheduleSlotChange[]
 
-  @@index([serviceId, sectorId])
+  @@unique([serviceId, ministryId, functionName, position])
+  @@index([serviceId, ministryId])
   @@index([status])
   @@index([assignedServantId])
   @@index([responsibilityId])
   @@index([scheduleId])
-  @@unique([serviceId, sectorId, functionName, position])
 }
 
 model ScheduleSlotChange {
@@ -570,15 +570,15 @@ model ServantAvailability {
 }
 
 model ScheduleSwapHistory {
-  id                String   @id @default(cuid())
-  fromScheduleId    String
-  toScheduleId      String
-  reason            String?
-  swappedByUserId   String
-  createdAt         DateTime @default(now())
-  fromSchedule      Schedule @relation("SwapFromSchedule", fields: [fromScheduleId], references: [id], onDelete: Cascade)
-  toSchedule        Schedule @relation("SwapToSchedule", fields: [toScheduleId], references: [id], onDelete: Cascade)
-  swappedBy         User     @relation("SwappedByUser", fields: [swappedByUserId], references: [id])
+  id              String   @id @default(cuid())
+  fromScheduleId  String
+  toScheduleId    String
+  reason          String?
+  swappedByUserId String
+  createdAt       DateTime @default(now())
+  fromSchedule    Schedule @relation("SwapFromSchedule", fields: [fromScheduleId], references: [id], onDelete: Cascade)
+  toSchedule      Schedule @relation("SwapToSchedule", fields: [toScheduleId], references: [id], onDelete: Cascade)
+  swappedBy       User     @relation("SwappedByUser", fields: [swappedByUserId], references: [id])
 
   @@index([createdAt])
   @@index([swappedByUserId])
@@ -598,27 +598,27 @@ model Attendance {
   servant            Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
   registeredBy       User             @relation("RegisteredAttendances", fields: [registeredByUserId], references: [id])
 
+  @@unique([serviceId, servantId])
   @@index([serviceId])
   @@index([servantId])
   @@index([status])
-  @@unique([serviceId, servantId])
 }
 
 model PastoralVisit {
-  id               String             @id @default(cuid())
+  id               String              @id @default(cuid())
   servantId        String
   reason           String
   status           PastoralVisitStatus @default(ABERTA)
-  openedAt         DateTime           @default(now())
+  openedAt         DateTime            @default(now())
   resolvedAt       DateTime?
   notes            String?
   createdByUserId  String
   resolvedByUserId String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  servant          Servant            @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  createdBy        User               @relation("CreatedPastoralVisits", fields: [createdByUserId], references: [id])
-  resolvedBy       User?              @relation("ResolvedPastoralVisits", fields: [resolvedByUserId], references: [id])
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  servant          Servant             @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  createdBy        User                @relation("CreatedPastoralVisits", fields: [createdByUserId], references: [id])
+  resolvedBy       User?               @relation("ResolvedPastoralVisits", fields: [resolvedByUserId], references: [id])
 
   @@index([servantId])
   @@index([status])
@@ -626,25 +626,25 @@ model PastoralVisit {
 }
 
 model PastoralWeeklyFollowUp {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   servantId         String
-  sectorId          String
+  ministryId        String
   scheduleId        String?
   weekStartDate     DateTime
-  contactedAt       DateTime @default(now())
+  contactedAt       DateTime  @default(now())
   notes             String?
   responsibleUserId String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  servant           Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  sector            Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  servant           Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  ministry          Ministry  @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   schedule          Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  responsible       User     @relation("PastoralWeeklyFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: Cascade)
+  responsible       User      @relation("PastoralWeeklyFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: Cascade)
 
-  @@unique([servantId, sectorId, weekStartDate])
+  @@unique([servantId, ministryId, weekStartDate])
   @@index([weekStartDate])
   @@index([servantId, weekStartDate])
-  @@index([sectorId, weekStartDate])
+  @@index([ministryId, weekStartDate])
   @@index([scheduleId])
   @@index([responsibleUserId])
 }
@@ -705,23 +705,23 @@ model PastoralAlert {
 }
 
 model Talent {
-  id         String      @id @default(cuid())
-  servantId  String
-  stage      TalentStage
-  reviewStatus TalentReviewStatus @default(NOT_REQUIRED)
-  rejectionReason String?
+  id               String             @id @default(cuid())
+  servantId        String
+  stage            TalentStage
+  reviewStatus     TalentReviewStatus @default(NOT_REQUIRED)
+  rejectionReason  String?
   rejectedByUserId String?
-  rejectedAt  DateTime?
+  rejectedAt       DateTime?
   reviewedByUserId String?
-  reviewedAt  DateTime?
-  reviewNotes String?
-  notes      String?
-  approvedAt DateTime?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  servant    Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  rejectedBy User?       @relation("TalentRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
-  reviewedBy User?       @relation("TalentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reviewedAt       DateTime?
+  reviewNotes      String?
+  notes            String?
+  approvedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  servant          Servant            @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  rejectedBy       User?              @relation("TalentRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  reviewedBy       User?              @relation("TalentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
 
   @@index([servantId])
   @@index([stage])
@@ -731,19 +731,19 @@ model Talent {
 }
 
 model SupportRequest {
-  id             String               @id @default(cuid())
-  type           SupportRequestType
-  subject        String
-  description    String
-  reference      String?
-  status         SupportRequestStatus @default(ABERTO)
-  authorUserId   String
+  id              String               @id @default(cuid())
+  type            SupportRequestType
+  subject         String
+  description     String
+  reference       String?
+  status          SupportRequestStatus @default(ABERTO)
+  authorUserId    String
   handledByUserId String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  handledAt      DateTime?
-  author         User                 @relation("SupportRequestAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
-  handledBy      User?                @relation("SupportRequestHandler", fields: [handledByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  handledAt       DateTime?
+  author          User                 @relation("SupportRequestAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
+  handledBy       User?                @relation("SupportRequestHandler", fields: [handledByUserId], references: [id], onDelete: SetNull)
 
   @@index([authorUserId, createdAt])
   @@index([status, createdAt])
@@ -751,19 +751,19 @@ model SupportRequest {
 }
 
 model MinistryResponsibility {
-  id                  String   @id @default(cuid())
-  ministryId          String
-  title               String
-  activity            String?
-  functionName        String?
-  description         String?
+  id                   String         @id @default(cuid())
+  ministryId           String
+  title                String
+  activity             String?
+  functionName         String?
+  description          String?
   responsibleServantId String?
-  active              Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  ministry            Sector   @relation(fields: [ministryId], references: [id], onDelete: Cascade)
-  responsibleServant  Servant? @relation("ResponsibilityOwnerServant", fields: [responsibleServantId], references: [id], onDelete: SetNull)
-  scheduleSlots       ScheduleSlot[]
+  active               Boolean        @default(true)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  ministry             Ministry       @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  responsibleServant   Servant?       @relation("ResponsibilityOwnerServant", fields: [responsibleServantId], references: [id], onDelete: SetNull)
+  scheduleSlots        ScheduleSlot[]
 
   @@index([ministryId, active])
   @@index([responsibleServantId])
@@ -783,41 +783,41 @@ model ServantReward {
   servant         Servant      @relation(fields: [servantId], references: [id], onDelete: Cascade)
   grantedBy       User?        @relation("ServantRewardGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
 
+  @@unique([servantId, source, referenceId])
   @@index([servantId, rewardedAt])
   @@index([source, rewardedAt])
   @@index([grantedByUserId])
-  @@unique([servantId, source, referenceId])
 }
 
 model AuditLog {
-  id         String      @id @default(cuid())
-  action     AuditAction
-  entity     String
-  entityId   String
-  metadata   Json?
-  userId     String?
-  createdAt  DateTime    @default(now())
-  user       User?       @relation(fields: [userId], references: [id])
+  id        String      @id @default(cuid())
+  action    AuditAction
+  entity    String
+  entityId  String
+  metadata  Json?
+  userId    String?
+  createdAt DateTime    @default(now())
+  user      User?       @relation(fields: [userId], references: [id])
 
   @@index([entity, entityId])
   @@index([action])
   @@index([createdAt])
 }
 
-model UserScopeBinding {
-  id        String   @id @default(cuid())
-  userId    String
-  sectorId  String?
-  teamId    String?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sector    Sector?  @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  team      Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+model UserMinistryBinding {
+  id         String    @id @default(cuid())
+  userId     String
+  ministryId String?
+  teamId     String?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ministry   Ministry? @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  team       Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, ministryId, teamId])
   @@index([userId])
-  @@index([sectorId])
+  @@index([ministryId])
   @@index([teamId])
-  @@unique([userId, sectorId, teamId])
 }
 
 model UserPermissionOverride {
@@ -836,7 +836,7 @@ model UserPermissionOverride {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   type      String
   title     String
@@ -844,8 +844,8 @@ model Notification {
   link      String?
   metadata  Json?
   readAt    DateTime?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
@@ -853,18 +853,18 @@ model Notification {
 }
 
 model NotificationTemplate {
-  id          String                     @id @default(cuid())
-  eventKey    String
-  channel     NotificationChannel
-  provider    NotificationProvider?      @default(MOCK)
-  name        String
-  content     String
-  variables   Json?
-  status      NotificationTemplateStatus @default(ACTIVE)
-  createdAt   DateTime                   @default(now())
-  updatedAt   DateTime                   @updatedAt
-  queueItems  NotificationQueue[]
-  logs        NotificationLog[]
+  id         String                     @id @default(cuid())
+  eventKey   String
+  channel    NotificationChannel
+  provider   NotificationProvider?      @default(MOCK)
+  name       String
+  content    String
+  variables  Json?
+  status     NotificationTemplateStatus @default(ACTIVE)
+  createdAt  DateTime                   @default(now())
+  updatedAt  DateTime                   @updatedAt
+  queueItems NotificationQueue[]
+  logs       NotificationLog[]
 
   @@unique([eventKey, channel])
   @@index([channel, status])
@@ -881,16 +881,16 @@ model NotificationPreference {
   user      User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
   servant   Servant?            @relation(fields: [servantId], references: [id], onDelete: Cascade)
 
-  @@index([channel, enabled])
   @@unique([userId, channel])
   @@unique([servantId, channel])
+  @@index([channel, enabled])
 }
 
 model NotificationQueue {
-  id                String                @id @default(cuid())
+  id                String                  @id @default(cuid())
   eventKey          String
-  channel           NotificationChannel   @default(WHATSAPP)
-  provider          NotificationProvider  @default(MOCK)
+  channel           NotificationChannel     @default(WHATSAPP)
+  provider          NotificationProvider    @default(MOCK)
   status            NotificationQueueStatus @default(PENDING)
   userId            String?
   servantId         String?
@@ -899,18 +899,18 @@ model NotificationQueue {
   templateId        String?
   payload           Json?
   renderedMessage   String
-  attemptCount      Int                   @default(0)
-  maxAttempts       Int                   @default(3)
-  nextRetryAt       DateTime              @default(now())
+  attemptCount      Int                     @default(0)
+  maxAttempts       Int                     @default(3)
+  nextRetryAt       DateTime                @default(now())
   lockedAt          DateTime?
   processedAt       DateTime?
   providerMessageId String?
   lastError         String?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  user              User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
-  servant           Servant?              @relation(fields: [servantId], references: [id], onDelete: SetNull)
-  template          NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  user              User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  servant           Servant?                @relation(fields: [servantId], references: [id], onDelete: SetNull)
+  template          NotificationTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
   logs              NotificationLog[]
 
   @@index([channel, status, nextRetryAt])
@@ -919,11 +919,11 @@ model NotificationQueue {
 }
 
 model NotificationLog {
-  id                String                   @id @default(cuid())
+  id                String                     @id @default(cuid())
   queueId           String?
   eventKey          String
-  channel           NotificationChannel      @default(WHATSAPP)
-  provider          NotificationProvider     @default(MOCK)
+  channel           NotificationChannel        @default(WHATSAPP)
+  provider          NotificationProvider       @default(MOCK)
   status            NotificationDeliveryStatus
   userId            String?
   servantId         String?
@@ -932,13 +932,13 @@ model NotificationLog {
   payload           Json?
   providerMessageId String?
   error             String?
-  attempt           Int                      @default(1)
+  attempt           Int                        @default(1)
   sentAt            DateTime?
-  createdAt         DateTime                 @default(now())
-  queue             NotificationQueue?       @relation(fields: [queueId], references: [id], onDelete: SetNull)
-  template          NotificationTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  user              User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  servant           Servant?                 @relation(fields: [servantId], references: [id], onDelete: SetNull)
+  createdAt         DateTime                   @default(now())
+  queue             NotificationQueue?         @relation(fields: [queueId], references: [id], onDelete: SetNull)
+  template          NotificationTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  user              User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  servant           Servant?                   @relation(fields: [servantId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([status, channel])

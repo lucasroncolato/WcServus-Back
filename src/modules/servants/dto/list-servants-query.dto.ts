@@ -22,11 +22,6 @@ export class ListServantsQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
   ministryId?: string;
 
   @ApiPropertyOptional()
@@ -39,3 +34,4 @@ export class ListServantsQueryDto {
   @IsString()
   search?: string;
 }
+

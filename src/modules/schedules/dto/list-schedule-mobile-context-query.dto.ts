@@ -3,12 +3,7 @@ import { Transform } from 'class-transformer';
 import { IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class ListScheduleMobileContextQueryDto {
-  @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'Ministerio para contexto mobile.' })
   @IsOptional()
   @IsString()
   ministryId?: string;

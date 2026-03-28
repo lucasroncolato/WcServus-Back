@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, Prisma, Role, TeamStatus } from '@prisma/client';
-import { assertSectorAccess, assertTeamAccess, getTeamAccessWhere } from 'src/common/auth/access-scope';
+import { assertTeamAccess, getTeamAccessWhere, assertMinistryAccess } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -27,7 +27,7 @@ export class TeamsService {
     const search = query.search?.trim();
 
     const queryWhere: Prisma.TeamWhereInput = {
-      sectorId: query.sectorId,
+      ministryId: query.ministryId,
       status: query.status,
       ...(search
         ? {
@@ -44,15 +44,15 @@ export class TeamsService {
     const records = await this.prisma.team.findMany({
       where,
       include: {
-        sector: { select: { id: true, name: true } },
+        ministry: { select: { id: true, name: true } },
         leader: { select: { id: true, name: true, email: true } },
         _count: { select: { servants: true } },
       },
-      orderBy: [{ sector: { name: 'asc' } }, { name: 'asc' }],
+      orderBy: [{ ministry: { name: 'asc' } }, { name: 'asc' }],
     });
 
     return {
-      data: records,
+      data: records.map((record) => this.serializeTeam(record)),
     };
   }
 
@@ -62,7 +62,7 @@ export class TeamsService {
     const team = await this.prisma.team.findUnique({
       where: { id },
       include: {
-        sector: { select: { id: true, name: true } },
+        ministry: { select: { id: true, name: true } },
         leader: { select: { id: true, name: true, email: true, role: true } },
         _count: { select: { servants: true } },
       },
@@ -72,7 +72,7 @@ export class TeamsService {
       throw new NotFoundException('Team not found');
     }
 
-    return { data: team };
+    return { data: this.serializeTeam(team) };
   }
 
   async create(dto: CreateTeamDto, actor: JwtPayload) {
@@ -81,17 +81,17 @@ export class TeamsService {
     }
 
     if (actor.role === Role.COORDENADOR) {
-      await assertSectorAccess(this.prisma, actor, dto.sectorId);
+      await assertMinistryAccess(this.prisma, actor, dto.ministryId);
     }
 
-    await this.ensureSectorExists(dto.sectorId);
+    await this.ensureMinistryExists(dto.ministryId);
 
     const existing = await this.prisma.team.findFirst({
-      where: { sectorId: dto.sectorId, name: dto.name },
+      where: { ministryId: dto.ministryId, name: dto.name },
       select: { id: true },
     });
     if (existing) {
-      throw new ConflictException('A team with this name already exists in this sector');
+      throw new ConflictException('A team with this name already exists in this ministry');
     }
 
     const created = await this.prisma.team.create({
@@ -99,11 +99,11 @@ export class TeamsService {
         name: dto.name,
         slug: dto.slug,
         description: dto.description,
-        sectorId: dto.sectorId,
+        ministryId: dto.ministryId,
         status: dto.status ?? TeamStatus.ACTIVE,
       },
       include: {
-        sector: { select: { id: true, name: true } },
+        ministry: { select: { id: true, name: true } },
         leader: { select: { id: true, name: true, email: true } },
       },
     });
@@ -116,7 +116,7 @@ export class TeamsService {
       metadata: dto as unknown as Record<string, unknown>,
     });
 
-    return { data: created };
+    return { data: this.serializeTeam(created) };
   }
 
   async update(id: string, dto: UpdateTeamDto, actor: JwtPayload) {
@@ -126,7 +126,7 @@ export class TeamsService {
 
     const current = await this.prisma.team.findUnique({
       where: { id },
-      select: { id: true, name: true, sectorId: true, status: true },
+      select: { id: true, name: true, ministryId: true, status: true },
     });
 
     if (!current) {
@@ -134,16 +134,16 @@ export class TeamsService {
     }
 
     if (actor.role === Role.COORDENADOR) {
-      await assertSectorAccess(this.prisma, actor, current.sectorId);
+      await assertMinistryAccess(this.prisma, actor, current.ministryId);
     }
 
     if (dto.name && dto.name !== current.name) {
       const duplicated = await this.prisma.team.findFirst({
-        where: { id: { not: id }, sectorId: current.sectorId, name: dto.name },
+        where: { id: { not: id }, ministryId: current.ministryId, name: dto.name },
         select: { id: true },
       });
       if (duplicated) {
-        throw new ConflictException('A team with this name already exists in this sector');
+        throw new ConflictException('A team with this name already exists in this ministry');
       }
     }
 
@@ -156,7 +156,7 @@ export class TeamsService {
         status: dto.status,
       },
       include: {
-        sector: { select: { id: true, name: true } },
+        ministry: { select: { id: true, name: true } },
         leader: { select: { id: true, name: true, email: true } },
       },
     });
@@ -169,7 +169,7 @@ export class TeamsService {
       metadata: dto as unknown as Record<string, unknown>,
     });
 
-    return { data: updated };
+    return { data: this.serializeTeam(updated) };
   }
 
   async remove(id: string, actor: JwtPayload) {
@@ -183,7 +183,7 @@ export class TeamsService {
       where: { id },
       data: { status: TeamStatus.INACTIVE },
       include: {
-        sector: { select: { id: true, name: true } },
+        ministry: { select: { id: true, name: true } },
         leader: { select: { id: true, name: true, email: true } },
       },
     });
@@ -196,10 +196,7 @@ export class TeamsService {
       metadata: { status: TeamStatus.INACTIVE },
     });
 
-    return {
-      message: 'Team inactivated successfully',
-      data: updated,
-    };
+    return { message: 'Team inactivated successfully', data: this.serializeTeam(updated) };
   }
 
   async members(id: string, actor: JwtPayload) {
@@ -209,7 +206,7 @@ export class TeamsService {
     const servants = await this.prisma.servant.findMany({
       where: { teamId: id },
       include: {
-        mainSector: { select: { id: true, name: true } },
+        mainMinistry: { select: { id: true, name: true } },
       },
       orderBy: { name: 'asc' },
     });
@@ -225,11 +222,11 @@ export class TeamsService {
     const [team, servant] = await Promise.all([
       this.prisma.team.findUnique({
         where: { id: teamId },
-        select: { id: true, sectorId: true, status: true },
+        select: { id: true, ministryId: true, status: true },
       }),
       this.prisma.servant.findUnique({
         where: { id: servantId },
-        select: { id: true, mainSectorId: true, servantSectors: { select: { sectorId: true } } },
+        select: { id: true, mainMinistryId: true, servantMinistries: { select: { ministryId: true } } },
       }),
     ]);
 
@@ -243,21 +240,21 @@ export class TeamsService {
       throw new BadRequestException('Cannot add member to an inactive team');
     }
 
-    const servantSectorIds = new Set([
-      ...(servant.mainSectorId ? [servant.mainSectorId] : []),
-      ...servant.servantSectors.map((item) => item.sectorId),
+    const servantMinistryIds = new Set([
+      ...(servant.mainMinistryId ? [servant.mainMinistryId] : []),
+      ...servant.servantMinistries.map((item) => item.ministryId),
     ]);
 
-    if (!servantSectorIds.has(team.sectorId)) {
-      throw new BadRequestException('Servant does not belong to the team sector');
+    if (!servantMinistryIds.has(team.ministryId)) {
+      throw new BadRequestException('Servant does not belong to the team ministry');
     }
 
     const updated = await this.prisma.servant.update({
       where: { id: servantId },
       data: { teamId },
       include: {
-        mainSector: { select: { id: true, name: true } },
-        team: { select: { id: true, name: true, sectorId: true } },
+        mainMinistry: { select: { id: true, name: true } },
+        team: { select: { id: true, name: true, ministryId: true } },
       },
     });
 
@@ -290,7 +287,7 @@ export class TeamsService {
       where: { id: servantId },
       data: { teamId: null },
       include: {
-        mainSector: { select: { id: true, name: true } },
+        mainMinistry: { select: { id: true, name: true } },
       },
     });
 
@@ -314,7 +311,7 @@ export class TeamsService {
         where: { id: teamId },
         data: { leaderUserId: null },
         include: {
-          sector: { select: { id: true, name: true } },
+          ministry: { select: { id: true, name: true } },
           leader: { select: { id: true, name: true, email: true } },
         },
       });
@@ -360,7 +357,7 @@ export class TeamsService {
       where: { id: teamId },
       data: { leaderUserId: dto.leaderUserId },
       include: {
-        sector: { select: { id: true, name: true } },
+        ministry: { select: { id: true, name: true } },
         leader: { select: { id: true, name: true, email: true } },
       },
     });
@@ -373,7 +370,7 @@ export class TeamsService {
       metadata: { leaderUserId: dto.leaderUserId },
     });
 
-    return { data: updated };
+    return { data: this.serializeTeam(updated) };
   }
 
   private async assertCanManageMembers(actor: JwtPayload, teamId: string) {
@@ -387,14 +384,14 @@ export class TeamsService {
 
     const team = await this.prisma.team.findUnique({
       where: { id: teamId },
-      select: { id: true, sectorId: true },
+      select: { id: true, ministryId: true },
     });
 
     if (!team) {
       throw new NotFoundException('Team not found');
     }
 
-    await assertSectorAccess(this.prisma, actor, team.sectorId);
+    await assertMinistryAccess(this.prisma, actor, team.ministryId);
   }
 
   private async ensureTeamExists(id: string) {
@@ -407,13 +404,24 @@ export class TeamsService {
     }
   }
 
-  private async ensureSectorExists(id: string) {
-    const found = await this.prisma.sector.findUnique({
+  private async ensureMinistryExists(id: string) {
+    const found = await this.prisma.ministry.findUnique({
       where: { id },
       select: { id: true },
     });
     if (!found) {
-      throw new NotFoundException('Sector not found');
+      throw new NotFoundException('Ministry not found');
     }
   }
+
+  private serializeTeam<T extends { ministryId: string; ministry?: { id: string; name: string } | null }>(team: T) {
+    return {
+      ...team,
+      ministryId: team.ministryId,
+      ministry: team.ministry ? { id: team.ministry.id, name: team.ministry.name } : null,
+    };
+  }
 }
+
+
+

@@ -259,16 +259,16 @@ export class AuthService {
                 name: true,
               },
             },
-            mainSectorId: true,
-            mainSector: {
+            mainMinistryId: true,
+            mainMinistry: {
               select: {
                 id: true,
                 name: true,
               },
             },
-            servantSectors: {
+            servantMinistries: {
               select: {
-                sector: {
+                ministry: {
                   select: {
                     id: true,
                     name: true,
@@ -278,7 +278,7 @@ export class AuthService {
             },
           },
         },
-        coordinatedSectors: {
+        coordinatedMinistries: {
           select: {
             id: true,
             name: true,
@@ -286,9 +286,9 @@ export class AuthService {
         },
         scopeBindings: {
           select: {
-            sectorId: true,
+            ministryId: true,
             teamId: true,
-            sector: {
+            ministry: {
               select: {
                 id: true,
                 name: true,
@@ -308,15 +308,15 @@ export class AuthService {
     });
 
     const linkedSector =
-      account.servant?.mainSector ??
-      account.servant?.servantSectors[0]?.sector ??
-      account.coordinatedSectors[0] ??
+      account.servant?.mainMinistry ??
+      account.servant?.servantMinistries[0]?.ministry ??
+      account.coordinatedMinistries[0] ??
       null;
 
-    const sectorIds = [
+    const ministryIds = [
       ...new Set(
         account.scopeBindings
-          .map((binding) => binding.sectorId ?? binding.sector?.id ?? null)
+          .map((binding) => binding.ministryId ?? binding.ministry?.id ?? null)
           .filter((value): value is string => Boolean(value)),
       ),
     ];
@@ -335,9 +335,9 @@ export class AuthService {
       role: account.role,
       scope: account.scope,
       scopeType: account.scope,
-      sectorIds,
+      ministryIds,
       teamIds,
-      sectorId: account.servant?.mainSectorId ?? sectorIds[0] ?? null,
+      ministryId: account.servant?.mainMinistryId ?? ministryIds[0] ?? null,
       teamId: account.servant?.teamId ?? teamIds[0] ?? null,
       status: account.status,
       mustChangePassword: account.mustChangePassword,
@@ -355,8 +355,8 @@ export class AuthService {
             teamId: account.servant.teamId,
             teamName: account.servant.team?.name ?? null,
             team: account.servant.team,
-            mainSectorId: account.servant.mainSectorId,
-            sectors: account.servant.servantSectors.map((x) => x.sector),
+            mainMinistryId: account.servant.mainMinistryId,
+            ministries: account.servant.servantMinistries.map((x) => x.ministry),
           }
         : null,
       linkedSector,
@@ -604,3 +604,6 @@ export class AuthService {
     };
   }
 }
+
+
+

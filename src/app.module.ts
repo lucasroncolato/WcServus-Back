@@ -7,7 +7,6 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ServantsModule } from './modules/servants/servants.module';
-import { SectorsModule } from './modules/sectors/sectors.module';
 import { WorshipServicesModule } from './modules/worship-services/worship-services.module';
 import { SchedulesModule } from './modules/schedules/schedules.module';
 import { AttendancesModule } from './modules/attendances/attendances.module';
@@ -38,7 +37,6 @@ import { HealthController } from './health.controller';
     AuthModule,
     UsersModule,
     ServantsModule,
-    SectorsModule,
     WorshipServicesModule,
     SchedulesModule,
     AttendancesModule,

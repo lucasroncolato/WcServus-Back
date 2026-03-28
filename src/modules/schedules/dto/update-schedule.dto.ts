@@ -10,12 +10,7 @@ export class UpdateScheduleDto {
   @IsString()
   servantId?: string;
 
-  @ApiPropertyOptional({ description: 'Novo setor para esta escala' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'Novo ministerio para esta escala' })
   @IsOptional()
   @IsString()
   ministryId?: string;

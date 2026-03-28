@@ -10,7 +10,7 @@ export class ListPastoralWeeklyFollowUpsQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sectorId?: string;
+  ministryId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -32,3 +32,4 @@ export class ListPastoralWeeklyFollowUpsQueryDto {
   @IsDateString()
   weekStartDateTo?: string;
 }
+

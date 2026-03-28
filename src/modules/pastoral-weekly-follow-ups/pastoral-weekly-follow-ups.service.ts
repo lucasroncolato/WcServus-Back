@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { AuditAction, Prisma, Role } from '@prisma/client';
 import {
-  assertSectorAccess,
+  assertMinistryAccess,
   assertServantAccess,
   getScheduleAccessWhere,
   getServantAccessWhere,
@@ -36,14 +36,14 @@ export class PastoralWeeklyFollowUpsService {
   ) {}
 
   async findAll(query: ListPastoralWeeklyFollowUpsQueryDto, actor: JwtPayload) {
-    if (query.sectorId) {
-      await assertSectorAccess(this.prisma, actor, query.sectorId);
+    if (query.ministryId) {
+      await assertMinistryAccess(this.prisma, actor, query.ministryId);
     }
 
     const servantScope = await getServantAccessWhere(this.prisma, actor);
     const queryWhere: Prisma.PastoralWeeklyFollowUpWhereInput = {
       servantId: query.servantId,
-      sectorId: query.sectorId,
+      ministryId: query.ministryId,
       scheduleId: query.scheduleId,
       responsibleUserId: query.responsibleUserId,
       weekStartDate:
@@ -70,9 +70,9 @@ export class PastoralWeeklyFollowUpsService {
       where,
       include: {
         servant: {
-          select: { id: true, name: true, mainSectorId: true, teamId: true },
+          select: { id: true, name: true, mainMinistryId: true, teamId: true },
         },
-        sector: {
+        ministry: {
           select: { id: true, name: true },
         },
         schedule: {
@@ -112,7 +112,7 @@ export class PastoralWeeklyFollowUpsService {
 
     const schedule = await this.prisma.schedule.findFirst({
       where: scheduleScope ? { AND: [scheduleBaseWhere, scheduleScope] } : scheduleBaseWhere,
-      select: { id: true, sectorId: true, serviceId: true },
+      select: { id: true, ministryId: true, serviceId: true },
     });
 
     if (!schedule) {
@@ -122,14 +122,14 @@ export class PastoralWeeklyFollowUpsService {
     }
 
     if (actor.role === Role.COORDENADOR) {
-      await assertSectorAccess(this.prisma, actor, schedule.sectorId);
+      await assertMinistryAccess(this.prisma, actor, schedule.ministryId);
     }
 
     const record = await this.prisma.pastoralWeeklyFollowUp.upsert({
       where: {
-        servantId_sectorId_weekStartDate: {
+        servantId_ministryId_weekStartDate: {
           servantId: dto.servantId,
-          sectorId: schedule.sectorId,
+          ministryId: schedule.ministryId,
           weekStartDate,
         },
       },
@@ -141,7 +141,7 @@ export class PastoralWeeklyFollowUpsService {
       },
       create: {
         servantId: dto.servantId,
-        sectorId: schedule.sectorId,
+        ministryId: schedule.ministryId,
         scheduleId: schedule.id,
         weekStartDate,
         contactedAt: dto.contactedAt ? new Date(dto.contactedAt) : new Date(),
@@ -152,7 +152,7 @@ export class PastoralWeeklyFollowUpsService {
         servant: {
           select: { id: true, name: true },
         },
-        sector: {
+        ministry: {
           select: { id: true, name: true },
         },
         schedule: {
@@ -176,7 +176,7 @@ export class PastoralWeeklyFollowUpsService {
       metadata: {
         servantId: dto.servantId,
         weekStartDate: weekStartDate.toISOString(),
-        sectorId: schedule.sectorId,
+        ministryId: schedule.ministryId,
         scheduleId: schedule.id,
       },
     });
@@ -214,7 +214,7 @@ export class PastoralWeeklyFollowUpsService {
       select: {
         id: true,
         servantId: true,
-        sectorId: true,
+        ministryId: true,
         serviceId: true,
         service: {
           select: {
@@ -223,7 +223,7 @@ export class PastoralWeeklyFollowUpsService {
             serviceDate: true,
           },
         },
-        sector: {
+        ministry: {
           select: {
             id: true,
             name: true,
@@ -233,7 +233,7 @@ export class PastoralWeeklyFollowUpsService {
           select: {
             id: true,
             name: true,
-            mainSectorId: true,
+            mainMinistryId: true,
             teamId: true,
           },
         },
@@ -244,16 +244,16 @@ export class PastoralWeeklyFollowUpsService {
     const uniqueSlots = new Map<string, (typeof schedules)[number]>();
     for (const schedule of schedules) {
       if (actor.role === Role.COORDENADOR) {
-        await assertSectorAccess(this.prisma, actor, schedule.sectorId);
+        await assertMinistryAccess(this.prisma, actor, schedule.ministryId);
       }
-      const slotKey = `${schedule.servantId}:${schedule.sectorId}`;
+      const slotKey = `${schedule.servantId}:${schedule.ministryId}`;
       if (!uniqueSlots.has(slotKey)) {
         uniqueSlots.set(slotKey, schedule);
       }
     }
 
-    const servantSectorPairs = [...uniqueSlots.values()];
-    if (!servantSectorPairs.length) {
+    const servantMinistryPairs = [...uniqueSlots.values()];
+    if (!servantMinistryPairs.length) {
       return {
         weekStartDate,
         weekEndDate,
@@ -269,9 +269,9 @@ export class PastoralWeeklyFollowUpsService {
     const followUps = await this.prisma.pastoralWeeklyFollowUp.findMany({
       where: {
         weekStartDate,
-        OR: servantSectorPairs.map((pair) => ({
+        OR: servantMinistryPairs.map((pair) => ({
           servantId: pair.servantId,
-          sectorId: pair.sectorId,
+          ministryId: pair.ministryId,
         })),
       },
       include: {
@@ -286,18 +286,18 @@ export class PastoralWeeklyFollowUpsService {
     });
 
     const followUpMap = new Map<string, (typeof followUps)[number]>(
-      followUps.map((item) => [`${item.servantId}:${item.sectorId}`, item]),
+      followUps.map((item) => [`${item.servantId}:${item.ministryId}`, item]),
     );
 
-    const items = servantSectorPairs.map((slot) => {
-      const key = `${slot.servantId}:${slot.sectorId}`;
+    const items = servantMinistryPairs.map((slot) => {
+      const key = `${slot.servantId}:${slot.ministryId}`;
       const followUp = followUpMap.get(key);
 
       return {
         servantId: slot.servant.id,
         servantName: slot.servant.name,
-        sectorId: slot.sector.id,
-        sectorName: slot.sector.name,
+        ministryId: slot.ministry.id,
+        sectorName: slot.ministry.name,
         weekStartDate,
         weekEndDate,
         scheduleId: slot.id,
@@ -328,7 +328,7 @@ export class PastoralWeeklyFollowUpsService {
     row: {
       id: string;
       servantId: string;
-      sectorId: string;
+      ministryId: string;
       scheduleId: string | null;
       weekStartDate: Date;
       contactedAt: Date;
@@ -337,7 +337,7 @@ export class PastoralWeeklyFollowUpsService {
       updatedAt: Date;
       responsibleUserId: string;
       servant?: { id: string; name: string } | null;
-      sector?: { id: string; name: string } | null;
+      ministry?: { id: string; name: string } | null;
       schedule?: unknown;
       responsible?: { id: string; name: string; role: Role } | null;
     },
@@ -350,3 +350,6 @@ export class PastoralWeeklyFollowUpsService {
     };
   }
 }
+
+
+

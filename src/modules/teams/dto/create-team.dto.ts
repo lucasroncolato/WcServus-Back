@@ -14,7 +14,7 @@ export class CreateTeamDto {
   @ApiProperty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  sectorId: string;
+  ministryId: string;
 
   @ApiPropertyOptional()
   @IsOptional()

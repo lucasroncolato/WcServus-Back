@@ -10,12 +10,7 @@ export class CreateScheduleDto {
   @IsString()
   servantId: string;
 
-  @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'ID do ministerio da escala.' })
   @IsOptional()
   @IsString()
   ministryId?: string;

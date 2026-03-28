@@ -48,20 +48,9 @@ export class UpdateServantDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  sectorIds?: string[];
-
-  @ApiPropertyOptional({ type: [String], description: 'Nomenclatura oficial do dominio.' })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
   ministryIds?: string[];
 
   @ApiPropertyOptional({ description: 'Retrocompatibilidade.' })
-  @IsOptional()
-  @IsString()
-  mainSectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
   @IsOptional()
   @IsString()
   mainMinistryId?: string;
@@ -76,3 +65,4 @@ export class UpdateServantDto {
   @IsDateString()
   joinedAt?: string;
 }
+

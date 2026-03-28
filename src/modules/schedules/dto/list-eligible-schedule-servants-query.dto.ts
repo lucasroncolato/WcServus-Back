@@ -7,12 +7,7 @@ export class ListEligibleScheduleServantsQueryDto {
   @IsString()
   serviceId: string;
 
-  @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'Ministerio alvo da elegibilidade.' })
   @IsOptional()
   @IsString()
   ministryId?: string;

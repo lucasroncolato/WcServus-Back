@@ -10,14 +10,14 @@ import { SchedulesService } from './schedules.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
-import { resolveScopedSectorIds } from 'src/common/auth/access-scope';
+import { resolveScopedMinistryIds } from 'src/common/auth/access-scope';
 import { ScheduleSlotSwapContextDto } from './dto/contextual-swap-schedule-slot.dto';
 
 jest.mock('src/common/auth/access-scope', () => ({
-  assertSectorAccess: jest.fn(),
+  assertMinistryAccess: jest.fn(),
   assertServantAccess: jest.fn().mockResolvedValue(undefined),
   getScheduleAccessWhere: jest.fn().mockResolvedValue(undefined),
-  resolveScopedSectorIds: jest.fn().mockResolvedValue([]),
+  resolveScopedMinistryIds: jest.fn().mockResolvedValue([]),
 }));
 
 describe('SchedulesService - duplicate', () => {
@@ -30,7 +30,7 @@ describe('SchedulesService - duplicate', () => {
     worshipService: {
       findUnique: jest.fn(),
     },
-    sector: {
+    ministry: {
       findMany: jest.fn(),
     },
     servant: {
@@ -76,7 +76,7 @@ describe('SchedulesService - duplicate', () => {
     prisma.worshipService.findUnique.mockReset();
     prisma.servant.findUnique.mockReset();
     prisma.servantAvailability.findFirst.mockReset();
-    prisma.sector.findMany.mockReset();
+    prisma.ministry.findMany.mockReset();
     prisma.pastoralVisit.count.mockReset();
     prisma.pastoralVisit.findMany.mockReset();
     prisma.pastoralAlert.count.mockReset();
@@ -98,7 +98,7 @@ describe('SchedulesService - duplicate', () => {
       id: 'schedule-1',
       serviceId: 'service-a',
       servantId: 'servant-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       service: { id: 'service-a' },
     });
     prisma.worshipService.findUnique.mockResolvedValue({
@@ -111,8 +111,8 @@ describe('SchedulesService - duplicate', () => {
       status: 'ATIVO',
       trainingStatus: 'COMPLETED',
       approvalStatus: 'APPROVED',
-      mainSectorId: 'sector-1',
-      servantSectors: [],
+      mainMinistryId: 'ministry-1',
+      servantMinistries: [],
       talents: [],
     });
     prisma.schedule.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
@@ -122,7 +122,7 @@ describe('SchedulesService - duplicate', () => {
       status: ScheduleStatus.ASSIGNED,
       service: { title: 'Culto Domingo 19h' },
       servant: { id: 'servant-1', name: 'Servo 1' },
-      sector: { id: 'sector-1', name: 'Louvor' },
+      ministry: { id: 'ministry-1', name: 'Louvor' },
     });
 
     const result = await service.duplicate('schedule-1', { worshipServiceId: 'service-b' }, actor);
@@ -146,7 +146,7 @@ describe('SchedulesService - duplicate', () => {
     prisma.schedule.findUnique.mockResolvedValue({
       id: 'schedule-1',
       servantId: 'servant-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue({ id: 'schedule-1' });
@@ -161,7 +161,7 @@ describe('SchedulesService - duplicate', () => {
     prisma.schedule.findUnique.mockResolvedValue({
       id: 'schedule-1',
       servantId: 'servant-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue({ id: 'existing-schedule' });
@@ -176,8 +176,8 @@ describe('SchedulesService - duplicate', () => {
       status: 'ATIVO',
       trainingStatus: 'COMPLETED',
       approvalStatus: 'APPROVED',
-      mainSectorId: 'sector-1',
-      servantSectors: [],
+      mainMinistryId: 'ministry-1',
+      servantMinistries: [],
       talents: [],
     });
 
@@ -192,7 +192,7 @@ describe('SchedulesService - duplicate', () => {
     prisma.schedule.findUnique.mockResolvedValue({
       id: 'schedule-1',
       servantId: 'servant-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       service: { id: 'service-a' },
     });
     prisma.schedule.findFirst.mockResolvedValue(null);
@@ -348,7 +348,7 @@ describe('SchedulesService - workspace context', () => {
     schedule: {
       findMany: jest.fn(),
     },
-    sector: {
+    ministry: {
       findMany: jest.fn(),
     },
   } as any;
@@ -370,9 +370,9 @@ describe('SchedulesService - workspace context', () => {
     prisma.worshipService.findMany.mockReset();
     prisma.scheduleSlot.findMany.mockReset();
     prisma.schedule.findMany.mockReset();
-    prisma.sector.findMany.mockReset();
-    prisma.sector.findMany.mockResolvedValue([]);
-    (resolveScopedSectorIds as jest.Mock).mockReset();
+    prisma.ministry.findMany.mockReset();
+    prisma.ministry.findMany.mockResolvedValue([]);
+    (resolveScopedMinistryIds as jest.Mock).mockReset();
     service = new SchedulesService(prisma, auditService, notificationsService);
   });
 
@@ -384,7 +384,7 @@ describe('SchedulesService - workspace context', () => {
       servantId: null,
     };
 
-    (resolveScopedSectorIds as jest.Mock).mockResolvedValue(['sector-1']);
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue(['ministry-1']);
     prisma.worshipService.findMany.mockResolvedValue([]);
     prisma.scheduleSlot.findMany.mockResolvedValue([]);
     prisma.schedule.findMany.mockResolvedValue([]);
@@ -396,7 +396,7 @@ describe('SchedulesService - workspace context', () => {
       ),
     ).resolves.toEqual([]);
 
-    expect(resolveScopedSectorIds).toHaveBeenCalled();
+    expect(resolveScopedMinistryIds).toHaveBeenCalled();
     expect(prisma.worshipService.findMany).toHaveBeenCalled();
   });
 
@@ -424,7 +424,7 @@ describe('SchedulesService - workspace context', () => {
       servantId: null,
     };
 
-    (resolveScopedSectorIds as jest.Mock).mockResolvedValue(['sector-1', 'sector-2']);
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue(['ministry-1', 'ministry-2']);
 
     await expect(
       service.servicesOperationalStatus(
@@ -442,11 +442,11 @@ describe('SchedulesService - workspace context', () => {
       servantId: null,
     };
 
-    (resolveScopedSectorIds as jest.Mock).mockResolvedValue(['sector-1']);
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue(['ministry-1']);
 
     await expect(
       service.servicesOperationalStatus(
-        { startDate: '2026-03-01', endDate: '2026-03-31', ministryId: 'sector-2' },
+        { startDate: '2026-03-01', endDate: '2026-03-31', ministryId: 'ministry-2' },
         actor,
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -460,7 +460,7 @@ describe('SchedulesService - workspace context', () => {
       servantId: null,
     };
 
-    (resolveScopedSectorIds as jest.Mock).mockResolvedValue([]);
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue([]);
 
     await expect(
       service.servicesOperationalStatus(
@@ -484,7 +484,7 @@ describe('SchedulesService - workspace context', () => {
 
     await expect(
       service.servicesOperationalStatus(
-        { startDate: '2026-03-01', endDate: '2026-03-31', ministryId: 'sector-1' },
+        { startDate: '2026-03-01', endDate: '2026-03-31', ministryId: 'ministry-1' },
         actor,
       ),
     ).resolves.toEqual([]);
@@ -552,8 +552,8 @@ describe('SchedulesService - slot eligibility rules', () => {
         status: 'ATIVO',
         trainingStatus: 'COMPLETED',
         approvalStatus: 'APPROVED',
-        mainSectorId: 'sector-1',
-        servantSectors: [],
+        mainMinistryId: 'ministry-1',
+        servantMinistries: [],
         availabilities: [],
         talents: [],
       },
@@ -563,14 +563,14 @@ describe('SchedulesService - slot eligibility rules', () => {
         status: 'ATIVO',
         trainingStatus: 'COMPLETED',
         approvalStatus: 'APPROVED',
-        mainSectorId: 'sector-1',
-        servantSectors: [],
+        mainMinistryId: 'ministry-1',
+        servantMinistries: [],
         availabilities: [],
         talents: [],
       },
     ]);
     prisma.schedule.findMany.mockResolvedValue([
-      { servantId: 'servant-b', sectorId: 'sector-2' },
+      { servantId: 'servant-b', ministryId: 'ministry-2' },
     ]);
     prisma.pastoralVisit.findMany.mockResolvedValue([
       { servantId: 'servant-a' },
@@ -580,7 +580,7 @@ describe('SchedulesService - slot eligibility rules', () => {
     const result = await service.listEligibleServants(
       {
         serviceId: 'svc-1',
-        ministryId: 'sector-1',
+        ministryId: 'ministry-1',
         includeReasons: true,
       },
       actor,
@@ -608,9 +608,9 @@ describe('SchedulesService - slot eligibility rules', () => {
         status: 'ATIVO',
         trainingStatus: 'COMPLETED',
         approvalStatus: 'APPROVED',
-        mainSectorId: 'sector-2',
-        servantSectors: [
-          { sectorId: 'sector-1', trainingStatus: 'PENDING', trainingCompletedAt: null },
+        mainMinistryId: 'ministry-2',
+        servantMinistries: [
+          { ministryId: 'ministry-1', trainingStatus: 'PENDING', trainingCompletedAt: null },
         ],
         availabilities: [],
         talents: [],
@@ -623,7 +623,7 @@ describe('SchedulesService - slot eligibility rules', () => {
     const result = await service.listEligibleServants(
       {
         serviceId: 'svc-1',
-        ministryId: 'sector-1',
+        ministryId: 'ministry-1',
         includeReasons: true,
       },
       actor,
@@ -703,9 +703,9 @@ describe('SchedulesService - assignment flow with ministry training', () => {
         trainingStatus: 'COMPLETED',
         approvalStatus: 'APPROVED',
         aptitude: null,
-        mainSectorId: 'sector-1',
-        servantSectors: [
-          { sectorId: 'sector-1', trainingStatus: 'PENDING', trainingCompletedAt: null },
+        mainMinistryId: 'ministry-1',
+        servantMinistries: [
+          { ministryId: 'ministry-1', trainingStatus: 'PENDING', trainingCompletedAt: null },
         ],
       },
     ]);
@@ -721,7 +721,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
     prisma.scheduleSlot.findUnique.mockResolvedValue({
       id: 'slot-1',
       serviceId: 'svc-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       functionName: 'Recepcao',
       requiredTraining: true,
       blocked: false,
@@ -741,7 +741,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
     prisma.scheduleSlot.findUnique.mockResolvedValue({
       id: 'slot-1',
       serviceId: 'svc-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       functionName: 'Recepcao',
       requiredTraining: true,
       blocked: false,
@@ -765,7 +765,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
     prisma.scheduleSlot.findUnique.mockResolvedValue({
       id: 'slot-1',
       serviceId: 'svc-1',
-      sectorId: 'sector-1',
+      ministryId: 'ministry-1',
       functionName: 'Recepcao',
       requiredTraining: true,
       blocked: false,
@@ -791,7 +791,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
       {
         id: 'slot-1',
         serviceId: 'svc-1',
-        sectorId: 'sector-1',
+        ministryId: 'ministry-1',
         functionName: 'Recepcao',
         requiredTraining: true,
         blocked: false,
@@ -804,7 +804,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
     const result = await service.autoGenerateExplained(
       {
         serviceId: 'svc-1',
-        ministryId: 'sector-1',
+        ministryId: 'ministry-1',
       },
       actor,
     );
@@ -818,3 +818,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
     );
   });
 });
+
+
+
+

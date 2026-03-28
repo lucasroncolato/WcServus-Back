@@ -19,7 +19,7 @@ export class ListSwapHistoryQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sectorId?: string;
+  ministryId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

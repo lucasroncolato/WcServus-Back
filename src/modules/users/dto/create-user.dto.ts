@@ -80,7 +80,7 @@ export class CreateUserDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Vinculos de escopo por setor (IDs de Sector).',
+    description: 'Vinculos de escopo por setor (IDs de Ministry).',
   })
   @IsOptional()
   @Transform(({ value }) => {
@@ -98,7 +98,7 @@ export class CreateUserDto {
   @IsArray()
   @ArrayUnique()
   @IsString({ each: true })
-  sectorIds?: string[];
+  ministryIds?: string[];
 
   @ApiPropertyOptional({
     type: [String],
@@ -123,3 +123,5 @@ export class CreateUserDto {
   teamIds?: string[];
 
 }
+
+

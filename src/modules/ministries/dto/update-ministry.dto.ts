@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString } from 'class-validator';
 
-export class UpdateSectorDto {
+export class UpdateMinistryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -37,7 +37,7 @@ export class UpdateSectorDto {
   @IsString()
   pop?: string;
 
-  @ApiPropertyOptional({ type: [String], description: 'Vincula servos ao setor na edição' })
+  @ApiPropertyOptional({ type: [String], description: 'Vincula servos ao ministerio na edicao' })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

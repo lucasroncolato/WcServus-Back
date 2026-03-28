@@ -4,53 +4,53 @@ import { Role } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
-import { CreateMinistryResponsibilityDto } from '../sectors/dto/create-ministry-responsibility.dto';
-import { CreateSectorDto } from '../sectors/dto/create-sector.dto';
-import { UpdateMinistryResponsibilityDto } from '../sectors/dto/update-ministry-responsibility.dto';
-import { UpdateSectorDto } from '../sectors/dto/update-sector.dto';
-import { SectorsService } from '../sectors/sectors.service';
+import { CreateMinistryResponsibilityDto } from './dto/create-ministry-responsibility.dto';
+import { CreateMinistryDto } from './dto/create-ministry.dto';
+import { UpdateMinistryResponsibilityDto } from './dto/update-ministry-responsibility.dto';
+import { UpdateMinistryDto } from './dto/update-ministry.dto';
+import { MinistriesService } from './ministries.service';
 
 @ApiTags('Ministries')
 @ApiBearerAuth()
 @Controller('ministries')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
 export class MinistriesController {
-  constructor(private readonly sectorsService: SectorsService) {}
+  constructor(private readonly ministriesService: MinistriesService) {}
 
   @Get()
   findAll(@CurrentUser() user: JwtPayload) {
-    return this.sectorsService.findAll(user);
+    return this.ministriesService.findAll(user);
   }
 
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.sectorsService.findOne(id, user);
+    return this.ministriesService.findOne(id, user);
   }
 
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  create(@Body() dto: CreateSectorDto, @CurrentUser() user: JwtPayload) {
-    return this.sectorsService.create(dto, user);
+  create(@Body() dto: CreateMinistryDto, @CurrentUser() user: JwtPayload) {
+    return this.ministriesService.create(dto, user);
   }
 
   @Patch(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   update(
     @Param('id') id: string,
-    @Body() dto: UpdateSectorDto,
+    @Body() dto: UpdateMinistryDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.sectorsService.update(id, dto, user);
+    return this.ministriesService.update(id, dto, user);
   }
 
   @Get(':id/servants')
   listServants(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.sectorsService.listServants(id, user);
+    return this.ministriesService.listServants(id, user);
   }
 
   @Get(':id/responsibilities')
   listResponsibilities(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.sectorsService.listResponsibilities(id, user);
+    return this.ministriesService.listResponsibilities(id, user);
   }
 
   @Post(':id/responsibilities')
@@ -60,7 +60,7 @@ export class MinistriesController {
     @Body() dto: CreateMinistryResponsibilityDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.sectorsService.createResponsibility(id, dto, user);
+    return this.ministriesService.createResponsibility(id, dto, user);
   }
 
   @Patch('responsibilities/:responsibilityId')
@@ -70,6 +70,7 @@ export class MinistriesController {
     @Body() dto: UpdateMinistryResponsibilityDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.sectorsService.updateResponsibility(responsibilityId, dto, user);
+    return this.ministriesService.updateResponsibility(responsibilityId, dto, user);
   }
 }
+

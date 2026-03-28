@@ -8,11 +8,11 @@ export class GenerateServiceScheduleDto {
   @IsString()
   serviceId: string;
 
-  @ApiPropertyOptional({ type: [String], example: ['clx_sector_1', 'clx_sector_2'] })
+  @ApiPropertyOptional({ type: [String], example: ['clx_ministry_1', 'clx_ministry_2'] })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  sectorIds?: string[];
+  ministryIds?: string[];
 
   @ApiPropertyOptional({ type: [String], example: ['team_1', 'team_2'] })
   @IsOptional()
@@ -33,7 +33,7 @@ export class GenerateServiceScheduleDto {
   @ApiPropertyOptional({ default: false })
   @IsOptional()
   @IsBoolean()
-  allowMultiSectorSameService?: boolean;
+  allowMultiMinistrySameService?: boolean;
 
   @ApiPropertyOptional({ type: ScheduleGenerationWeightsDto })
   @IsOptional()

@@ -6,12 +6,7 @@ export class AutoGenerateScheduleSlotsDto {
   @IsString()
   serviceId: string;
 
-  @ApiPropertyOptional({ description: 'Compatibilidade legado.' })
-  @IsOptional()
-  @IsString()
-  sectorId?: string;
-
-  @ApiPropertyOptional({ description: 'Nomenclatura oficial do dominio.' })
+  @ApiPropertyOptional({ description: 'Ministerio para geracao automatica de vagas.' })
   @IsOptional()
   @IsString()
   ministryId?: string;

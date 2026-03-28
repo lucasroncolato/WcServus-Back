@@ -6,7 +6,7 @@ type Db = PrismaClient | { [K in keyof PrismaClient]: PrismaClient[K] };
 
 type ActorScopeContext = {
   scopeType: UserScope;
-  sectorIds: string[];
+  ministryIds: string[];
   teamIds: string[];
   servantId: string | null;
   overrides: Record<string, PermissionEffect>;
@@ -16,8 +16,9 @@ const NO_ACCESS_SERVANT: Prisma.ServantWhereInput = { id: '__no_access__' };
 const NO_ACCESS_SCHEDULE: Prisma.ScheduleWhereInput = { id: '__no_access__' };
 const NO_ACCESS_ATTENDANCE: Prisma.AttendanceWhereInput = { id: '__no_access__' };
 const NO_ACCESS_PASTORAL: Prisma.PastoralVisitWhereInput = { id: '__no_access__' };
-const NO_ACCESS_SECTOR: Prisma.SectorWhereInput = { id: '__no_access__' };
+const NO_ACCESS_SECTOR: Prisma.MinistryWhereInput = { id: '__no_access__' };
 const NO_ACCESS_TEAM: Prisma.TeamWhereInput = { id: '__no_access__' };
+const MINISTRY_SCOPE = (UserScope as unknown as { MINISTRY?: UserScope }).MINISTRY ?? UserScope.MINISTRY;
 
 function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))];
@@ -53,7 +54,7 @@ export async function resolveCoordinatorSectorIds(prisma: Db, actor: JwtPayload)
   }
 
   const [coordinated, scoped] = await Promise.all([
-    prisma.sector.findMany({
+    prisma.ministry.findMany({
       where: { coordinatorUserId: actor.sub },
       select: { id: true },
     }),
@@ -61,7 +62,7 @@ export async function resolveCoordinatorSectorIds(prisma: Db, actor: JwtPayload)
       where: { id: actor.sub },
       select: {
         scopeBindings: {
-          select: { sectorId: true },
+          select: { ministryId: true },
         },
       },
     }),
@@ -70,7 +71,7 @@ export async function resolveCoordinatorSectorIds(prisma: Db, actor: JwtPayload)
   return unique([
     ...coordinated.map((item) => item.id),
     ...(scoped?.scopeBindings ?? [])
-      .map((item) => item.sectorId)
+      .map((item) => item.ministryId)
       .filter((value): value is string => Boolean(value)),
   ]);
 }
@@ -90,7 +91,7 @@ async function loadActorScopeContext(prisma: Db, actor: JwtPayload): Promise<Act
       servantId: true,
       scopeBindings: {
         select: {
-          sectorId: true,
+          ministryId: true,
           teamId: true,
         },
       },
@@ -108,13 +109,13 @@ async function loadActorScopeContext(prisma: Db, actor: JwtPayload): Promise<Act
     actor.role === Role.SERVO
       ? UserScope.SELF
       : actor.role === Role.COORDENADOR
-        ? UserScope.SETOR
+        ? MINISTRY_SCOPE
         : UserScope.GLOBAL;
 
   if (!user) {
     return {
       scopeType: fallbackScope,
-      sectorIds: roleSectorIds,
+      ministryIds: roleSectorIds,
       teamIds: [],
       servantId: actor.servantId ?? null,
       overrides: {},
@@ -127,12 +128,12 @@ async function loadActorScopeContext(prisma: Db, actor: JwtPayload): Promise<Act
     actor.role === Role.SERVO
       ? UserScope.SELF
       : actor.role === Role.COORDENADOR
-        ? UserScope.SETOR
+        ? MINISTRY_SCOPE
         : user.scope ?? UserScope.GLOBAL;
 
-  const sectorIds = unique([
+  const ministryIds = unique([
     ...scopeBindings
-      .map((binding) => binding.sectorId)
+      .map((binding) => binding.ministryId)
       .filter((value): value is string => Boolean(value)),
     ...roleSectorIds,
   ]);
@@ -144,7 +145,7 @@ async function loadActorScopeContext(prisma: Db, actor: JwtPayload): Promise<Act
 
   return {
     scopeType: enforcedScope,
-    sectorIds,
+    ministryIds,
     teamIds,
     servantId: user.servantId ?? actor.servantId ?? null,
     overrides: Object.fromEntries(permissionOverrides.map((item) => [item.permissionKey, item.effect])),
@@ -156,7 +157,7 @@ export async function getCurrentUserScope(prisma: Db, actor: JwtPayload) {
   return {
     role: actor.role,
     scopeType: ctx.scopeType,
-    sectorIds: ctx.sectorIds,
+    ministryIds: ctx.ministryIds,
     teamIds: ctx.teamIds,
     servantId: ctx.servantId,
   };
@@ -181,8 +182,8 @@ function getRoleBaselineServantWhere(
 
     return {
       OR: [
-        { mainSectorId: { in: roleSectorIds } },
-        { servantSectors: { some: { sectorId: { in: roleSectorIds } } } },
+        { mainMinistryId: { in: roleSectorIds } },
+        { servantMinistries: { some: { ministryId: { in: roleSectorIds } } } },
       ],
     };
   }
@@ -203,13 +204,13 @@ function getRoleBaselineScheduleWhere(
   }
 
   if (actor.role === Role.COORDENADOR) {
-    return roleSectorIds.length > 0 ? { sectorId: { in: roleSectorIds } } : NO_ACCESS_SCHEDULE;
+    return roleSectorIds.length > 0 ? { ministryId: { in: roleSectorIds } } : NO_ACCESS_SCHEDULE;
   }
 
   return NO_ACCESS_SCHEDULE;
 }
 
-function getRoleBaselineSectorWhere(actor: JwtPayload, roleSectorIds: string[]): Prisma.SectorWhereInput | undefined {
+function getRoleBaselineSectorWhere(actor: JwtPayload, roleSectorIds: string[]): Prisma.MinistryWhereInput | undefined {
   if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
     return undefined;
   }
@@ -233,7 +234,7 @@ function getRoleBaselineTeamWhere(
   }
 
   if (actor.role === Role.COORDENADOR) {
-    return roleSectorIds.length > 0 ? { sectorId: { in: roleSectorIds } } : NO_ACCESS_TEAM;
+    return roleSectorIds.length > 0 ? { ministryId: { in: roleSectorIds } } : NO_ACCESS_TEAM;
   }
 
   return NO_ACCESS_TEAM;
@@ -248,15 +249,15 @@ function getScopeServantWhere(ctx: ActorScopeContext): Prisma.ServantWhereInput 
     return ctx.servantId ? { id: ctx.servantId } : NO_ACCESS_SERVANT;
   }
 
-  if (ctx.scopeType === UserScope.SETOR) {
-    if (ctx.sectorIds.length === 0) {
+  if (ctx.scopeType === MINISTRY_SCOPE) {
+    if (ctx.ministryIds.length === 0) {
       return NO_ACCESS_SERVANT;
     }
 
     return {
       OR: [
-        { mainSectorId: { in: ctx.sectorIds } },
-        { servantSectors: { some: { sectorId: { in: ctx.sectorIds } } } },
+        { mainMinistryId: { in: ctx.ministryIds } },
+        { servantMinistries: { some: { ministryId: { in: ctx.ministryIds } } } },
       ],
     };
   }
@@ -277,8 +278,8 @@ function getScopeScheduleWhere(ctx: ActorScopeContext): Prisma.ScheduleWhereInpu
     return ctx.servantId ? { servantId: ctx.servantId } : NO_ACCESS_SCHEDULE;
   }
 
-  if (ctx.scopeType === UserScope.SETOR) {
-    return ctx.sectorIds.length > 0 ? { sectorId: { in: ctx.sectorIds } } : NO_ACCESS_SCHEDULE;
+  if (ctx.scopeType === MINISTRY_SCOPE) {
+    return ctx.ministryIds.length > 0 ? { ministryId: { in: ctx.ministryIds } } : NO_ACCESS_SCHEDULE;
   }
 
   if (ctx.scopeType === UserScope.EQUIPE) {
@@ -297,16 +298,16 @@ function getScopeAttendanceWhere(ctx: ActorScopeContext): Prisma.AttendanceWhere
     return ctx.servantId ? { servantId: ctx.servantId } : NO_ACCESS_ATTENDANCE;
   }
 
-  if (ctx.scopeType === UserScope.SETOR) {
-    if (ctx.sectorIds.length === 0) {
+  if (ctx.scopeType === MINISTRY_SCOPE) {
+    if (ctx.ministryIds.length === 0) {
       return NO_ACCESS_ATTENDANCE;
     }
 
     return {
       servant: {
         OR: [
-          { mainSectorId: { in: ctx.sectorIds } },
-          { servantSectors: { some: { sectorId: { in: ctx.sectorIds } } } },
+          { mainMinistryId: { in: ctx.ministryIds } },
+          { servantMinistries: { some: { ministryId: { in: ctx.ministryIds } } } },
         ],
       },
     };
@@ -328,16 +329,16 @@ function getScopePastoralWhere(ctx: ActorScopeContext): Prisma.PastoralVisitWher
     return ctx.servantId ? { servantId: ctx.servantId } : NO_ACCESS_PASTORAL;
   }
 
-  if (ctx.scopeType === UserScope.SETOR) {
-    if (ctx.sectorIds.length === 0) {
+  if (ctx.scopeType === MINISTRY_SCOPE) {
+    if (ctx.ministryIds.length === 0) {
       return NO_ACCESS_PASTORAL;
     }
 
     return {
       servant: {
         OR: [
-          { mainSectorId: { in: ctx.sectorIds } },
-          { servantSectors: { some: { sectorId: { in: ctx.sectorIds } } } },
+          { mainMinistryId: { in: ctx.ministryIds } },
+          { servantMinistries: { some: { ministryId: { in: ctx.ministryIds } } } },
         ],
       },
     };
@@ -350,7 +351,7 @@ function getScopePastoralWhere(ctx: ActorScopeContext): Prisma.PastoralVisitWher
   return NO_ACCESS_PASTORAL;
 }
 
-function getScopeSectorWhere(ctx: ActorScopeContext): Prisma.SectorWhereInput | undefined {
+function getScopeSectorWhere(ctx: ActorScopeContext): Prisma.MinistryWhereInput | undefined {
   if (ctx.scopeType === UserScope.GLOBAL) {
     return undefined;
   }
@@ -359,8 +360,8 @@ function getScopeSectorWhere(ctx: ActorScopeContext): Prisma.SectorWhereInput | 
     return NO_ACCESS_SECTOR;
   }
 
-  if (ctx.scopeType === UserScope.SETOR || ctx.scopeType === UserScope.EQUIPE) {
-    return ctx.sectorIds.length > 0 ? { id: { in: ctx.sectorIds } } : NO_ACCESS_SECTOR;
+  if (ctx.scopeType === MINISTRY_SCOPE || ctx.scopeType === UserScope.EQUIPE) {
+    return ctx.ministryIds.length > 0 ? { id: { in: ctx.ministryIds } } : NO_ACCESS_SECTOR;
   }
 
   return NO_ACCESS_SECTOR;
@@ -375,8 +376,8 @@ function getScopeTeamWhere(ctx: ActorScopeContext): Prisma.TeamWhereInput | unde
     return NO_ACCESS_TEAM;
   }
 
-  if (ctx.scopeType === UserScope.SETOR) {
-    return ctx.sectorIds.length > 0 ? { sectorId: { in: ctx.sectorIds } } : NO_ACCESS_TEAM;
+  if (ctx.scopeType === MINISTRY_SCOPE) {
+    return ctx.ministryIds.length > 0 ? { ministryId: { in: ctx.ministryIds } } : NO_ACCESS_TEAM;
   }
 
   if (ctx.scopeType === UserScope.EQUIPE) {
@@ -414,15 +415,19 @@ export async function resolveScopedSectorIds(prisma: Db, actor: JwtPayload) {
   const where = combineWhere(roleBaseline, scopeBaseline);
 
   if (!where) {
-    const sectors = await prisma.sector.findMany({ select: { id: true } });
-    return sectors.map((sector) => sector.id);
+    const ministries = await prisma.ministry.findMany({ select: { id: true } });
+    return ministries.map((ministry) => ministry.id);
   }
 
-  const sectors = await prisma.sector.findMany({
+  const ministries = await prisma.ministry.findMany({
     where,
     select: { id: true },
   });
-  return sectors.map((sector) => sector.id);
+  return ministries.map((ministry) => ministry.id);
+}
+
+export async function resolveScopedMinistryIds(prisma: Db, actor: JwtPayload) {
+  return resolveScopedSectorIds(prisma, actor);
 }
 
 export async function getServantAccessWhere(
@@ -460,8 +465,8 @@ export async function getAttendanceAccessWhere(
           ? {
               servant: {
                 OR: [
-                  { mainSectorId: { in: roleSectorIds } },
-                  { servantSectors: { some: { sectorId: { in: roleSectorIds } } } },
+                  { mainMinistryId: { in: roleSectorIds } },
+                  { servantMinistries: { some: { ministryId: { in: roleSectorIds } } } },
                 ],
               },
             }
@@ -487,8 +492,8 @@ export async function getPastoralVisitAccessWhere(
           ? {
               servant: {
                 OR: [
-                  { mainSectorId: { in: roleSectorIds } },
-                  { servantSectors: { some: { sectorId: { in: roleSectorIds } } } },
+                  { mainMinistryId: { in: roleSectorIds } },
+                  { servantMinistries: { some: { ministryId: { in: roleSectorIds } } } },
                 ],
               },
             }
@@ -497,10 +502,10 @@ export async function getPastoralVisitAccessWhere(
   );
 }
 
-export async function getSectorAccessWhere(
+export async function getMinistryAccessWhere(
   prisma: Db,
   actor: JwtPayload,
-): Promise<Prisma.SectorWhereInput | undefined> {
+): Promise<Prisma.MinistryWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
   return combineWhere(getRoleBaselineSectorWhere(actor, roleSectorIds), getScopeSectorWhere(ctx));
@@ -523,19 +528,19 @@ export async function getUserAccessWhere(
   return getScopeUserWhere(ctx, actor);
 }
 
-export async function assertSectorAccess(prisma: Db, actor: JwtPayload, sectorId: string) {
-  const where = await getSectorAccessWhere(prisma, actor);
+export async function assertMinistryAccess(prisma: Db, actor: JwtPayload, ministryId: string) {
+  const where = await getMinistryAccessWhere(prisma, actor);
   if (!where) {
     return;
   }
 
-  const sector = await prisma.sector.findFirst({
-    where: { AND: [{ id: sectorId }, where] },
+  const ministry = await prisma.ministry.findFirst({
+    where: { AND: [{ id: ministryId }, where] },
     select: { id: true },
   });
 
-  if (!sector) {
-    throw new ForbiddenException('You do not have permission for this sector');
+  if (!ministry) {
+    throw new ForbiddenException('You do not have permission for this ministry');
   }
 }
 
@@ -571,3 +576,7 @@ export async function hasPermissionOverride(
   const ctx = await loadActorScopeContext(prisma, actor);
   return ctx.overrides[permissionKey] ?? null;
 }
+
+
+
+

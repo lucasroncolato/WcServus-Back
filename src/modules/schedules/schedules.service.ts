@@ -35,7 +35,7 @@ import {
 import {
   assertServantAccess,
   getScheduleAccessWhere,
-  resolveScopedSectorIds,
+  resolveScopedMinistryIds,
 } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -75,19 +75,19 @@ type GenerationOptions = {
   month?: number;
   serviceIds?: string[];
   weekdays?: number[];
-  sectorIds?: string[];
+  ministryIds?: string[];
   teamIds?: string[];
   respectFairnessRules?: boolean;
   dryRun?: boolean;
   force?: boolean;
-  allowMultiSectorSameService?: boolean;
+  allowMultiMinistrySameService?: boolean;
   weights?: ScheduleGenerationWeightsDto;
 };
 
 type EligibleCandidate = {
   servantId: string;
   teamId: string | null;
-  sectorId: string;
+  ministryId: string;
   isMainSector: boolean;
   assignedCountMonth: number;
   consecutiveAssignments: number;
@@ -106,7 +106,7 @@ type GenerationAction =
 
 type GenerationItem = {
   serviceId: string;
-  sectorId: string;
+  ministryId: string;
   servantId?: string;
   scheduleId?: string;
   action: GenerationAction;
@@ -150,10 +150,10 @@ export class SchedulesService {
     });
 
     const scopeWhere = await getScheduleAccessWhere(this.prisma, actor);
-    const sectorId = query.ministryId ?? query.sectorId;
+    const ministryId = query.ministryId;
     const queryWhere: Prisma.ScheduleWhereInput = {
       serviceId: query.serviceId,
-      sectorId,
+      ministryId,
       servantId: query.servantId,
       service:
         start || end
@@ -174,12 +174,12 @@ export class SchedulesService {
         actor.role === Role.SERVO
           ? {
               service: true,
-              sector: true,
+              ministry: true,
             }
           : {
               service: true,
               servant: true,
-              sector: true,
+              ministry: true,
               assignedBy: {
                 select: { id: true, name: true, email: true },
               },
@@ -195,7 +195,7 @@ export class SchedulesService {
       return filteredByWeekday.map((schedule) => ({
         id: schedule.id,
         serviceId: schedule.serviceId,
-        sectorId: schedule.sectorId,
+        ministryId: schedule.ministryId,
         status: schedule.status,
         responseStatus: schedule.responseStatus,
         responseAt: schedule.responseAt,
@@ -203,7 +203,7 @@ export class SchedulesService {
         worshipServiceId: schedule.serviceId,
         worshipServiceTitle: schedule.service.title,
         service: schedule.service,
-        sector: schedule.sector,
+        ministry: schedule.ministry,
       }));
     }
 
@@ -211,12 +211,12 @@ export class SchedulesService {
   }
 
   async listEligibleServants(query: ListEligibleScheduleServantsQueryDto, actor: JwtPayload) {
-    const sectorId = query.ministryId ?? query.sectorId;
-    if (!sectorId) {
-      throw new BadRequestException('sectorId or ministryId is required');
+    const ministryId = query.ministryId;
+    if (!ministryId) {
+      throw new BadRequestException('ministryId is required');
     }
 
-    await this.assertCanManageSector(actor, sectorId);
+    await this.assertCanManageMinistry(actor, ministryId);
 
     const service = await this.prisma.worshipService.findUnique({
       where: { id: query.serviceId },
@@ -232,7 +232,7 @@ export class SchedulesService {
 
     const servants = await this.prisma.servant.findMany({
       where: {
-        OR: [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }],
+        OR: [{ mainMinistryId: ministryId }, { servantMinistries: { some: { ministryId } } }],
       },
       select: {
         id: true,
@@ -240,10 +240,10 @@ export class SchedulesService {
         status: true,
         trainingStatus: true,
         approvalStatus: true,
-        mainSectorId: true,
-        servantSectors: {
-          where: { sectorId },
-          select: { sectorId: true, trainingStatus: true, trainingCompletedAt: true },
+        mainMinistryId: true,
+        servantMinistries: {
+          where: { ministryId },
+          select: { ministryId: true, trainingStatus: true, trainingCompletedAt: true },
         },
         availabilities: {
           where: {
@@ -270,15 +270,15 @@ export class SchedulesService {
           serviceId: service.id,
           servantId: { in: servantIds },
         },
-        select: { servantId: true, sectorId: true },
+        select: { servantId: true, ministryId: true },
       }),
       this.getServantsWithActivePastoralPendencies(servantIds),
     ]);
     const conflictsByServant = new Map<string, Set<string>>();
     for (const item of conflicts) {
-      const sectors = conflictsByServant.get(item.servantId) ?? new Set<string>();
-      sectors.add(item.sectorId);
-      conflictsByServant.set(item.servantId, sectors);
+      const ministries = conflictsByServant.get(item.servantId) ?? new Set<string>();
+      ministries.add(item.ministryId);
+      conflictsByServant.set(item.servantId, ministries);
     }
 
     const evaluated = servants.map((servant) => {
@@ -292,7 +292,7 @@ export class SchedulesService {
       if (servant.status !== ServantStatus.ATIVO) {
         reasons.push('SERVANT_NOT_ACTIVE');
       }
-      if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
+      if (!this.hasCompletedTrainingForMinistry(servant, ministryId)) {
         reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
       }
       const latestTalent = servant.talents[0];
@@ -303,17 +303,16 @@ export class SchedulesService {
         reasons.push('UNAVAILABLE_FOR_SERVICE_SHIFT');
       }
       const conflictSectors = conflictsByServant.get(servant.id);
-      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== sectorId)) {
+      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== ministryId)) {
         reasons.push('ALREADY_SCHEDULED_IN_OTHER_MINISTRY');
       }
 
       return {
         servantId: servant.id,
         servantName: servant.name,
-        ministryId: sectorId,
-        sectorId,
-        ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, sectorId),
-        ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, sectorId),
+        ministryId,
+        ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, ministryId),
+        ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, ministryId),
         eligible: reasons.length === 0,
         reasons,
       };
@@ -326,22 +325,22 @@ export class SchedulesService {
 
   async mobileContext(query: ListScheduleMobileContextQueryDto, actor: JwtPayload) {
     const daysAhead = query.daysAhead ?? 30;
-    const sectorId = query.ministryId ?? query.sectorId;
+    const ministryId = query.ministryId;
 
-    const allowedSectorIds = await this.resolveAllowedSectorIds(
+    const allowedSectorIds = await this.resolveAllowedMinistryIds(
       actor,
-      sectorId ? [sectorId] : undefined,
+      ministryId ? [ministryId] : undefined,
     );
 
     const [ministries, teams, services] = await Promise.all([
-      this.prisma.sector.findMany({
+      this.prisma.ministry.findMany({
         where: { id: { in: allowedSectorIds } },
         select: { id: true, name: true },
         orderBy: [{ name: 'asc' }],
       }),
       this.prisma.team.findMany({
-        where: { sectorId: { in: allowedSectorIds }, status: TeamStatus.ACTIVE },
-        select: { id: true, name: true, sectorId: true },
+        where: { ministryId: { in: allowedSectorIds }, status: TeamStatus.ACTIVE },
+        select: { id: true, name: true, ministryId: true },
         orderBy: [{ name: 'asc' }],
       }),
       this.prisma.worshipService.findMany({
@@ -364,7 +363,7 @@ export class SchedulesService {
       }),
     ]);
 
-    const suggestedMinistryId = sectorId ?? ministries[0]?.id;
+    const suggestedMinistryId = ministryId ?? ministries[0]?.id;
 
     const eligibleServants =
       query.serviceId && suggestedMinistryId
@@ -392,7 +391,7 @@ export class SchedulesService {
       })),
       teams: teams.map((team) => ({
         ...team,
-        ministryId: team.sectorId,
+        ministryId: team.ministryId,
       })),
       services,
       servants: eligibleServants,
@@ -485,13 +484,13 @@ export class SchedulesService {
       this.prisma.scheduleSlot.findMany({
         where: {
           serviceId: { in: services.map((service) => service.id) },
-          sectorId: { in: allowedSectorIds },
+          ministryId: { in: allowedSectorIds },
         },
       }),
       this.prisma.schedule.findMany({
         where: {
           serviceId: { in: services.map((service) => service.id) },
-          sectorId: { in: allowedSectorIds },
+          ministryId: { in: allowedSectorIds },
         },
       }),
     ]);
@@ -525,7 +524,7 @@ export class SchedulesService {
   }
 
   async serviceBoard(serviceId: string, query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
-    const sectorId = await this.resolveWorkspaceSectorId(query, actor);
+    const ministryId = await this.resolveWorkspaceMinistryId(query, actor);
 
     const service = await this.prisma.worshipService.findUnique({
       where: { id: serviceId },
@@ -537,7 +536,7 @@ export class SchedulesService {
 
     const [slots, schedules] = await Promise.all([
       this.prisma.scheduleSlot.findMany({
-        where: { serviceId, sectorId },
+        where: { serviceId, ministryId },
         include: {
           responsibility: { select: { id: true, title: true, functionName: true } },
           assignedServant: { select: { id: true, name: true, status: true, trainingStatus: true } },
@@ -545,7 +544,7 @@ export class SchedulesService {
         orderBy: [{ functionName: 'asc' }, { position: 'asc' }],
       }),
       this.prisma.schedule.findMany({
-        where: { serviceId, sectorId },
+        where: { serviceId, ministryId },
         include: {
           servant: { select: { id: true, name: true, status: true, trainingStatus: true } },
         },
@@ -572,13 +571,13 @@ export class SchedulesService {
             }
           : null,
         responsibility: slot.responsibility,
-        eligibleServants: await this.listSlotEligibility(serviceId, sectorId, slot),
+        eligibleServants: await this.listSlotEligibility(serviceId, ministryId, slot),
       })),
     );
 
     return {
       service,
-      ministryId: sectorId,
+      ministryId: ministryId,
       operationalStatus: evaluation.operationalStatus,
       summary: {
         missingRequiredSlots: evaluation.missingRequiredSlots,
@@ -593,19 +592,19 @@ export class SchedulesService {
   }
 
   async createSlot(serviceId: string, dto: CreateScheduleSlotDto, actor: JwtPayload) {
-    const sectorId = dto.ministryId ?? dto.sectorId;
-    if (!sectorId) {
-      throw new BadRequestException('sectorId or ministryId is required');
+    const ministryId = dto.ministryId;
+    if (!ministryId) {
+      throw new BadRequestException('ministryId is required');
     }
 
-    await this.assertCanManageSector(actor, sectorId);
+    await this.assertCanManageMinistry(actor, ministryId);
     await this.ensureServiceExists(serviceId);
-    await this.ensureResponsibilityMatchesSector(dto.responsibilityId, sectorId);
+    await this.ensureResponsibilityMatchesSector(dto.responsibilityId, ministryId);
 
     const slot = await this.prisma.scheduleSlot.create({
       data: {
         serviceId,
-        sectorId,
+        ministryId,
         responsibilityId: dto.responsibilityId,
         functionName: dto.functionName.trim(),
         slotLabel: dto.slotLabel,
@@ -629,7 +628,7 @@ export class SchedulesService {
       userId: actor.sub,
       metadata: {
         serviceId,
-        sectorId,
+        ministryId,
         functionName: slot.functionName,
         position: slot.position,
       },
@@ -647,10 +646,10 @@ export class SchedulesService {
       throw new NotFoundException('Schedule slot not found');
     }
 
-    await this.assertCanManageSector(actor, slot.sectorId);
+    await this.assertCanManageMinistry(actor, slot.ministryId);
     const eligibility = await this.evaluateServantEligibilityForSlot(
       slot.serviceId,
-      slot.sectorId,
+      slot.ministryId,
       dto.servantId,
       slot,
     );
@@ -677,10 +676,10 @@ export class SchedulesService {
 
       const schedule = await tx.schedule.upsert({
         where: {
-          serviceId_servantId_sectorId: {
+          serviceId_servantId_ministryId: {
             serviceId: slot.serviceId,
             servantId: dto.servantId,
-            sectorId: slot.sectorId,
+            ministryId: slot.ministryId,
           },
         },
         update: {
@@ -693,7 +692,7 @@ export class SchedulesService {
         create: {
           serviceId: slot.serviceId,
           servantId: dto.servantId,
-          sectorId: slot.sectorId,
+          ministryId: slot.ministryId,
           assignedByUserId: actor.sub,
           status: ScheduleStatus.ASSIGNED,
           responseStatus: ScheduleResponseStatus.PENDING,
@@ -715,7 +714,7 @@ export class SchedulesService {
           performedByUserId: actor.sub,
           metadata: {
             serviceId: slot.serviceId,
-            sectorId: slot.sectorId,
+            ministryId: slot.ministryId,
           },
         },
       });
@@ -724,7 +723,7 @@ export class SchedulesService {
         const hasOtherSlots = await tx.scheduleSlot.count({
           where: {
             serviceId: slot.serviceId,
-            sectorId: slot.sectorId,
+            ministryId: slot.ministryId,
             assignedServantId: previousServantId,
             NOT: { id: slotId },
           },
@@ -733,7 +732,7 @@ export class SchedulesService {
           await tx.schedule.deleteMany({
             where: {
               serviceId: slot.serviceId,
-              sectorId: slot.sectorId,
+              ministryId: slot.ministryId,
               servantId: previousServantId,
             },
           });
@@ -772,17 +771,17 @@ export class SchedulesService {
   }
 
   async autoGenerateExplained(dto: AutoGenerateScheduleSlotsDto, actor: JwtPayload) {
-    const sectorId = dto.ministryId ?? dto.sectorId;
-    if (!sectorId) {
-      throw new BadRequestException('sectorId or ministryId is required');
+    const ministryId = dto.ministryId;
+    if (!ministryId) {
+      throw new BadRequestException('ministryId is required');
     }
-    await this.assertCanManageSector(actor, sectorId);
+    await this.assertCanManageMinistry(actor, ministryId);
     await this.ensureServiceExists(dto.serviceId);
 
     const slots = await this.prisma.scheduleSlot.findMany({
       where: {
         serviceId: dto.serviceId,
-        sectorId,
+        ministryId,
         ...(dto.functionNames?.length ? { functionName: { in: dto.functionNames } } : {}),
         ...(dto.responsibilityIds?.length
           ? { responsibilityId: { in: dto.responsibilityIds } }
@@ -792,7 +791,7 @@ export class SchedulesService {
     });
 
     const criteria = {
-      ministryId: sectorId,
+      ministryId: ministryId,
       serviceId: dto.serviceId,
       rules: [
         'status ativo',
@@ -810,7 +809,7 @@ export class SchedulesService {
     const targetSlots = slots.filter((slot) => slot.status === ScheduleSlotStatus.OPEN || !slot.assignedServantId);
 
     for (const slot of targetSlots) {
-      const eligible = await this.listSlotEligibility(dto.serviceId, sectorId, slot);
+      const eligible = await this.listSlotEligibility(dto.serviceId, ministryId, slot);
       const candidate = eligible.find(
         (item) => item.eligible && !usedServants.has(item.servantId),
       );
@@ -856,27 +855,27 @@ export class SchedulesService {
   }
 
   async create(dto: CreateScheduleDto, actor: JwtPayload) {
-    const sectorId = dto.ministryId ?? dto.sectorId;
-    if (!sectorId) {
-      throw new BadRequestException('sectorId or ministryId is required');
+    const ministryId = dto.ministryId;
+    if (!ministryId) {
+      throw new BadRequestException('ministryId is required');
     }
-    await this.assertCanManageSector(actor, sectorId);
+    await this.assertCanManageMinistry(actor, ministryId);
     await assertServantAccess(this.prisma, actor, dto.servantId);
 
-    await this.validateScheduleInput(dto.serviceId, sectorId, dto.servantId);
-    await this.ensureNoConflict(dto.serviceId, dto.servantId, sectorId);
+    await this.validateScheduleInput(dto.serviceId, ministryId, dto.servantId);
+    await this.ensureNoConflict(dto.serviceId, dto.servantId, ministryId);
 
     const schedule = await this.prisma.schedule.create({
       data: {
         serviceId: dto.serviceId,
-        sectorId,
+        ministryId,
         servantId: dto.servantId,
         assignedByUserId: actor.sub,
       },
       include: {
         service: true,
         servant: true,
-        sector: true,
+        ministry: true,
       },
     });
 
@@ -896,7 +895,7 @@ export class SchedulesService {
       {
         scheduleId: schedule.id,
         serviceId: schedule.serviceId,
-        sectorId: schedule.sectorId,
+        ministryId: schedule.ministryId,
       },
     );
 
@@ -904,9 +903,9 @@ export class SchedulesService {
   }
 
   async generateMonth(dto: GenerateMonthScheduleDto, actor: JwtPayload) {
-    if (dto.sectorIds?.length) {
-      for (const sectorId of dto.sectorIds) {
-        await this.assertCanManageSector(actor, sectorId);
+    if (dto.ministryIds?.length) {
+      for (const ministryId of dto.ministryIds) {
+        await this.assertCanManageMinistry(actor, ministryId);
       }
     }
 
@@ -917,19 +916,19 @@ export class SchedulesService {
       mode: 'generate-month',
       year: dto.year,
       month: dto.month,
-      sectorIds: dto.sectorIds,
+      ministryIds: dto.ministryIds,
       teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
-      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      allowMultiMinistrySameService: dto.allowMultiMinistrySameService,
       weights: dto.weights,
     });
   }
 
   async generatePeriod(dto: GeneratePeriodScheduleDto, actor: JwtPayload) {
-    if (dto.sectorIds?.length) {
-      for (const sectorId of dto.sectorIds) {
-        await this.assertCanManageSector(actor, sectorId);
+    if (dto.ministryIds?.length) {
+      for (const ministryId of dto.ministryIds) {
+        await this.assertCanManageMinistry(actor, ministryId);
       }
     }
 
@@ -944,20 +943,20 @@ export class SchedulesService {
       mode: 'generate-period',
       year: Number(dto.startDate.slice(0, 4)),
       weekdays: dto.weekdays,
-      sectorIds: dto.sectorIds,
+      ministryIds: dto.ministryIds,
       teamIds: dto.teamIds,
       respectFairnessRules: dto.respectFairnessRules,
       dryRun: dto.dryRun,
       force: dto.force,
-      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      allowMultiMinistrySameService: dto.allowMultiMinistrySameService,
       weights: dto.weights,
     });
   }
 
   async generateService(dto: GenerateServiceScheduleDto, actor: JwtPayload) {
-    if (dto.sectorIds?.length) {
-      for (const sectorId of dto.sectorIds) {
-        await this.assertCanManageSector(actor, sectorId);
+    if (dto.ministryIds?.length) {
+      for (const ministryId of dto.ministryIds) {
+        await this.assertCanManageMinistry(actor, ministryId);
       }
     }
 
@@ -979,11 +978,11 @@ export class SchedulesService {
       year: serviceDate.getUTCFullYear(),
       month: serviceDate.getUTCMonth() + 1,
       serviceIds: [service.id],
-      sectorIds: dto.sectorIds,
+      ministryIds: dto.ministryIds,
       teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
-      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      allowMultiMinistrySameService: dto.allowMultiMinistrySameService,
       weights: dto.weights,
     });
   }
@@ -991,7 +990,7 @@ export class SchedulesService {
   async generateServices(dto: GenerateServicesScheduleDto, actor: JwtPayload) {
     const serviceIds = [...new Set((dto.serviceIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const requestedSectorIds = [
-      ...new Set([...(dto.ministryIds ?? []), ...(dto.sectorIds ?? [])].map((value) => value.trim()).filter(Boolean)),
+      ...new Set([...(dto.ministryIds ?? []), ...(dto.ministryIds ?? [])].map((value) => value.trim()).filter(Boolean)),
     ];
 
     if (!serviceIds.length) {
@@ -999,8 +998,8 @@ export class SchedulesService {
     }
 
     if (requestedSectorIds.length) {
-      for (const sectorId of requestedSectorIds) {
-        await this.assertCanManageSector(actor, sectorId);
+      for (const ministryId of requestedSectorIds) {
+        await this.assertCanManageMinistry(actor, ministryId);
       }
     }
 
@@ -1047,19 +1046,19 @@ export class SchedulesService {
       mode: 'generate-services',
       year: startServiceDate.getUTCFullYear(),
       serviceIds,
-      sectorIds: requestedSectorIds.length ? requestedSectorIds : undefined,
+      ministryIds: requestedSectorIds.length ? requestedSectorIds : undefined,
       teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
-      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      allowMultiMinistrySameService: dto.allowMultiMinistrySameService,
       weights: dto.weights,
     });
   }
 
   async generateYear(dto: GenerateYearScheduleDto, actor: JwtPayload) {
-    if (dto.sectorIds?.length) {
-      for (const sectorId of dto.sectorIds) {
-        await this.assertCanManageSector(actor, sectorId);
+    if (dto.ministryIds?.length) {
+      for (const ministryId of dto.ministryIds) {
+        await this.assertCanManageMinistry(actor, ministryId);
       }
     }
 
@@ -1069,11 +1068,11 @@ export class SchedulesService {
     return this.generateBetween(start, end, actor, {
       mode: 'generate-year',
       year: dto.year,
-      sectorIds: dto.sectorIds,
+      ministryIds: dto.ministryIds,
       teamIds: dto.teamIds,
       dryRun: dto.dryRun,
       force: dto.force,
-      allowMultiSectorSameService: dto.allowMultiSectorSameService,
+      allowMultiMinistrySameService: dto.allowMultiMinistrySameService,
       weights: dto.weights,
     });
   }
@@ -1082,7 +1081,7 @@ export class SchedulesService {
     const scheduleInclude = {
       service: true,
       servant: true,
-      sector: true,
+      ministry: true,
     } as const;
 
     const isSimpleSwap = dto.scheduleId !== undefined || dto.servantId !== undefined;
@@ -1103,7 +1102,7 @@ export class SchedulesService {
 
       await this.assertCanManageSchedule(actor, current.id);
       await assertServantAccess(this.prisma, actor, dto.servantId);
-      await this.ensureServantEligibleForSector(dto.servantId, current.sectorId, current.serviceId);
+      await this.ensureServantEligibleForSector(dto.servantId, current.ministryId, current.serviceId);
 
       const conflict = await this.prisma.schedule.findFirst({
         where: {
@@ -1177,11 +1176,11 @@ export class SchedulesService {
     const [from, to] = await Promise.all([
       this.prisma.schedule.findUnique({
         where: { id: dto.fromScheduleId },
-        include: { service: true, servant: true, sector: true },
+        include: { service: true, servant: true, ministry: true },
       }),
       this.prisma.schedule.findUnique({
         where: { id: dto.toScheduleId },
-        include: { service: true, servant: true, sector: true },
+        include: { service: true, servant: true, ministry: true },
       }),
     ]);
 
@@ -1196,13 +1195,13 @@ export class SchedulesService {
       throw new BadRequestException('Swap must happen inside the same worship service');
     }
 
-    await this.ensureServantEligibleForSector(to.servantId, from.sectorId, from.serviceId);
-    await this.ensureServantEligibleForSector(from.servantId, to.sectorId, to.serviceId);
+    await this.ensureServantEligibleForSector(to.servantId, from.ministryId, from.serviceId);
+    await this.ensureServantEligibleForSector(from.servantId, to.ministryId, to.serviceId);
 
     const hasConflictFrom = await this.prisma.schedule.findFirst({
       where: {
         serviceId: from.serviceId,
-        sectorId: from.sectorId,
+        ministryId: from.ministryId,
         servantId: to.servantId,
         NOT: { id: from.id },
       },
@@ -1212,7 +1211,7 @@ export class SchedulesService {
     const hasConflictTo = await this.prisma.schedule.findFirst({
       where: {
         serviceId: to.serviceId,
-        sectorId: to.sectorId,
+        ministryId: to.ministryId,
         servantId: from.servantId,
         NOT: { id: to.id },
       },
@@ -1220,7 +1219,7 @@ export class SchedulesService {
     });
 
     if (hasConflictFrom || hasConflictTo) {
-      throw new BadRequestException('Swap creates a sector conflict');
+      throw new BadRequestException('Swap creates a ministry conflict');
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1297,21 +1296,21 @@ export class SchedulesService {
 
     if (
       dto.servantId === undefined &&
-      dto.sectorId === undefined &&
+      dto.ministryId === undefined &&
       dto.teamId === undefined &&
       dto.status === undefined
     ) {
       throw new BadRequestException('Nothing to update in schedule');
     }
     const nextServantId = dto.servantId ?? existing.servantId;
-    const nextSectorId = dto.ministryId ?? dto.sectorId ?? existing.sectorId;
+    const nextSectorId = dto.ministryId ?? existing.ministryId;
 
     if (dto.servantId !== undefined) {
       await assertServantAccess(this.prisma, actor, dto.servantId);
     }
 
-    if (dto.sectorId !== undefined || dto.ministryId !== undefined) {
-      await this.assertCanManageSector(actor, nextSectorId);
+    if (dto.ministryId !== undefined) {
+      await this.assertCanManageMinistry(actor, nextSectorId);
     }
 
     await this.ensureServantEligibleForSector(nextServantId, nextSectorId, existing.serviceId);
@@ -1333,13 +1332,13 @@ export class SchedulesService {
       where: { id },
       data: {
         servantId: dto.servantId,
-        sectorId: dto.ministryId ?? dto.sectorId,
+        ministryId: dto.ministryId,
         status: dto.status,
       },
       include: {
         service: true,
         servant: true,
-        sector: true,
+        ministry: true,
       },
     });
 
@@ -1378,7 +1377,7 @@ export class SchedulesService {
     }
 
     await this.assertCanManageSchedule(actor, source.id);
-    await this.assertCanManageSector(actor, source.sectorId);
+    await this.assertCanManageMinistry(actor, source.ministryId);
     await assertServantAccess(this.prisma, actor, source.servantId);
 
     const targetService = await this.prisma.worshipService.findUnique({
@@ -1390,33 +1389,33 @@ export class SchedulesService {
       throw new NotFoundException('Target worship service not found');
     }
 
-    await this.ensureServantEligibleForSector(source.servantId, source.sectorId, dto.worshipServiceId);
+    await this.ensureServantEligibleForSector(source.servantId, source.ministryId, dto.worshipServiceId);
 
     const conflict = await this.prisma.schedule.findFirst({
       where: {
         serviceId: dto.worshipServiceId,
         servantId: source.servantId,
-        sectorId: source.sectorId,
+        ministryId: source.ministryId,
       },
       select: { id: true },
     });
 
     if (conflict) {
-      throw new ConflictException('A schedule already exists for this servant and sector in target service');
+      throw new ConflictException('A schedule already exists for this servant and ministry in target service');
     }
 
     const duplicated = await this.prisma.schedule.create({
       data: {
         serviceId: dto.worshipServiceId,
         servantId: source.servantId,
-        sectorId: source.sectorId,
+        ministryId: source.ministryId,
         status: ScheduleStatus.ASSIGNED,
         assignedByUserId: actor.sub,
       },
       include: {
         service: true,
         servant: true,
-        sector: true,
+        ministry: true,
       },
     });
 
@@ -1462,10 +1461,10 @@ export class SchedulesService {
     const filterWhere: Prisma.ScheduleSwapHistoryWhereInput = {
       swappedByUserId: query.swappedByUserId,
       fromSchedule:
-        query.serviceId || query.sectorId
+        query.serviceId || query.ministryId
           ? {
               serviceId: query.serviceId,
-              sectorId: query.sectorId,
+              ministryId: query.ministryId,
             }
           : undefined,
     };
@@ -1479,10 +1478,10 @@ export class SchedulesService {
           select: { id: true, name: true, email: true, role: true },
         },
         fromSchedule: {
-          include: { servant: true, sector: true, service: true },
+          include: { servant: true, ministry: true, service: true },
         },
         toSchedule: {
-          include: { servant: true, sector: true, service: true },
+          include: { servant: true, ministry: true, service: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -1600,21 +1599,21 @@ export class SchedulesService {
     const respectFairnessRules = options.respectFairnessRules !== false;
     const dryRun = options.dryRun === true;
     const force = options.force === true;
-    const allowMultiSectorSameService = options.allowMultiSectorSameService === true;
+    const allowMultiMinistrySameService = options.allowMultiMinistrySameService === true;
     const weights = this.normalizeGenerationWeights(options.weights);
 
-    const scopedSectorIds = await this.resolveAllowedSectorIds(actor, options.sectorIds);
+    const scopedSectorIds = await this.resolveAllowedMinistryIds(actor, options.ministryIds);
     const teamFilter = await this.resolveGenerationTeamFilter(options.teamIds);
     const teamSectorIds = [
-      ...new Set(teamFilter.teams.map((team) => team.sectorId).filter((value): value is string => Boolean(value))),
+      ...new Set(teamFilter.teams.map((team) => team.ministryId).filter((value): value is string => Boolean(value))),
     ];
 
     const targetSectorIds = teamSectorIds.length
-      ? scopedSectorIds.filter((sectorId) => teamSectorIds.includes(sectorId))
+      ? scopedSectorIds.filter((ministryId) => teamSectorIds.includes(ministryId))
       : scopedSectorIds;
 
     if (options.teamIds?.length && targetSectorIds.length === 0) {
-      throw new ForbiddenException('You can only generate schedules for your allowed sectors');
+      throw new ForbiddenException('You can only generate schedules for your allowed ministries');
     }
 
     const servicesInPeriod = await this.prisma.worshipService.findMany({
@@ -1647,7 +1646,7 @@ export class SchedulesService {
         warnings: 0,
       },
       items: [] as GenerationItem[],
-      warnings: [] as Array<{ code: string; serviceId: string; sectorId: string; message: string }>,
+      warnings: [] as Array<{ code: string; serviceId: string; ministryId: string; message: string }>,
       weights,
     };
 
@@ -1655,20 +1654,20 @@ export class SchedulesService {
       return result;
     }
 
-    const sectors = await this.prisma.sector.findMany({
+    const ministries = await this.prisma.ministry.findMany({
       where: { id: { in: targetSectorIds } },
       orderBy: [{ id: 'asc' }],
       select: { id: true, name: true },
     });
 
-    if (sectors.length === 0) {
+    if (ministries.length === 0) {
       return result;
     }
 
-    result.summary.slotsTotal = services.length * sectors.length;
+    result.summary.slotsTotal = services.length * ministries.length;
 
     const candidatesBySector = await this.buildEligibleCandidatesBySector(
-      sectors.map((sector) => sector.id),
+      ministries.map((ministry) => ministry.id),
       teamFilter.teamIds,
     );
     const candidateIds = [...new Set([...candidatesBySector.values()].flat().map((item) => item.servantId))];
@@ -1676,11 +1675,11 @@ export class SchedulesService {
 
     const totalSlotsPerSector = new Map<string, number>();
     const hardCapBySector = new Map<string, number>();
-    for (const sector of sectors) {
+    for (const ministry of ministries) {
       const totalSlots = services.length;
-      const eligibleCount = Math.max(1, (candidatesBySector.get(sector.id) ?? []).length);
-      totalSlotsPerSector.set(sector.id, totalSlots);
-      hardCapBySector.set(sector.id, Math.ceil(totalSlots / eligibleCount) + 1);
+      const eligibleCount = Math.max(1, (candidatesBySector.get(ministry.id) ?? []).length);
+      totalSlotsPerSector.set(ministry.id, totalSlots);
+      hardCapBySector.set(ministry.id, Math.ceil(totalSlots / eligibleCount) + 1);
     }
 
     const assignedCountMonth = await this.getAssignedCountMap(start, end);
@@ -1703,7 +1702,7 @@ export class SchedulesService {
           select: {
             id: true,
             serviceId: true,
-            sectorId: true,
+            ministryId: true,
             servantId: true,
           },
         });
@@ -1716,20 +1715,20 @@ export class SchedulesService {
         );
       }
 
-      for (const sector of sectors) {
-          const existing = this.findExistingScheduleForSlot(existingSchedules, sector.id);
+      for (const ministry of ministries) {
+          const existing = this.findExistingScheduleForSlot(existingSchedules, ministry.id);
 
         if (existing && !force) {
           result.summary.skipped += 1;
           result.items.push({
             serviceId: service.id,
-            sectorId: sector.id,
+            ministryId: ministry.id,
             servantId: existing.servantId,
             scheduleId: existing.id,
             action: 'SKIPPED',
             reason: 'manual_or_existing_schedule',
           });
-          await this.logGenerationAudit(actor.sub, service.id, sector.id, existing.servantId, {
+          await this.logGenerationAudit(actor.sub, service.id, ministry.id, existing.servantId, {
             action: 'SKIPPED',
             reason: 'manual_or_existing_schedule',
             dryRun,
@@ -1739,20 +1738,20 @@ export class SchedulesService {
           continue;
         }
 
-        const rawCandidates = candidatesBySector.get(sector.id) ?? [];
+        const rawCandidates = candidatesBySector.get(ministry.id) ?? [];
         const serviceIndex = serviceOrder.get(service.id) ?? 0;
         const filtered = rawCandidates.filter((candidate) =>
           this.isCandidateAllowedInService(
             candidate.servantId,
             existing,
             assignedInServiceCount,
-            allowMultiSectorSameService,
+            allowMultiMinistrySameService,
           ) && this.isCandidateAvailableForService(candidate.servantId, service.serviceDate, service.startTime, unavailableMap),
         );
 
         if (filtered.length === 0) {
-          this.pushNoEligibleWarning(result, service.id, sector.id);
-          await this.logGenerationAudit(actor.sub, service.id, sector.id, undefined, {
+          this.pushNoEligibleWarning(result, service.id, ministry.id);
+          await this.logGenerationAudit(actor.sub, service.id, ministry.id, undefined, {
             action: 'SKIPPED',
             reason: 'NO_ELIGIBLE_SERVANT',
             dryRun,
@@ -1763,13 +1762,13 @@ export class SchedulesService {
         }
 
         const finalPool = respectFairnessRules
-          ? this.applyFairnessBands(filtered, assignedCountMonth, hardCapBySector.get(sector.id))
+          ? this.applyFairnessBands(filtered, assignedCountMonth, hardCapBySector.get(ministry.id))
           : filtered;
 
         const eligibleCount = Math.max(1, rawCandidates.length);
         const targetMonth = Math.max(
           1,
-          Math.ceil((totalSlotsPerSector.get(sector.id) ?? services.length) / eligibleCount),
+          Math.ceil((totalSlotsPerSector.get(ministry.id) ?? services.length) / eligibleCount),
         );
 
         const scored: EligibleCandidate[] = finalPool.map((candidate) => {
@@ -1795,7 +1794,7 @@ export class SchedulesService {
           return {
             servantId: candidate.servantId,
             teamId: candidate.teamId,
-            sectorId: sector.id,
+            ministryId: ministry.id,
             isMainSector: candidate.isMainSector,
             assignedCountMonth: candidateAssignedCount,
             consecutiveAssignments,
@@ -1810,7 +1809,7 @@ export class SchedulesService {
         const winner = scored[0];
         const score = Number(winner.score.toFixed(4));
 
-        if (!allowMultiSectorSameService) {
+        if (!allowMultiMinistrySameService) {
           const serviceConflict = await this.prisma.schedule.findFirst({
             where: {
               serviceId: service.id,
@@ -1824,13 +1823,13 @@ export class SchedulesService {
             result.summary.conflicts += 1;
             result.items.push({
               serviceId: service.id,
-              sectorId: sector.id,
+              ministryId: ministry.id,
               servantId: winner.servantId,
               action: dryRun ? 'WOULD_CREATE' : 'CONFLICT',
               reason: 'same_service_conflict',
               score,
             });
-            await this.logGenerationAudit(actor.sub, service.id, sector.id, winner.servantId, {
+            await this.logGenerationAudit(actor.sub, service.id, ministry.id, winner.servantId, {
               action: 'CONFLICT',
               reason: 'same_service_conflict',
               score,
@@ -1845,7 +1844,7 @@ export class SchedulesService {
         if (dryRun) {
           result.items.push({
             serviceId: service.id,
-            sectorId: sector.id,
+            ministryId: ministry.id,
             servantId: winner.servantId,
             scheduleId: existing?.id,
             action: existing ? 'WOULD_UPDATE' : 'WOULD_CREATE',
@@ -1883,7 +1882,7 @@ export class SchedulesService {
               source: 'generation',
               mode: options.mode ?? 'generate-year',
               serviceId: service.id,
-              sectorId: sector.id,
+              ministryId: ministry.id,
               servantId: winner.servantId,
               score,
             },
@@ -1891,7 +1890,7 @@ export class SchedulesService {
           result.summary.updated += 1;
           result.items.push({
             serviceId: service.id,
-            sectorId: sector.id,
+            ministryId: ministry.id,
             servantId: winner.servantId,
             scheduleId: existing.id,
             action: 'UPDATED',
@@ -1902,7 +1901,7 @@ export class SchedulesService {
           const created = await this.prisma.schedule.create({
             data: {
               serviceId: service.id,
-              sectorId: sector.id,
+              ministryId: ministry.id,
               servantId: winner.servantId,
               status: ScheduleStatus.ASSIGNED,
               assignedByUserId: actor.sub,
@@ -1918,7 +1917,7 @@ export class SchedulesService {
               source: 'generation',
               mode: options.mode ?? 'generate-year',
               serviceId: service.id,
-              sectorId: sector.id,
+              ministryId: ministry.id,
               servantId: winner.servantId,
               score,
             },
@@ -1926,7 +1925,7 @@ export class SchedulesService {
           result.summary.created += 1;
           result.items.push({
             serviceId: service.id,
-            sectorId: sector.id,
+            ministryId: ministry.id,
             servantId: winner.servantId,
             scheduleId: created.id,
             action: 'CREATED',
@@ -1946,7 +1945,7 @@ export class SchedulesService {
           service.serviceDate,
         );
 
-        await this.logGenerationAudit(actor.sub, service.id, sector.id, winner.servantId, {
+        await this.logGenerationAudit(actor.sub, service.id, ministry.id, winner.servantId, {
           action: existing ? 'UPDATED' : 'CREATED',
           score,
           reason: 'best_score_priority_band',
@@ -1969,9 +1968,9 @@ export class SchedulesService {
         force,
         respectFairnessRules,
         weekdays: options.weekdays,
-        allowMultiSectorSameService,
+        allowMultiMinistrySameService,
         teamIds: teamFilter.teamIds,
-        sectorIds: targetSectorIds,
+        ministryIds: targetSectorIds,
         summary: result.summary,
         weights,
       },
@@ -2038,7 +2037,7 @@ export class SchedulesService {
   }
 
   private async buildEligibleCandidatesBySector(
-    sectorIds: string[],
+    ministryIds: string[],
     teamIds: string[],
   ) {
     const servants = await this.prisma.servant.findMany({
@@ -2061,7 +2060,7 @@ export class SchedulesService {
           },
         },
         teamId: teamIds.length ? { in: teamIds } : undefined,
-        OR: [{ mainSectorId: { in: sectorIds } }, { servantSectors: { some: { sectorId: { in: sectorIds } } } }],
+        OR: [{ mainMinistryId: { in: ministryIds } }, { servantMinistries: { some: { ministryId: { in: ministryIds } } } }],
       },
       select: {
         id: true,
@@ -2072,10 +2071,10 @@ export class SchedulesService {
             name: true,
           },
         },
-        mainSectorId: true,
-        servantSectors: {
-          where: { sectorId: { in: sectorIds } },
-          select: { sectorId: true, trainingStatus: true, trainingCompletedAt: true },
+        mainMinistryId: true,
+        servantMinistries: {
+          where: { ministryId: { in: ministryIds } },
+          select: { ministryId: true, trainingStatus: true, trainingCompletedAt: true },
         },
       },
       orderBy: [{ id: 'asc' }],
@@ -2085,32 +2084,32 @@ export class SchedulesService {
       string,
       Array<{ servantId: string; teamId: string | null; isMainSector: boolean }>
     >();
-    for (const sectorId of sectorIds) {
-      map.set(sectorId, []);
+    for (const ministryId of ministryIds) {
+      map.set(ministryId, []);
     }
 
     for (const servant of servants) {
-      for (const sectorId of sectorIds) {
+      for (const ministryId of ministryIds) {
         const belongsToSector =
-          servant.mainSectorId === sectorId ||
-          servant.servantSectors.some((servantSector) => servantSector.sectorId === sectorId);
+          servant.mainMinistryId === ministryId ||
+          servant.servantMinistries.some((servantMinistry) => servantMinistry.ministryId === ministryId);
         if (!belongsToSector) {
           continue;
         }
-        if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
+        if (!this.hasCompletedTrainingForMinistry(servant, ministryId)) {
           continue;
         }
-        map.get(sectorId)?.push({
+        map.get(ministryId)?.push({
           servantId: servant.id,
           teamId: servant.teamId ?? null,
-          isMainSector: servant.mainSectorId === sectorId,
+          isMainSector: servant.mainMinistryId === ministryId,
         });
         }
     }
 
-    for (const [sectorId, candidates] of map) {
+    for (const [ministryId, candidates] of map) {
       candidates.sort((a, b) => a.servantId.localeCompare(b.servantId));
-      map.set(sectorId, candidates);
+      map.set(ministryId, candidates);
     }
 
     return map;
@@ -2199,12 +2198,12 @@ export class SchedulesService {
   private findExistingScheduleForSlot(
     existingSchedules: Array<{
       id: string;
-      sectorId: string;
+      ministryId: string;
       servantId: string;
     }>,
-    sectorId: string,
+    ministryId: string,
   ) {
-    return existingSchedules.find((item) => item.sectorId === sectorId);
+    return existingSchedules.find((item) => item.ministryId === ministryId);
   }
 
   private async resolveGenerationTeamFilter(teamIds?: string[]) {
@@ -2213,13 +2212,13 @@ export class SchedulesService {
     if (normalizedTeamIds.length === 0) {
       return {
         teamIds: [] as string[],
-        teams: [] as Array<{ id: string; name: string; sectorId: string }>,
+        teams: [] as Array<{ id: string; name: string; ministryId: string }>,
       };
     }
 
     const teams = await this.prisma.team.findMany({
       where: { id: { in: normalizedTeamIds } },
-      select: { id: true, name: true, sectorId: true },
+      select: { id: true, name: true, ministryId: true },
     });
 
     if (teams.length !== normalizedTeamIds.length) {
@@ -2236,9 +2235,9 @@ export class SchedulesService {
     servantId: string,
     existing: { servantId: string } | undefined,
     assignedInServiceCount: Map<string, number>,
-    allowMultiSectorSameService: boolean,
+    allowMultiMinistrySameService: boolean,
   ) {
-    if (allowMultiSectorSameService) {
+    if (allowMultiMinistrySameService) {
       return true;
     }
 
@@ -2308,17 +2307,17 @@ export class SchedulesService {
   private pushNoEligibleWarning(
     result: {
       summary: { skipped: number; warnings: number };
-      warnings: Array<{ code: string; serviceId: string; sectorId: string; message: string }>;
+      warnings: Array<{ code: string; serviceId: string; ministryId: string; message: string }>;
     },
     serviceId: string,
-    sectorId: string,
+    ministryId: string,
   ) {
     result.summary.warnings += 1;
     result.summary.skipped += 1;
     result.warnings.push({
       code: 'NO_ELIGIBLE_SERVANT',
       serviceId,
-      sectorId,
+      ministryId,
       message: 'Nenhum servo elegivel encontrado.',
     });
   }
@@ -2326,7 +2325,7 @@ export class SchedulesService {
   private async logGenerationAudit(
     userId: string,
     serviceId: string,
-    sectorId: string,
+    ministryId: string,
     servantId: string | undefined,
     payload: Record<string, unknown>,
   ) {
@@ -2338,35 +2337,35 @@ export class SchedulesService {
             ? AuditAction.UPDATE
             : AuditAction.STATUS_CHANGE,
       entity: 'ScheduleGenerationDecision',
-      entityId: `${serviceId}:${sectorId}:${servantId ?? 'none'}`,
+      entityId: `${serviceId}:${ministryId}:${servantId ?? 'none'}`,
       userId,
       metadata: {
         serviceId,
-        sectorId,
+        ministryId,
         servantId,
         ...payload,
       },
     });
   }
 
-  private async validateScheduleInput(serviceId: string, sectorId: string, servantId: string) {
-    const [service, sector] = await Promise.all([
+  private async validateScheduleInput(serviceId: string, ministryId: string, servantId: string) {
+    const [service, ministry] = await Promise.all([
       this.prisma.worshipService.findUnique({ where: { id: serviceId }, select: { id: true } }),
-      this.prisma.sector.findUnique({ where: { id: sectorId }, select: { id: true } }),
+      this.prisma.ministry.findUnique({ where: { id: ministryId }, select: { id: true } }),
     ]);
 
     if (!service) {
       throw new NotFoundException('Worship service not found');
     }
 
-    if (!sector) {
-      throw new NotFoundException('Sector not found');
+    if (!ministry) {
+      throw new NotFoundException('Ministry not found');
     }
 
-    await this.ensureServantEligibleForSector(servantId, sectorId, serviceId);
+    await this.ensureServantEligibleForSector(servantId, ministryId, serviceId);
   }
 
-  private async ensureNoConflict(serviceId: string, servantId: string, sectorId: string) {
+  private async ensureNoConflict(serviceId: string, servantId: string, ministryId: string) {
     const serviceConflict = await this.prisma.schedule.findFirst({
       where: { serviceId, servantId },
       select: { id: true },
@@ -2377,28 +2376,28 @@ export class SchedulesService {
     }
 
     const sectorConflict = await this.prisma.schedule.findFirst({
-      where: { serviceId, sectorId, servantId },
+      where: { serviceId, ministryId, servantId },
       select: { id: true },
     });
 
     if (sectorConflict) {
-      throw new BadRequestException('Servant is already assigned in this sector for the service');
+      throw new BadRequestException('Servant is already assigned in this ministry for the service');
     }
   }
 
   private resolveTrainingStatusForMinistry(
     servant: {
       trainingStatus: TrainingStatus;
-      mainSectorId?: string | null;
-      servantSectors?: Array<{ sectorId: string; trainingStatus?: TrainingStatus | null }>;
+      mainMinistryId?: string | null;
+      servantMinistries?: Array<{ ministryId: string; trainingStatus?: TrainingStatus | null }>;
     },
     ministryId: string,
   ) {
-    const sectorLink = servant.servantSectors?.find((relation) => relation.sectorId === ministryId);
+    const sectorLink = servant.servantMinistries?.find((relation) => relation.ministryId === ministryId);
     if (sectorLink?.trainingStatus) {
       return sectorLink.trainingStatus;
     }
-    if (servant.mainSectorId === ministryId) {
+    if (servant.mainMinistryId === ministryId) {
       return servant.trainingStatus;
     }
     return TrainingStatus.PENDING;
@@ -2406,12 +2405,12 @@ export class SchedulesService {
 
   private resolveTrainingCompletedAtForMinistry(
     servant: {
-      servantSectors?: Array<{ sectorId: string; trainingCompletedAt?: Date | null }>;
+      servantMinistries?: Array<{ ministryId: string; trainingCompletedAt?: Date | null }>;
     },
     ministryId: string,
   ) {
     return (
-      servant.servantSectors?.find((relation) => relation.sectorId === ministryId)
+      servant.servantMinistries?.find((relation) => relation.ministryId === ministryId)
         ?.trainingCompletedAt ?? null
     );
   }
@@ -2419,15 +2418,15 @@ export class SchedulesService {
   private hasCompletedTrainingForMinistry(
     servant: {
       trainingStatus: TrainingStatus;
-      mainSectorId?: string | null;
-      servantSectors?: Array<{ sectorId: string; trainingStatus?: TrainingStatus | null }>;
+      mainMinistryId?: string | null;
+      servantMinistries?: Array<{ ministryId: string; trainingStatus?: TrainingStatus | null }>;
     },
     ministryId: string,
   ) {
     return this.resolveTrainingStatusForMinistry(servant, ministryId) === TrainingStatus.COMPLETED;
   }
 
-  private async ensureServantEligibleForSector(servantId: string, sectorId: string, serviceId?: string) {
+  private async ensureServantEligibleForSector(servantId: string, ministryId: string, serviceId?: string) {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
       select: {
@@ -2435,10 +2434,10 @@ export class SchedulesService {
         status: true,
         trainingStatus: true,
         approvalStatus: true,
-        mainSectorId: true,
-        servantSectors: {
-          where: { sectorId },
-          select: { id: true, sectorId: true, trainingStatus: true, trainingCompletedAt: true },
+        mainMinistryId: true,
+        servantMinistries: {
+          where: { ministryId },
+          select: { id: true, ministryId: true, trainingStatus: true, trainingCompletedAt: true },
         },
         talents: {
           take: 1,
@@ -2475,14 +2474,14 @@ export class SchedulesService {
       });
     }
 
-    if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
+    if (!this.hasCompletedTrainingForMinistry(servant, ministryId)) {
       throw new UnprocessableEntityException({
         code: 'SERVANT_NOT_ELIGIBLE',
         message: 'Servo ainda nao concluiu o treinamento deste ministerio.',
         details: {
           servantId: servant.id,
-          ministryId: sectorId,
-          ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, sectorId),
+          ministryId: ministryId,
+          ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, ministryId),
           reason: 'MINISTRY_TRAINING_NOT_COMPLETED',
         },
         reasons: ['MINISTRY_TRAINING_NOT_COMPLETED'],
@@ -2513,7 +2512,7 @@ export class SchedulesService {
     }
 
     const belongsToSector =
-      servant.mainSectorId === sectorId || servant.servantSectors.length > 0;
+      servant.mainMinistryId === ministryId || servant.servantMinistries.length > 0;
 
     if (!belongsToSector) {
       throw new UnprocessableEntityException({
@@ -2523,7 +2522,7 @@ export class SchedulesService {
           servantId: servant.id,
           status: servant.status,
           trainingStatus: servant.trainingStatus,
-          sectorId,
+          ministryId,
           reason: 'SERVANT_NOT_IN_SECTOR',
         },
       });
@@ -2574,7 +2573,7 @@ export class SchedulesService {
       ? parseSaoPauloDateEnd(query.endDate)
       : new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 59, 59));
 
-    const scopedSectorId = await this.resolveWorkspaceSectorId(query, actor);
+    const scopedSectorId = await this.resolveWorkspaceMinistryId(query, actor);
     const allowedSectorIds = [scopedSectorId];
 
     const services = await this.prisma.worshipService.findMany({
@@ -2598,17 +2597,17 @@ export class SchedulesService {
     return { start, end, allowedSectorIds, services };
   }
 
-  private async resolveWorkspaceSectorId(query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
-    const requestedSectorId = (query.ministryId ?? query.sectorId ?? '').trim();
+  private async resolveWorkspaceMinistryId(query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    const requestedSectorId = (query.ministryId ?? '').trim();
     if (requestedSectorId) {
-      const allowedForRequested = await this.resolveAllowedSectorIds(actor, [requestedSectorId]);
+      const allowedForRequested = await this.resolveAllowedMinistryIds(actor, [requestedSectorId]);
       if (!allowedForRequested.includes(requestedSectorId)) {
         throw new ForbiddenException(WORKSPACE_CONTEXT_ERRORS.outOfScope);
       }
       return requestedSectorId;
     }
 
-    const allowedSectorIds = await this.resolveAllowedSectorIds(actor);
+    const allowedSectorIds = await this.resolveAllowedMinistryIds(actor);
     if (actor.role === Role.COORDENADOR) {
       if (allowedSectorIds.length === 1) {
         return allowedSectorIds[0];
@@ -2642,7 +2641,7 @@ export class SchedulesService {
       status: ScheduleStatus;
       responseStatus: ScheduleResponseStatus;
       servantId: string;
-      sectorId: string;
+      ministryId: string;
     }>,
   ) {
     const alerts: string[] = [];
@@ -2735,7 +2734,7 @@ export class SchedulesService {
 
   private async listSlotEligibility(
     serviceId: string,
-    sectorId: string,
+    ministryId: string,
     slot: {
       id: string;
       functionName: string;
@@ -2752,7 +2751,7 @@ export class SchedulesService {
       }),
       this.prisma.servant.findMany({
         where: {
-          OR: [{ mainSectorId: sectorId }, { servantSectors: { some: { sectorId } } }],
+          OR: [{ mainMinistryId: ministryId }, { servantMinistries: { some: { ministryId } } }],
         },
         select: {
           id: true,
@@ -2761,10 +2760,10 @@ export class SchedulesService {
           trainingStatus: true,
           approvalStatus: true,
           aptitude: true,
-          mainSectorId: true,
-          servantSectors: {
-            where: { sectorId },
-            select: { sectorId: true, trainingStatus: true, trainingCompletedAt: true },
+          mainMinistryId: true,
+          servantMinistries: {
+            where: { ministryId },
+            select: { ministryId: true, trainingStatus: true, trainingCompletedAt: true },
           },
         },
         orderBy: [{ name: 'asc' }],
@@ -2792,15 +2791,15 @@ export class SchedulesService {
     const [schedules, servantsWithPastoralPending] = await Promise.all([
       this.prisma.schedule.findMany({
         where: { serviceId, servantId: { in: servantIds } },
-        select: { servantId: true, sectorId: true },
+        select: { servantId: true, ministryId: true },
       }),
       this.getServantsWithActivePastoralPendencies(servantIds),
     ]);
     const conflictsByServant = new Map<string, Set<string>>();
     for (const schedule of schedules) {
-      const sectors = conflictsByServant.get(schedule.servantId) ?? new Set<string>();
-      sectors.add(schedule.sectorId);
-      conflictsByServant.set(schedule.servantId, sectors);
+      const ministries = conflictsByServant.get(schedule.servantId) ?? new Set<string>();
+      ministries.add(schedule.ministryId);
+      conflictsByServant.set(schedule.servantId, ministries);
     }
     const requiredAptitude = this.mapFunctionToAptitude(slot.functionName);
 
@@ -2818,7 +2817,7 @@ export class SchedulesService {
       if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
         reasons.push('PENDING_APPROVAL');
       }
-      if (!this.hasCompletedTrainingForMinistry(servant, sectorId)) {
+      if (!this.hasCompletedTrainingForMinistry(servant, ministryId)) {
         reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
       }
       if (unavailableSet.has(servant.id)) {
@@ -2828,12 +2827,12 @@ export class SchedulesService {
         reasons.push('OUTSIDE_FUNCTION_TALENT');
       }
       const conflictSectors = conflictsByServant.get(servant.id);
-      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== sectorId)) {
+      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== ministryId)) {
         reasons.push('ALREADY_SCHEDULED_OTHER_MINISTRY');
       }
       if (
         conflictSectors &&
-        conflictSectors.has(sectorId) &&
+        conflictSectors.has(ministryId) &&
         slot.assignedServantId !== servant.id
       ) {
         reasons.push('ALREADY_SCHEDULED_SAME_MINISTRY');
@@ -2842,8 +2841,8 @@ export class SchedulesService {
       return {
         servantId: servant.id,
         servantName: servant.name,
-        ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, sectorId),
-        ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, sectorId),
+        ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, ministryId),
+        ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, ministryId),
         eligible: reasons.length === 0,
         reasons,
       };
@@ -2852,7 +2851,7 @@ export class SchedulesService {
 
   private async evaluateServantEligibilityForSlot(
     serviceId: string,
-    sectorId: string,
+    ministryId: string,
     servantId: string,
     slot: {
       id: string;
@@ -2863,7 +2862,7 @@ export class SchedulesService {
       assignedServantId?: string | null;
     },
   ) {
-    const eligibilities = await this.listSlotEligibility(serviceId, sectorId, slot);
+    const eligibilities = await this.listSlotEligibility(serviceId, ministryId, slot);
     const item = eligibilities.find((entry) => entry.servantId === servantId);
     if (!item) {
       return {
@@ -2885,7 +2884,7 @@ export class SchedulesService {
     }
   }
 
-  private async ensureResponsibilityMatchesSector(responsibilityId: string | undefined, sectorId: string) {
+  private async ensureResponsibilityMatchesSector(responsibilityId: string | undefined, ministryId: string) {
     if (!responsibilityId) {
       return;
     }
@@ -2896,7 +2895,7 @@ export class SchedulesService {
     if (!responsibility) {
       throw new NotFoundException('Ministry responsibility not found');
     }
-    if (responsibility.ministryId !== sectorId) {
+    if (responsibility.ministryId !== ministryId) {
       throw new BadRequestException('Responsibility does not belong to informed ministry');
     }
   }
@@ -2917,14 +2916,14 @@ export class SchedulesService {
       throw new NotFoundException('Schedule slot not found');
     }
 
-    await this.assertCanManageSector(actor, slot.sectorId);
+    await this.assertCanManageMinistry(actor, slot.ministryId);
     if (!forceFill && !slot.assignedServantId) {
       throw new BadRequestException('Slot is not currently assigned. Use fill endpoint instead.');
     }
 
     const eligibility = await this.evaluateServantEligibilityForSlot(
       slot.serviceId,
-      slot.sectorId,
+      slot.ministryId,
       dto.substituteServantId,
       slot,
     );
@@ -3049,21 +3048,21 @@ export class SchedulesService {
     return Shift.EVENING;
   }
 
-  private async resolveAllowedSectorIds(actor: JwtPayload, requestedSectorIds?: string[]) {
+  private async resolveAllowedMinistryIds(actor: JwtPayload, requestedSectorIds?: string[]) {
     if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
       if (requestedSectorIds?.length) {
         return [...new Set(requestedSectorIds)];
       }
 
-      const allSectors = await this.prisma.sector.findMany({ select: { id: true } });
-      return allSectors.map((sector) => sector.id);
+      const allSectors = await this.prisma.ministry.findMany({ select: { id: true } });
+      return allSectors.map((ministry) => ministry.id);
     }
 
-    const allowed = await resolveScopedSectorIds(this.prisma, actor);
+    const allowed = await resolveScopedMinistryIds(this.prisma, actor);
     if (requestedSectorIds?.length) {
       const outOfScope = requestedSectorIds.some((id) => !allowed.includes(id));
       if (outOfScope) {
-        throw new ForbiddenException('You can only generate schedules for your allowed sectors');
+        throw new ForbiddenException('You can only generate schedules for your allowed ministries');
       }
       return [...new Set(requestedSectorIds)];
     }
@@ -3071,24 +3070,24 @@ export class SchedulesService {
     return allowed;
   }
 
-  private async assertCanManageSector(actor: JwtPayload, sectorId: string) {
+  private async assertCanManageMinistry(actor: JwtPayload, ministryId: string) {
     if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
       return;
     }
 
     if (actor.role === Role.COORDENADOR) {
-      const allowedSectorIds = await resolveScopedSectorIds(this.prisma, actor);
-      if (!allowedSectorIds.includes(sectorId)) {
+      const allowedSectorIds = await resolveScopedMinistryIds(this.prisma, actor);
+      if (!allowedSectorIds.includes(ministryId)) {
         throw new ForbiddenException({
-          message: 'You do not have permission for this sector',
-          sectorId,
+          message: 'You do not have permission for this ministry',
+          ministryId,
           allowedSectorIds,
         });
       }
       return;
     }
 
-    throw new ForbiddenException('You do not have permission to manage schedules for this sector');
+    throw new ForbiddenException('You do not have permission to manage schedules for this ministry');
   }
 
   private async assertCanManageSchedule(actor: JwtPayload, scheduleId: string) {
@@ -3135,7 +3134,7 @@ export class SchedulesService {
         teamId?: string | null;
         team?: { id?: string | null; name?: string | null } | null;
       } | null;
-      sector?: { name?: string } | null;
+      ministry?: { name?: string } | null;
     },
   >(schedule: T) {
       const teamId = schedule.servant?.team?.id ?? schedule.servant?.teamId ?? null;
@@ -3146,9 +3145,9 @@ export class SchedulesService {
         worshipServiceId: schedule.serviceId,
         worshipServiceTitle: schedule.service?.title ?? null,
         servantName: schedule.servant?.name ?? null,
-        sectorName: schedule.sector?.name ?? null,
-        ministryId: (schedule as { sectorId?: string }).sectorId ?? null,
-        ministryName: schedule.sector?.name ?? null,
+        sectorName: schedule.ministry?.name ?? null,
+        ministryId: (schedule as { ministryId?: string }).ministryId ?? null,
+        ministryName: schedule.ministry?.name ?? null,
         teamId,
         teamName,
       };
@@ -3170,3 +3169,8 @@ export class SchedulesService {
     });
   }
 }
+
+
+
+
+

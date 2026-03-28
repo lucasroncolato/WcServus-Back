@@ -11,7 +11,7 @@ export class UpdateUserScopeDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Vínculos de escopo por setor (IDs de Sector).',
+    description: 'Vínculos de escopo por setor (IDs de Ministry).',
   })
   @IsOptional()
   @Transform(({ value }) => {
@@ -29,7 +29,7 @@ export class UpdateUserScopeDto {
   @IsArray()
   @ArrayUnique()
   @IsString({ each: true })
-  sectorIds?: string[];
+  ministryIds?: string[];
 
   @ApiPropertyOptional({
     type: [String],
@@ -54,3 +54,5 @@ export class UpdateUserScopeDto {
   teamIds?: string[];
 
 }
+
+

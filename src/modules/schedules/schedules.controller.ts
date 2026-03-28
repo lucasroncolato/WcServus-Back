@@ -95,6 +95,24 @@ export class SchedulesController {
     return this.schedulesService.createSlot(serviceId, dto, user);
   }
 
+  @Get('services/:serviceId/versions')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  listVersions(@Param('serviceId') serviceId: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.listVersions(serviceId, user);
+  }
+
+  @Post('services/:serviceId/versions/draft')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  createDraftVersion(@Param('serviceId') serviceId: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.createDraftVersion(serviceId, user);
+  }
+
+  @Post('versions/:versionId/publish')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR, Role.PASTOR)
+  publishVersion(@Param('versionId') versionId: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.publishVersion(versionId, user);
+  }
+
   @Patch('slots/:slotId/assign')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
   assignSlot(

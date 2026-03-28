@@ -13,6 +13,55 @@ import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { resolveScopedMinistryIds } from 'src/common/auth/access-scope';
 import { ScheduleSlotSwapContextDto } from './dto/contextual-swap-schedule-slot.dto';
 
+const defaultEligibilityEvaluate = (context: any) => {
+  const reasons: string[] = [];
+  if (context.slot?.blocked) {
+    reasons.push(context.slot.blockedReason || 'SLOT_BLOCKED');
+  }
+  if (context.hasPastoralPending) {
+    reasons.push('PASTORAL_PENDING');
+  }
+  if (context.servant?.status !== 'ATIVO') {
+    reasons.push('INACTIVE');
+  }
+  if (context.servant?.approvalStatus !== 'APPROVED') {
+    reasons.push('PENDING_APPROVAL');
+  }
+
+  const relation = (context.servant?.servantMinistries ?? []).find(
+    (item: any) => item.ministryId === context.ministryId,
+  );
+  const trainingStatus = relation?.trainingStatus ?? context.servant?.trainingStatus;
+  if (context.slot?.requiredTraining !== false && trainingStatus !== 'COMPLETED') {
+    reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
+  }
+
+  if (context.unavailableAtServiceTime) {
+    reasons.push('UNAVAILABLE_AT_SERVICE_TIME');
+  }
+
+  const conflicts: string[] = context.conflictMinistryIds ?? [];
+  if (conflicts.some((ministryId) => ministryId !== context.ministryId)) {
+    reasons.push('ALREADY_SCHEDULED_IN_OTHER_MINISTRY');
+  }
+  if (
+    context.slot &&
+    conflicts.includes(context.ministryId) &&
+    context.slot.assignedServantId !== context.servant?.id
+  ) {
+    reasons.push('ALREADY_SCHEDULED_SAME_MINISTRY');
+  }
+
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+  };
+};
+
+const eligibilityEngine = {
+  evaluate: jest.fn(defaultEligibilityEvaluate),
+} as any;
+
 jest.mock('src/common/auth/access-scope', () => ({
   assertMinistryAccess: jest.fn(),
   assertServantAccess: jest.fn().mockResolvedValue(undefined),
@@ -70,6 +119,8 @@ describe('SchedulesService - duplicate', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (eligibilityEngine.evaluate as jest.Mock).mockReset();
+    (eligibilityEngine.evaluate as jest.Mock).mockImplementation(defaultEligibilityEvaluate);
     prisma.schedule.findUnique.mockReset();
     prisma.schedule.findFirst.mockReset();
     prisma.schedule.create.mockReset();
@@ -90,7 +141,7 @@ describe('SchedulesService - duplicate', () => {
     (notificationsService.create as jest.Mock).mockReset();
     (notificationsService.createMany as jest.Mock).mockReset();
     (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset();
-    service = new SchedulesService(prisma, auditService, notificationsService);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
   });
 
   it('should duplicate schedule successfully', async () => {
@@ -238,6 +289,8 @@ describe('SchedulesService - history', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (eligibilityEngine.evaluate as jest.Mock).mockReset();
+    (eligibilityEngine.evaluate as jest.Mock).mockImplementation(defaultEligibilityEvaluate);
     prisma.schedule.findFirst.mockReset();
     prisma.schedule.findUnique.mockReset();
     prisma.scheduleSwapHistory.findMany.mockReset();
@@ -245,7 +298,7 @@ describe('SchedulesService - history', () => {
     (notificationsService.create as jest.Mock).mockReset();
     (notificationsService.createMany as jest.Mock).mockReset();
     (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset();
-    service = new SchedulesService(prisma, auditService, notificationsService);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
   });
 
   it('should return merged history sorted desc with SWAPPED/CREATED/UPDATED/STATUS_CHANGED/DUPLICATED', async () => {
@@ -367,13 +420,15 @@ describe('SchedulesService - workspace context', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (eligibilityEngine.evaluate as jest.Mock).mockReset();
+    (eligibilityEngine.evaluate as jest.Mock).mockImplementation(defaultEligibilityEvaluate);
     prisma.worshipService.findMany.mockReset();
     prisma.scheduleSlot.findMany.mockReset();
     prisma.schedule.findMany.mockReset();
     prisma.ministry.findMany.mockReset();
     prisma.ministry.findMany.mockResolvedValue([]);
     (resolveScopedMinistryIds as jest.Mock).mockReset();
-    service = new SchedulesService(prisma, auditService, notificationsService);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
   });
 
   it('infers coordinator ministry automatically when only one scope is available', async () => {
@@ -531,12 +586,14 @@ describe('SchedulesService - slot eligibility rules', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (eligibilityEngine.evaluate as jest.Mock).mockReset();
+    (eligibilityEngine.evaluate as jest.Mock).mockImplementation(defaultEligibilityEvaluate);
     prisma.worshipService.findUnique.mockReset();
     prisma.servant.findMany.mockReset();
     prisma.schedule.findMany.mockReset();
     prisma.pastoralVisit.findMany.mockReset();
     prisma.pastoralAlert.findMany.mockReset();
-    service = new SchedulesService(prisma, auditService, notificationsService);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
   });
 
   it('returns pastoral pending and cross-ministry conflict reasons in eligible-servants endpoint', async () => {
@@ -681,6 +738,8 @@ describe('SchedulesService - assignment flow with ministry training', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (eligibilityEngine.evaluate as jest.Mock).mockReset();
+    (eligibilityEngine.evaluate as jest.Mock).mockImplementation(defaultEligibilityEvaluate);
     prisma.scheduleSlot.findUnique.mockReset();
     prisma.scheduleSlot.findMany.mockReset();
     prisma.worshipService.findUnique.mockReset();
@@ -714,7 +773,7 @@ describe('SchedulesService - assignment flow with ministry training', () => {
     prisma.pastoralVisit.findMany.mockResolvedValue([]);
     prisma.pastoralAlert.findMany.mockResolvedValue([]);
 
-    service = new SchedulesService(prisma, auditService, notificationsService);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
   });
 
   it('blocks assign when ministry training is pending', async () => {

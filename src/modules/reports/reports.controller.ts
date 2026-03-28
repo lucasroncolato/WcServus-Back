@@ -19,6 +19,31 @@ export class ReportsController {
     return this.reportsService.attendanceReport(query, user);
   }
 
+  @Get('servants/activity')
+  servantsActivity(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.servantsActivityReport(query, user);
+  }
+
+  @Get('ministry-load')
+  ministryLoad(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.ministryLoadReport(query, user);
+  }
+
+  @Get('training')
+  training(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.trainingPendingReport(query, user);
+  }
+
+  @Get('pastoral')
+  pastoral(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.pastoralPendenciesReport(query, user);
+  }
+
+  @Get('schedules')
+  schedules(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.schedulesPeriodReport(query, user);
+  }
+
   @Get('absences')
   absences(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
     return this.reportsService.absencesReport(query, user);

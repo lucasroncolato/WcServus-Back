@@ -102,11 +102,18 @@ enum ScheduleResponseStatus {
 enum ScheduleSlotStatus {
   OPEN
   ASSIGNED
-  PENDING
+  PENDING_CONFIRMATION
   CONFIRMED
-  CONFLICT
+  DECLINED
+  NO_SHOW
+  COMPLETED
   SWAPPED
-  CANCELLED
+}
+
+enum ScheduleVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
 }
 
 enum ScheduleSlotChangeType {
@@ -173,6 +180,29 @@ enum AuditAction {
   STATUS_CHANGE
   VISIT_RESOLVED
   SCHEDULE_SWAP
+  CREATE_SERVANT
+  UPDATE_SERVANT
+  CREATE_MINISTRY
+  UPDATE_MINISTRY
+  GENERATE_SCHEDULE
+  ASSIGN
+  SWAP
+  FILL
+  RESOLVE_PASTORAL_PENDING
+  TRAINING_CHANGE
+  USER_SCOPE_CHANGE
+  USER_ROLE_CHANGE
+  USER_LOGIN
+  USER_LOGOUT
+  SCHEDULE_PUBLISH
+  SLOT_ASSIGNED
+  SLOT_CONFIRMED
+  SLOT_DECLINED
+  SLOT_NO_SHOW
+  SLOT_COMPLETED
+  SLOT_SWAPPED
+  ATTENDANCE_REGISTERED
+  PASTORAL_ACTION
   DELETE
 }
 
@@ -226,6 +256,32 @@ enum RewardSource {
   MANUAL
 }
 
+model Church {
+  id             String        @id @default(cuid())
+  name           String
+  city           String?
+  state          String?
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  users          User[]
+  ministries     Ministry[]
+  teams          Team[]
+  servants       Servant[]
+  worshipServices WorshipService[]
+  schedules      Schedule[]
+  scheduleSlots  ScheduleSlot[]
+  attendances    Attendance[]
+  pastoralVisits PastoralVisit[]
+  pastoralAlerts PastoralAlert[]
+  pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
+  notifications  Notification[]
+  scheduleVersions ScheduleVersion[]
+
+  @@index([active])
+  @@index([name])
+}
+
 model User {
   id                               String                    @id @default(cuid())
   name                             String
@@ -239,8 +295,12 @@ model User {
   phone                            String?
   avatarUrl                        String?
   lastLoginAt                      DateTime?
+  churchId                         String?
+  deletedAt                        DateTime?
+  deletedBy                        String?
   createdAt                        DateTime                  @default(now())
   updatedAt                        DateTime                  @updatedAt
+  church                           Church?                   @relation(fields: [churchId], references: [id], onDelete: SetNull)
   servant                          Servant?                  @relation(fields: [servantId], references: [id], onDelete: SetNull)
   refreshTokens                    RefreshToken[]
   passwordResetTokens              PasswordResetToken[]
@@ -274,11 +334,14 @@ model User {
   notificationPreferences          NotificationPreference[]
   notificationLogs                 NotificationLog[]
   notificationQueue                NotificationQueue[]
+  createdScheduleVersions          ScheduleVersion[]
 
   @@index([role])
   @@index([scope])
   @@index([status])
   @@index([servantId])
+  @@index([churchId])
+  @@index([deletedAt])
   @@index([createdAt])
 }
 
@@ -310,6 +373,7 @@ model PasswordResetToken {
 
 model Ministry {
   id                      String                   @id @default(cuid())
+  churchId                String?
   name                    String                   @unique
   description             String?
   color                   String?
@@ -318,6 +382,9 @@ model Ministry {
   coordinatorUserId       String?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
+  deletedAt               DateTime?
+  deletedBy               String?
+  church                  Church?                  @relation(fields: [churchId], references: [id], onDelete: SetNull)
   coordinator             User?                    @relation(fields: [coordinatorUserId], references: [id])
   servants                Servant[]
   servantMinistries       ServantMinistry[]
@@ -327,8 +394,11 @@ model Ministry {
   teams                   Team[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   responsibilities        MinistryResponsibility[]
+  scheduleVersionSlots    ScheduleVersionSlot[]
 
   @@index([coordinatorUserId])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model Team {
@@ -337,10 +407,14 @@ model Team {
   slug              String?
   description       String?
   ministryId        String
+  churchId          String?
   leaderUserId      String?
   status            TeamStatus            @default(ACTIVE)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  church            Church?               @relation(fields: [churchId], references: [id], onDelete: SetNull)
   ministry          Ministry              @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   leader            User?                 @relation("TeamLeader", fields: [leaderUserId], references: [id], onDelete: SetNull)
   servants          Servant[]
@@ -350,6 +424,8 @@ model Team {
   @@index([ministryId])
   @@index([leaderUserId])
   @@index([status])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model Servant {
@@ -368,12 +444,16 @@ model Servant {
   aptitude                  Aptitude?
   mainMinistryId            String?
   teamId                    String?
+  churchId                  String?
   notes                     String?
   joinedAt                  DateTime?
   consecutiveAbsences       Int                      @default(0)
   monthlyAbsences           Int                      @default(0)
   createdAt                 DateTime                 @default(now())
   updatedAt                 DateTime                 @updatedAt
+  deletedAt                 DateTime?
+  deletedBy                 String?
+  church                    Church?                  @relation(fields: [churchId], references: [id], onDelete: SetNull)
   mainMinistry              Ministry?                @relation(fields: [mainMinistryId], references: [id])
   team                      Team?                    @relation(fields: [teamId], references: [id], onDelete: SetNull)
   servantMinistries         ServantMinistry[]
@@ -396,6 +476,7 @@ model Servant {
   notificationPreferences   NotificationPreference[]
   notificationLogs          NotificationLog[]
   notificationQueue         NotificationQueue[]
+  scheduleVersionSlots      ScheduleVersionSlot[]
 
   @@index([name])
   @@index([status])
@@ -405,6 +486,8 @@ model Servant {
   @@index([approvedByUserId])
   @@index([mainMinistryId])
   @@index([teamId])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model ServantMinistry {
@@ -440,6 +523,7 @@ model ServantStatusHistory {
 
 model WorshipService {
   id            String               @id @default(cuid())
+  churchId      String?
   type          WorshipServiceType
   title         String
   serviceDate   DateTime
@@ -448,13 +532,57 @@ model WorshipService {
   status        WorshipServiceStatus @default(PLANEJADO)
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
+  deletedAt     DateTime?
+  deletedBy     String?
+  church        Church?              @relation(fields: [churchId], references: [id], onDelete: SetNull)
   schedules     Schedule[]
   scheduleSlots ScheduleSlot[]
+  scheduleVersions ScheduleVersion[]
   attendances   Attendance[]
 
   @@unique([serviceDate, startTime, title])
   @@index([serviceDate])
   @@index([type])
+  @@index([churchId])
+  @@index([deletedAt])
+}
+
+model ScheduleVersion {
+  id              String                @id @default(cuid())
+  worshipServiceId String
+  churchId        String?
+  versionNumber   Int
+  status          ScheduleVersionStatus @default(DRAFT)
+  createdBy       String
+  createdAt       DateTime              @default(now())
+  worshipService  WorshipService        @relation(fields: [worshipServiceId], references: [id], onDelete: Cascade)
+  church          Church?               @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  createdByUser   User                  @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  slots           ScheduleVersionSlot[]
+
+  @@unique([worshipServiceId, versionNumber])
+  @@index([worshipServiceId, status])
+  @@index([churchId])
+}
+
+model ScheduleVersionSlot {
+  id                String             @id @default(cuid())
+  scheduleVersionId String
+  ministryId        String
+  responsibilityId  String?
+  assignedServantId String?
+  status            ScheduleSlotStatus @default(OPEN)
+  position          Int                @default(1)
+  createdAt         DateTime           @default(now())
+  scheduleVersion   ScheduleVersion    @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  ministry          Ministry           @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  responsibility    MinistryResponsibility? @relation(fields: [responsibilityId], references: [id], onDelete: SetNull)
+  assignedServant   Servant?           @relation(fields: [assignedServantId], references: [id], onDelete: SetNull)
+
+  @@index([scheduleVersionId, position])
+  @@index([ministryId])
+  @@index([responsibilityId])
+  @@index([assignedServantId])
 }
 
 model Schedule {
@@ -462,6 +590,7 @@ model Schedule {
   serviceId               String
   servantId               String
   ministryId              String
+  churchId                String?
   assignedByUserId        String
   status                  ScheduleStatus            @default(ASSIGNED)
   responseStatus          ScheduleResponseStatus    @default(PENDING)
@@ -469,6 +598,9 @@ model Schedule {
   declineReason           String?
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
+  deletedAt               DateTime?
+  deletedBy               String?
+  church                  Church?                   @relation(fields: [churchId], references: [id], onDelete: SetNull)
   service                 WorshipService            @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   servant                 Servant                   @relation(fields: [servantId], references: [id], onDelete: Cascade)
   ministry                Ministry                  @relation(fields: [ministryId], references: [id], onDelete: Cascade)
@@ -485,12 +617,15 @@ model Schedule {
   @@index([ministryId])
   @@index([status])
   @@index([responseStatus])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model ScheduleSlot {
   id                String                  @id @default(cuid())
   serviceId         String
   ministryId        String
+  churchId          String?
   scheduleId        String?
   responsibilityId  String?
   functionName      String
@@ -506,6 +641,9 @@ model ScheduleSlot {
   notes             String?
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  church            Church?                 @relation(fields: [churchId], references: [id], onDelete: SetNull)
   service           WorshipService          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   ministry          Ministry                @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   schedule          Schedule?               @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
@@ -520,6 +658,8 @@ model ScheduleSlot {
   @@index([assignedServantId])
   @@index([responsibilityId])
   @@index([scheduleId])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model ScheduleSlotChange {
@@ -588,12 +728,16 @@ model Attendance {
   id                 String           @id @default(cuid())
   serviceId          String
   servantId          String
+  churchId           String?
   status             AttendanceStatus
   justification      String?
   notes              String?
   registeredByUserId String
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
+  deletedBy          String?
+  church             Church?          @relation(fields: [churchId], references: [id], onDelete: SetNull)
   service            WorshipService   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   servant            Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
   registeredBy       User             @relation("RegisteredAttendances", fields: [registeredByUserId], references: [id])
@@ -602,11 +746,14 @@ model Attendance {
   @@index([serviceId])
   @@index([servantId])
   @@index([status])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model PastoralVisit {
   id               String              @id @default(cuid())
   servantId        String
+  churchId         String?
   reason           String
   status           PastoralVisitStatus @default(ABERTA)
   openedAt         DateTime            @default(now())
@@ -616,6 +763,9 @@ model PastoralVisit {
   resolvedByUserId String?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
+  deletedAt        DateTime?
+  deletedBy        String?
+  church           Church?             @relation(fields: [churchId], references: [id], onDelete: SetNull)
   servant          Servant             @relation(fields: [servantId], references: [id], onDelete: Cascade)
   createdBy        User                @relation("CreatedPastoralVisits", fields: [createdByUserId], references: [id])
   resolvedBy       User?               @relation("ResolvedPastoralVisits", fields: [resolvedByUserId], references: [id])
@@ -623,12 +773,15 @@ model PastoralVisit {
   @@index([servantId])
   @@index([status])
   @@index([openedAt])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model PastoralWeeklyFollowUp {
   id                String    @id @default(cuid())
   servantId         String
   ministryId        String
+  churchId          String?
   scheduleId        String?
   weekStartDate     DateTime
   contactedAt       DateTime  @default(now())
@@ -636,6 +789,9 @@ model PastoralWeeklyFollowUp {
   responsibleUserId String
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  church            Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
   servant           Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
   ministry          Ministry  @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   schedule          Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
@@ -647,6 +803,8 @@ model PastoralWeeklyFollowUp {
   @@index([ministryId, weekStartDate])
   @@index([scheduleId])
   @@index([responsibleUserId])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model DailyDevotional {
@@ -689,6 +847,7 @@ model MonthlyFasting {
 model PastoralAlert {
   id               String      @id @default(cuid())
   servantId        String
+  churchId         String?
   message          String
   status           AlertStatus @default(OPEN)
   trigger          String
@@ -696,12 +855,17 @@ model PastoralAlert {
   resolvedAt       DateTime?
   createdByUserId  String?
   resolvedByUserId String?
+  deletedAt        DateTime?
+  deletedBy        String?
+  church           Church?     @relation(fields: [churchId], references: [id], onDelete: SetNull)
   servant          Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
   createdBy        User?       @relation("AlertCreatedBy", fields: [createdByUserId], references: [id])
   resolvedBy       User?       @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id])
 
   @@index([servantId])
   @@index([status])
+  @@index([churchId])
+  @@index([deletedAt])
 }
 
 model Talent {
@@ -753,20 +917,28 @@ model SupportRequest {
 model MinistryResponsibility {
   id                   String         @id @default(cuid())
   ministryId           String
+  name                 String?
   title                String
   activity             String?
   functionName         String?
   description          String?
+  requiredTraining     Boolean        @default(false)
+  requiredAptitude     Aptitude?
   responsibleServantId String?
   active               Boolean        @default(true)
+  deletedAt            DateTime?
+  deletedBy            String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   ministry             Ministry       @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   responsibleServant   Servant?       @relation("ResponsibilityOwnerServant", fields: [responsibleServantId], references: [id], onDelete: SetNull)
   scheduleSlots        ScheduleSlot[]
+  scheduleVersionSlots ScheduleVersionSlot[]
 
   @@index([ministryId, active])
   @@index([responsibleServantId])
+  @@index([requiredAptitude])
+  @@index([deletedAt])
 }
 
 model ServantReward {
@@ -794,6 +966,8 @@ model AuditLog {
   action    AuditAction
   entity    String
   entityId  String
+  before    Json?
+  after     Json?
   metadata  Json?
   userId    String?
   createdAt DateTime    @default(now())
@@ -838,6 +1012,7 @@ model UserPermissionOverride {
 model Notification {
   id        String    @id @default(cuid())
   userId    String
+  churchId  String?
   type      String
   title     String
   message   String
@@ -846,10 +1021,12 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  church    Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
   @@index([type])
+  @@index([churchId])
 }
 
 model NotificationTemplate {

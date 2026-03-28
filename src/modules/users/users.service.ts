@@ -268,6 +268,7 @@ export class UsersService {
             status: dto.status ?? UserStatus.ACTIVE,
             phone: dto.phone,
             servantId: dto.servantId,
+            churchId: actor.churchId ?? null,
           },
           select: USER_SELECT,
         });
@@ -544,7 +545,7 @@ export class UsersService {
     });
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: AuditAction.USER_ROLE_CHANGE,
       entity: 'UserRole',
       entityId: id,
       userId: actor.sub,
@@ -600,7 +601,7 @@ export class UsersService {
     });
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: AuditAction.USER_SCOPE_CHANGE,
       entity: 'UserScope',
       entityId: id,
       userId: actor.sub,
@@ -694,6 +695,8 @@ export class UsersService {
         data: {
           status: UserStatus.INACTIVE,
           servantId: null,
+          deletedAt: new Date(),
+          deletedBy: actorUserId ?? null,
         },
         select: USER_SELECT,
       });

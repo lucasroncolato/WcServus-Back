@@ -5,15 +5,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   Prisma,
   Role,
   ScheduleResponseStatus,
+  ScheduleSlotStatus,
   ScheduleStatus,
   ServantStatus,
   Shift,
 } from '@prisma/client';
+import { EventBusService } from 'src/common/events/event-bus.service';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { ChangePasswordDto } from '../auth/dto/change-password.dto';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { ListNotificationsQueryDto } from '../notifications/dto/list-notifications-query.dto';
@@ -29,6 +33,8 @@ export class MeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly auditService: AuditService,
+    private readonly eventBus: EventBusService,
   ) {}
 
   async getProfile(actor: JwtPayload) {
@@ -527,7 +533,44 @@ export class MeService {
         },
       });
 
+      await tx.scheduleSlot.updateMany({
+        where: { scheduleId },
+        data: {
+          status:
+            dto.responseStatus === ScheduleResponseStatus.CONFIRMED
+              ? ScheduleSlotStatus.CONFIRMED
+              : ScheduleSlotStatus.DECLINED,
+        },
+      });
+
       return next;
+    });
+
+    await this.auditService.log({
+      action:
+        dto.responseStatus === ScheduleResponseStatus.CONFIRMED
+          ? AuditAction.SLOT_CONFIRMED
+          : AuditAction.SLOT_DECLINED,
+      entity: 'Schedule',
+      entityId: scheduleId,
+      userId: actor.sub,
+      metadata: {
+        responseStatus: dto.responseStatus,
+        declineReason: declineReason ?? null,
+      },
+    });
+
+    await this.eventBus.emit({
+      name:
+        dto.responseStatus === ScheduleResponseStatus.CONFIRMED
+          ? 'SLOT_CONFIRMED'
+          : 'SLOT_DECLINED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      payload: {
+        scheduleId,
+        responseStatus: dto.responseStatus,
+      },
     });
 
     return {

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AlertStatus, AttendanceStatus, PastoralVisitStatus, ServantStatus } from '@prisma/client';
+import { AppCacheService } from 'src/common/cache/cache.service';
 import {
   getAttendanceAccessWhere,
   getPastoralVisitAccessWhere,
@@ -11,9 +12,18 @@ import { JwtPayload } from '../auth/types/jwt-payload.type';
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: AppCacheService,
+  ) {}
 
   async summary(actor: JwtPayload) {
+    const cacheKey = `dashboard-summary:${actor.sub}`;
+    const cached = this.cacheService.get<unknown>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
     const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59));
@@ -94,7 +104,7 @@ export class DashboardService {
 
     const assiduidadeGeral = totalAttendances === 0 ? 0 : (presentes / totalAttendances) * 100;
 
-    return {
+    const payload = {
       totalServosAtivos,
       faltasDoMes,
       visitasPastoraisPendentes: visitasPendentes,
@@ -113,6 +123,8 @@ export class DashboardService {
         createdAt: alerta.createdAt,
       })),
     };
+    this.cacheService.set(cacheKey, payload, 20_000);
+    return payload;
   }
 
   async alerts(actor: JwtPayload) {

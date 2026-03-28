@@ -12,14 +12,22 @@ export class AuditService {
     entity: string;
     entityId: string;
     userId?: string;
+    before?: Record<string, unknown> | null;
+    after?: Record<string, unknown> | null;
     metadata?: Record<string, unknown>;
   }) {
+    const resolvedBefore = params.before ?? null;
+    const resolvedAfter = params.after ?? params.metadata ?? null;
+
     await this.prisma.auditLog.create({
       data: {
         action: params.action,
         entity: params.entity,
         entityId: params.entityId,
         userId: params.userId,
+        before:
+          resolvedBefore === null ? undefined : (resolvedBefore as Prisma.InputJsonValue | undefined),
+        after: resolvedAfter === null ? undefined : (resolvedAfter as Prisma.InputJsonValue | undefined),
         metadata: params.metadata as Prisma.InputJsonValue | undefined,
       },
     });

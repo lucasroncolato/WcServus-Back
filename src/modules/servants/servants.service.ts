@@ -23,6 +23,7 @@ import {
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { getServantAccessWhere, resolveScopedSectorIds } from 'src/common/auth/access-scope';
+import { EventBusService } from 'src/common/events/event-bus.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -64,6 +65,9 @@ export class ServantsService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly eventBus: EventBusService = {
+      emit: async () => undefined,
+    } as unknown as EventBusService,
   ) {}
 
   private readonly servantInclude = {
@@ -323,6 +327,7 @@ export class ServantsService {
     const servant = await this.prisma.$transaction(async (tx) => {
       const createdServant = await tx.servant.create({
         data: {
+          churchId: actor.churchId ?? null,
           name: dto.name,
           phone: dto.phone,
           gender: dto.gender,
@@ -381,7 +386,7 @@ export class ServantsService {
     });
 
     await this.auditService.log({
-      action: AuditAction.CREATE,
+      action: AuditAction.CREATE_SERVANT,
       entity: 'ServantWithUser',
       entityId: servant.id,
       userId: actor.sub,
@@ -390,6 +395,18 @@ export class ServantsService {
         teamId,
         userRole: targetRole,
         approvalStatus: isCoordinatorRequest ? ServantApprovalStatus.PENDING : ServantApprovalStatus.APPROVED,
+      },
+    });
+
+    await this.eventBus.emit({
+      name: 'SERVANT_CREATED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: (servant as unknown as { churchId?: string | null }).churchId ?? null,
+      payload: {
+        servantId: servant.id,
+        ministryIds,
+        teamId,
       },
     });
 
@@ -695,7 +712,7 @@ export class ServantsService {
     });
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: AuditAction.UPDATE_SERVANT,
       entity: 'Servant',
       entityId: id,
       userId: actor.sub,
@@ -704,6 +721,16 @@ export class ServantsService {
         ministryIds: resolvedSectorIds,
         teamId: resolvedTeamId,
       } as unknown as Record<string, unknown>,
+    });
+
+    await this.eventBus.emit({
+      name: 'SERVANT_UPDATED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: (servant as unknown as { churchId?: string | null }).churchId ?? null,
+      payload: {
+        servantId: id,
+      },
     });
 
     return this.toApiServant(servant);
@@ -847,7 +874,7 @@ export class ServantsService {
     });
 
     await this.auditService.log({
-      action: AuditAction.STATUS_CHANGE,
+      action: AuditAction.TRAINING_CHANGE,
       entity: 'ServantTraining',
       entityId: id,
       userId: actor.sub,
@@ -858,6 +885,18 @@ export class ServantsService {
         fromStatus: existing.status,
         toStatus: promoteToActive ? ServantStatus.ATIVO : existing.status,
         notes: dto.notes,
+      },
+    });
+
+    await this.eventBus.emit({
+      name: 'TRAINING_COMPLETED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: (updated as unknown as { churchId?: string | null }).churchId ?? null,
+      payload: {
+        servantId: id,
+        ministryId: targetMinistryId,
+        trainingStatus: updated.trainingStatus,
       },
     });
 

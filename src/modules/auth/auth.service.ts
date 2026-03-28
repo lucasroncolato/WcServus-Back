@@ -6,10 +6,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { PasswordResetToken, Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
+import { AuditAction, PasswordResetToken, Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -25,6 +26,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly auditService: AuditService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -39,6 +41,7 @@ export class AuthService {
         mustChangePassword: true,
         passwordHash: true,
         servantId: true,
+        churchId: true,
       },
     });
 
@@ -60,13 +63,27 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    return this.createSession({
+    const session = await this.createSession({
       id: user.id,
       email: user.email,
       role: user.role,
       servantId: user.servantId,
+      churchId: user.churchId,
       mustChangePassword: user.mustChangePassword,
     });
+
+    await this.auditService.log({
+      action: AuditAction.USER_LOGIN,
+      entity: 'Auth',
+      entityId: user.id,
+      userId: user.id,
+      metadata: {
+        role: user.role,
+        churchId: user.churchId ?? null,
+      },
+    });
+
+    return session;
   }
 
   async refresh(dto: RefreshTokenDto) {
@@ -81,6 +98,7 @@ export class AuthService {
         status: true,
         mustChangePassword: true,
         servantId: true,
+        churchId: true,
       },
     });
 
@@ -129,6 +147,16 @@ export class AuthService {
     await this.prisma.refreshToken.update({
       where: { id: matchedToken.id },
       data: { revokedAt: new Date() },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.USER_LOGOUT,
+      entity: 'Auth',
+      entityId: payload.sub,
+      userId: payload.sub,
+      metadata: {
+        refreshTokenId: matchedToken.id,
+      },
     });
 
     return { message: 'Logged out successfully' };
@@ -381,6 +409,7 @@ export class AuthService {
     email: string;
     role: JwtPayload['role'];
     servantId?: string | null;
+    churchId?: string | null;
     mustChangePassword?: boolean;
   }) {
     const payload: JwtPayload = {
@@ -388,6 +417,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       servantId: user.servantId ?? null,
+      churchId: user.churchId ?? null,
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {

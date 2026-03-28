@@ -17,6 +17,7 @@ import {
   ScheduleResponseStatus,
   ScheduleSlotChangeType,
   ScheduleSlotStatus,
+  ScheduleVersionStatus,
   ScheduleStatus,
   Shift,
   ServantApprovalStatus,
@@ -37,10 +38,13 @@ import {
   getScheduleAccessWhere,
   resolveScopedMinistryIds,
 } from 'src/common/auth/access-scope';
+import { EventBusService } from 'src/common/events/event-bus.service';
+import { AppCacheService } from 'src/common/cache/cache.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
+import { EligibilityEngine } from './eligibility/eligibility.engine';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { DuplicateScheduleDto } from './dto/duplicate-schedule.dto';
 import { GenerateMonthScheduleDto } from './dto/generate-month-schedule.dto';
@@ -82,6 +86,11 @@ type GenerationOptions = {
   force?: boolean;
   allowMultiMinistrySameService?: boolean;
   weights?: ScheduleGenerationWeightsDto;
+};
+
+type AssignSlotOptions = {
+  auditAction?: AuditAction;
+  auditMetadata?: Record<string, unknown>;
 };
 
 type EligibleCandidate = {
@@ -136,6 +145,15 @@ export class SchedulesService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly eligibilityEngine: EligibilityEngine,
+    private readonly eventBus: EventBusService = {
+      emit: async () => undefined,
+    } as unknown as EventBusService,
+    private readonly cacheService: AppCacheService = {
+      get: () => null,
+      set: () => undefined,
+      del: () => undefined,
+    } as unknown as AppCacheService,
   ) {}
 
   async findAll(query: ListSchedulesQueryDto, actor: JwtPayload) {
@@ -215,6 +233,23 @@ export class SchedulesService {
     if (!ministryId) {
       throw new BadRequestException('ministryId is required');
     }
+    const cacheKey = `eligible:${query.serviceId}:${ministryId}:${query.includeReasons ? 'all' : 'only'}:${actor.sub}`;
+    const cached = this.cacheService.get<
+      Array<{
+        servantId: string;
+        servantName: string;
+        ministryId: string;
+        ministryTrainingStatus: TrainingStatus;
+        ministryTrainingCompletedAt: Date | null;
+        eligible: boolean;
+        reasons: string[];
+        score: number;
+        priority: 'LOW' | 'MEDIUM' | 'HIGH';
+      }>
+    >(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     await this.assertCanManageMinistry(actor, ministryId);
 
@@ -281,30 +316,29 @@ export class SchedulesService {
       conflictsByServant.set(item.servantId, ministries);
     }
 
-    const evaluated = servants.map((servant) => {
-      const reasons: string[] = [];
-      if (servantsWithPastoralPending.has(servant.id)) {
-        reasons.push('PASTORAL_PENDING');
-      }
-      if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
-        reasons.push('PENDING_MINISTRY_APPROVAL');
-      }
-      if (servant.status !== ServantStatus.ATIVO) {
-        reasons.push('SERVANT_NOT_ACTIVE');
-      }
-      if (!this.hasCompletedTrainingForMinistry(servant, ministryId)) {
-        reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
-      }
+    const evaluated = await Promise.all(servants.map(async (servant) => {
       const latestTalent = servant.talents[0];
+      const conflictSectors = [...(conflictsByServant.get(servant.id) ?? new Set<string>())];
+      const evaluation = await this.eligibilityEngine.evaluate({
+        ministryId,
+        servant: {
+          id: servant.id,
+          status: servant.status,
+          approvalStatus: servant.approvalStatus,
+          aptitude: null,
+          trainingStatus: servant.trainingStatus,
+          mainMinistryId: servant.mainMinistryId,
+          servantMinistries: servant.servantMinistries,
+        },
+        hasPastoralPending: servantsWithPastoralPending.has(servant.id),
+        unavailableAtServiceTime: servant.availabilities.some((availability) => !availability.available),
+        conflictMinistryIds: conflictSectors,
+        requiredAptitude: null,
+      });
+
+      const reasons = [...evaluation.reasons];
       if (latestTalent?.stage === TalentStage.REPROVADO) {
         reasons.push('TALENT_REJECTED');
-      }
-      if (servant.availabilities.some((availability) => !availability.available)) {
-        reasons.push('UNAVAILABLE_FOR_SERVICE_SHIFT');
-      }
-      const conflictSectors = conflictsByServant.get(servant.id);
-      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== ministryId)) {
-        reasons.push('ALREADY_SCHEDULED_IN_OTHER_MINISTRY');
       }
 
       return {
@@ -315,12 +349,16 @@ export class SchedulesService {
         ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, ministryId),
         eligible: reasons.length === 0,
         reasons,
+        score: evaluation.score ?? 0,
+        priority: evaluation.priority ?? 'LOW',
       };
-    });
+    }));
 
-    return query.includeReasons
+    const payload = query.includeReasons
       ? evaluated
       : evaluated.filter((item) => item.eligible);
+    this.cacheService.set(cacheKey, payload, 15_000);
+    return payload;
   }
 
   async mobileContext(query: ListScheduleMobileContextQueryDto, actor: JwtPayload) {
@@ -525,6 +563,11 @@ export class SchedulesService {
 
   async serviceBoard(serviceId: string, query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
     const ministryId = await this.resolveWorkspaceMinistryId(query, actor);
+    const cacheKey = `schedule-board:${serviceId}:${ministryId}:${actor.sub}`;
+    const cached = this.cacheService.get<unknown>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const service = await this.prisma.worshipService.findUnique({
       where: { id: serviceId },
@@ -575,7 +618,7 @@ export class SchedulesService {
       })),
     );
 
-    return {
+    const board = {
       service,
       ministryId: ministryId,
       operationalStatus: evaluation.operationalStatus,
@@ -589,6 +632,8 @@ export class SchedulesService {
       slots: slotsView,
       legacyAssignments: schedules.map((schedule) => this.toApiSchedule(schedule)),
     };
+    this.cacheService.set(cacheKey, board, 20_000);
+    return board;
   }
 
   async createSlot(serviceId: string, dto: CreateScheduleSlotDto, actor: JwtPayload) {
@@ -600,17 +645,24 @@ export class SchedulesService {
     await this.assertCanManageMinistry(actor, ministryId);
     await this.ensureServiceExists(serviceId);
     await this.ensureResponsibilityMatchesSector(dto.responsibilityId, ministryId);
+    const responsibility = dto.responsibilityId
+      ? await this.prisma.ministryResponsibility.findUnique({
+          where: { id: dto.responsibilityId },
+          select: { requiredTraining: true, name: true, title: true },
+        })
+      : null;
 
     const slot = await this.prisma.scheduleSlot.create({
       data: {
         serviceId,
         ministryId,
+        churchId: actor.churchId ?? null,
         responsibilityId: dto.responsibilityId,
         functionName: dto.functionName.trim(),
         slotLabel: dto.slotLabel,
         position: dto.position ?? 1,
         required: dto.required ?? true,
-        requiredTraining: dto.requiredTraining ?? true,
+        requiredTraining: dto.requiredTraining ?? responsibility?.requiredTraining ?? true,
         blocked: dto.blocked ?? false,
         blockedReason: dto.blockedReason,
         notes: dto.notes,
@@ -634,10 +686,123 @@ export class SchedulesService {
       },
     });
 
+    this.invalidateSchedulingCaches(serviceId, ministryId);
     return slot;
   }
 
-  async assignSlot(slotId: string, dto: AssignScheduleSlotDto, actor: JwtPayload) {
+  async listVersions(serviceId: string, actor: JwtPayload) {
+    await this.ensureServiceExists(serviceId);
+    return this.prisma.scheduleVersion.findMany({
+      where: { worshipServiceId: serviceId },
+      include: {
+        createdByUser: { select: { id: true, name: true } },
+      },
+      orderBy: [{ versionNumber: 'desc' }],
+    });
+  }
+
+  async createDraftVersion(serviceId: string, actor: JwtPayload) {
+    const slots = await this.prisma.scheduleSlot.findMany({
+      where: { serviceId },
+      orderBy: [{ functionName: 'asc' }, { position: 'asc' }],
+    });
+    if (slots.length === 0) {
+      throw new BadRequestException('No schedule slots found for this service');
+    }
+
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: serviceId },
+      select: { id: true, churchId: true },
+    });
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+
+    const last = await this.prisma.scheduleVersion.findFirst({
+      where: { worshipServiceId: serviceId },
+      orderBy: [{ versionNumber: 'desc' }],
+      select: { versionNumber: true },
+    });
+
+    const version = await this.prisma.scheduleVersion.create({
+      data: {
+        worshipServiceId: serviceId,
+        churchId: service.churchId,
+        versionNumber: (last?.versionNumber ?? 0) + 1,
+        status: ScheduleVersionStatus.DRAFT,
+        createdBy: actor.sub,
+        slots: {
+          create: slots.map((slot) => ({
+            ministryId: slot.ministryId,
+            responsibilityId: slot.responsibilityId,
+            assignedServantId: slot.assignedServantId,
+            status: slot.status,
+            position: slot.position,
+          })),
+        },
+      },
+      include: { slots: true },
+    });
+
+    await this.eventBus.emit({
+      name: 'SCHEDULE_GENERATED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: service.churchId,
+      payload: {
+        serviceId,
+        scheduleVersionId: version.id,
+        versionNumber: version.versionNumber,
+      },
+    });
+
+    return version;
+  }
+
+  async publishVersion(versionId: string, actor: JwtPayload) {
+    const version = await this.prisma.scheduleVersion.findUnique({
+      where: { id: versionId },
+      include: { worshipService: { select: { id: true, churchId: true } } },
+    });
+    if (!version) {
+      throw new NotFoundException('Schedule version not found');
+    }
+
+    const published = await this.prisma.$transaction(async (tx) => {
+      await tx.scheduleVersion.updateMany({
+        where: {
+          worshipServiceId: version.worshipServiceId,
+          status: ScheduleVersionStatus.PUBLISHED,
+        },
+        data: { status: ScheduleVersionStatus.ARCHIVED },
+      });
+
+      return tx.scheduleVersion.update({
+        where: { id: versionId },
+        data: { status: ScheduleVersionStatus.PUBLISHED },
+      });
+    });
+
+    await this.auditService.log({
+      action: AuditAction.SCHEDULE_PUBLISH,
+      entity: 'ScheduleVersion',
+      entityId: versionId,
+      userId: actor.sub,
+      metadata: {
+        worshipServiceId: version.worshipServiceId,
+        versionNumber: version.versionNumber,
+      },
+    });
+
+    return published;
+  }
+
+  async assignSlot(
+    slotId: string,
+    dto: AssignScheduleSlotDto,
+    actor: JwtPayload,
+    options?: AssignSlotOptions,
+  ) {
     const slot = await this.prisma.scheduleSlot.findUnique({
       where: { id: slotId },
       include: { service: true },
@@ -661,6 +826,21 @@ export class SchedulesService {
       });
     }
 
+    const isIdempotentRepeat =
+      slot.assignedServantId === dto.servantId &&
+      (slot.status === ScheduleSlotStatus.ASSIGNED ||
+        slot.status === ScheduleSlotStatus.PENDING_CONFIRMATION ||
+        slot.status === ScheduleSlotStatus.CONFIRMED);
+    if (isIdempotentRepeat) {
+      return this.prisma.scheduleSlot.findUnique({
+        where: { id: slot.id },
+        include: {
+          assignedServant: { select: { id: true, name: true } },
+          responsibility: { select: { id: true, title: true, functionName: true } },
+        },
+      });
+    }
+
     const previousServantId = slot.assignedServantId;
     const updated = await this.prisma.$transaction(async (tx) => {
       const updatedSlot = await tx.scheduleSlot.update({
@@ -668,7 +848,7 @@ export class SchedulesService {
         data: {
           assignedServantId: dto.servantId,
           assignedByUserId: actor.sub,
-          status: ScheduleSlotStatus.PENDING,
+          status: ScheduleSlotStatus.PENDING_CONFIRMATION,
           blocked: false,
           blockedReason: null,
         },
@@ -683,6 +863,7 @@ export class SchedulesService {
           },
         },
         update: {
+          churchId: slot.churchId,
           status: ScheduleStatus.ASSIGNED,
           responseStatus: ScheduleResponseStatus.PENDING,
           responseAt: null,
@@ -693,6 +874,7 @@ export class SchedulesService {
           serviceId: slot.serviceId,
           servantId: dto.servantId,
           ministryId: slot.ministryId,
+          churchId: slot.churchId,
           assignedByUserId: actor.sub,
           status: ScheduleStatus.ASSIGNED,
           responseStatus: ScheduleResponseStatus.PENDING,
@@ -743,15 +925,31 @@ export class SchedulesService {
     });
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: options?.auditAction ?? AuditAction.SLOT_ASSIGNED,
       entity: 'ScheduleSlot',
       entityId: slotId,
       userId: actor.sub,
       metadata: {
         action: 'ASSIGN_SLOT',
         servantId: dto.servantId,
+        ...(options?.auditMetadata ?? {}),
       },
     });
+
+    await this.eventBus.emit({
+      name: 'SLOT_ASSIGNED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: slot.churchId,
+      payload: {
+        slotId,
+        serviceId: slot.serviceId,
+        ministryId: slot.ministryId,
+        servantId: dto.servantId,
+      },
+    });
+
+    this.invalidateSchedulingCaches(slot.serviceId, slot.ministryId);
 
     return this.prisma.scheduleSlot.findUnique({
       where: { id: updated.id },
@@ -810,7 +1008,9 @@ export class SchedulesService {
 
     for (const slot of targetSlots) {
       const eligible = await this.listSlotEligibility(dto.serviceId, ministryId, slot);
-      const candidate = eligible.find(
+      const candidate = [...eligible]
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .find(
         (item) => item.eligible && !usedServants.has(item.servantId),
       );
 
@@ -825,7 +1025,15 @@ export class SchedulesService {
       }
 
       usedServants.add(candidate.servantId);
-      await this.assignSlot(slot.id, { servantId: candidate.servantId, reason: 'AUTO_GENERATED' }, actor);
+      await this.assignSlot(
+        slot.id,
+        { servantId: candidate.servantId, reason: 'AUTO_GENERATED' },
+        actor,
+        {
+          auditAction: AuditAction.ASSIGN,
+          auditMetadata: { source: 'AUTO_GENERATED' },
+        },
+      );
       await this.prisma.scheduleSlotChange.create({
         data: {
           slotId: slot.id,
@@ -846,6 +1054,20 @@ export class SchedulesService {
         servantName: candidate.servantName,
       });
     }
+
+    await this.auditService.log({
+      action: AuditAction.GENERATE_SCHEDULE,
+      entity: 'ScheduleSlotAutoGeneration',
+      entityId: `${dto.serviceId}:${ministryId}`,
+      userId: actor.sub,
+      metadata: {
+        serviceId: dto.serviceId,
+        ministryId,
+        processedSlots: targetSlots.length,
+        assignedCount: results.filter((item) => item.action === 'ASSIGNED').length,
+        skippedCount: results.filter((item) => item.action === 'SKIPPED').length,
+      },
+    });
 
     return {
       criteria,
@@ -880,7 +1102,7 @@ export class SchedulesService {
     });
 
     await this.auditService.log({
-      action: AuditAction.CREATE,
+      action: AuditAction.ASSIGN,
       entity: 'Schedule',
       entityId: schedule.id,
       userId: actor.sub,
@@ -1103,6 +1325,9 @@ export class SchedulesService {
       await this.assertCanManageSchedule(actor, current.id);
       await assertServantAccess(this.prisma, actor, dto.servantId);
       await this.ensureServantEligibleForSector(dto.servantId, current.ministryId, current.serviceId);
+      if (current.servantId === dto.servantId) {
+        return this.toApiSchedule(current);
+      }
 
       const conflict = await this.prisma.schedule.findFirst({
         where: {
@@ -1136,7 +1361,7 @@ export class SchedulesService {
       });
 
       await this.auditService.log({
-        action: AuditAction.SCHEDULE_SWAP,
+        action: AuditAction.SWAP,
         entity: 'Schedule',
         entityId: current.id,
         userId: actor.sub,
@@ -1159,6 +1384,8 @@ export class SchedulesService {
           newServantId: updated.servantId,
         },
       );
+
+      this.invalidateSchedulingCaches(updated.serviceId, updated.ministryId);
 
       return this.toApiSchedule(updated);
     }
@@ -1251,7 +1478,7 @@ export class SchedulesService {
     });
 
     await this.auditService.log({
-      action: AuditAction.SCHEDULE_SWAP,
+      action: AuditAction.SWAP,
       entity: 'ScheduleSwap',
       entityId: from.id,
       userId: actor.sub,
@@ -1282,6 +1509,9 @@ export class SchedulesService {
         toScheduleId: to.id,
       },
     );
+
+    this.invalidateSchedulingCaches(from.serviceId, from.ministryId);
+    this.invalidateSchedulingCaches(to.serviceId, to.ministryId);
 
     return result;
   }
@@ -1957,7 +2187,7 @@ export class SchedulesService {
     }
 
     await this.auditService.log({
-      action: AuditAction.CREATE,
+      action: AuditAction.GENERATE_SCHEDULE,
       entity: 'ScheduleGeneration',
       entityId: `${start.toISOString()}_${end.toISOString()}`,
       userId: actor.sub,
@@ -2674,13 +2904,15 @@ export class SchedulesService {
       (slot) => slot.required && !slot.assignedServantId && !slot.blocked,
     ).length;
 
-    const slotPending = slots.filter((slot) => slot.status === ScheduleSlotStatus.PENDING).length;
+    const slotPending = slots.filter(
+      (slot) => slot.status === ScheduleSlotStatus.PENDING_CONFIRMATION,
+    ).length;
     const schedulePending = schedules.filter(
       (schedule) => schedule.responseStatus === ScheduleResponseStatus.PENDING,
     ).length;
     const pendingCount = slotPending + schedulePending;
 
-    const slotConflicts = slots.filter((slot) => slot.status === ScheduleSlotStatus.CONFLICT).length;
+    const slotDeclined = slots.filter((slot) => slot.status === ScheduleSlotStatus.DECLINED).length;
     const duplicateServants = new Set<string>();
     const seenServants = new Set<string>();
     for (const schedule of schedules) {
@@ -2691,7 +2923,7 @@ export class SchedulesService {
         seenServants.add(key);
       }
     }
-    const conflictCount = slotConflicts + duplicateServants.size;
+    const conflictCount = slotDeclined + duplicateServants.size;
     if (conflictCount > 0) {
       alerts.push('Conflitos operacionais detectados para este culto.');
     }
@@ -2738,6 +2970,7 @@ export class SchedulesService {
     slot: {
       id: string;
       functionName: string;
+      responsibilityId?: string | null;
       requiredTraining: boolean;
       blocked: boolean;
       blockedReason: string | null;
@@ -2801,52 +3034,51 @@ export class SchedulesService {
       ministries.add(schedule.ministryId);
       conflictsByServant.set(schedule.servantId, ministries);
     }
-    const requiredAptitude = this.mapFunctionToAptitude(slot.functionName);
+    const responsibility = slot.responsibilityId
+      ? await this.prisma.ministryResponsibility.findUnique({
+          where: { id: slot.responsibilityId },
+          select: { requiredAptitude: true, requiredTraining: true },
+        })
+      : null;
+    const requiredAptitude =
+      responsibility?.requiredAptitude ?? this.mapFunctionToAptitude(slot.functionName);
 
-    return servants.map((servant) => {
-      const reasons: string[] = [];
-      if (slot.blocked) {
-        reasons.push(slot.blockedReason || 'SLOT_BLOCKED');
-      }
-      if (servantsWithPastoralPending.has(servant.id)) {
-        reasons.push('PASTORAL_PENDING');
-      }
-      if (servant.status !== ServantStatus.ATIVO) {
-        reasons.push('INACTIVE');
-      }
-      if (servant.approvalStatus !== ServantApprovalStatus.APPROVED) {
-        reasons.push('PENDING_APPROVAL');
-      }
-      if (!this.hasCompletedTrainingForMinistry(servant, ministryId)) {
-        reasons.push('MINISTRY_TRAINING_NOT_COMPLETED');
-      }
-      if (unavailableSet.has(servant.id)) {
-        reasons.push('UNAVAILABLE_AT_SERVICE_TIME');
-      }
-      if (requiredAptitude && servant.aptitude && servant.aptitude !== requiredAptitude) {
-        reasons.push('OUTSIDE_FUNCTION_TALENT');
-      }
-      const conflictSectors = conflictsByServant.get(servant.id);
-      if (conflictSectors && [...conflictSectors].some((conflictSector) => conflictSector !== ministryId)) {
-        reasons.push('ALREADY_SCHEDULED_OTHER_MINISTRY');
-      }
-      if (
-        conflictSectors &&
-        conflictSectors.has(ministryId) &&
-        slot.assignedServantId !== servant.id
-      ) {
-        reasons.push('ALREADY_SCHEDULED_SAME_MINISTRY');
-      }
+    const effectiveRequiredTraining = responsibility?.requiredTraining ?? slot.requiredTraining;
+
+    return Promise.all(servants.map(async (servant) => {
+      const conflictSectors = [...(conflictsByServant.get(servant.id) ?? new Set<string>())];
+      const evaluation = await this.eligibilityEngine.evaluate({
+        ministryId,
+        servant: {
+          id: servant.id,
+          status: servant.status,
+          approvalStatus: servant.approvalStatus,
+          aptitude: servant.aptitude,
+          trainingStatus: servant.trainingStatus,
+          mainMinistryId: servant.mainMinistryId,
+          servantMinistries: servant.servantMinistries,
+        },
+        slot: {
+          ...slot,
+          requiredTraining: effectiveRequiredTraining,
+        },
+        hasPastoralPending: servantsWithPastoralPending.has(servant.id),
+        unavailableAtServiceTime: unavailableSet.has(servant.id),
+        conflictMinistryIds: conflictSectors,
+        requiredAptitude,
+      });
 
       return {
         servantId: servant.id,
         servantName: servant.name,
         ministryTrainingStatus: this.resolveTrainingStatusForMinistry(servant, ministryId),
         ministryTrainingCompletedAt: this.resolveTrainingCompletedAtForMinistry(servant, ministryId),
-        eligible: reasons.length === 0,
-        reasons,
+        eligible: evaluation.eligible,
+        reasons: evaluation.reasons,
+        score: evaluation.score ?? 0,
+        priority: evaluation.priority ?? 'LOW',
       };
-    });
+    }));
   }
 
   private async evaluateServantEligibilityForSlot(
@@ -2856,6 +3088,7 @@ export class SchedulesService {
     slot: {
       id: string;
       functionName: string;
+      responsibilityId?: string | null;
       requiredTraining: boolean;
       blocked: boolean;
       blockedReason: string | null;
@@ -2920,6 +3153,15 @@ export class SchedulesService {
     if (!forceFill && !slot.assignedServantId) {
       throw new BadRequestException('Slot is not currently assigned. Use fill endpoint instead.');
     }
+    if (slot.assignedServantId === dto.substituteServantId) {
+      return this.prisma.scheduleSlot.findUnique({
+        where: { id: slot.id },
+        include: {
+          assignedServant: { select: { id: true, name: true } },
+          responsibility: { select: { id: true, title: true, functionName: true } },
+        },
+      });
+    }
 
     const eligibility = await this.evaluateServantEligibilityForSlot(
       slot.serviceId,
@@ -2936,10 +3178,18 @@ export class SchedulesService {
     }
 
     const oldServantId = slot.assignedServantId;
-    await this.assignSlot(slotId, { servantId: dto.substituteServantId, reason: dto.reason }, actor);
+    await this.assignSlot(slotId, { servantId: dto.substituteServantId, reason: dto.reason }, actor, {
+      auditAction: forceFill ? AuditAction.FILL : AuditAction.SLOT_SWAPPED,
+      auditMetadata: {
+        context: dto.context,
+        substituteServantId: dto.substituteServantId,
+      },
+    });
     const updated = await this.prisma.scheduleSlot.update({
       where: { id: slotId },
-      data: { status: ScheduleSlotStatus.SWAPPED },
+      data: {
+        status: forceFill ? ScheduleSlotStatus.PENDING_CONFIRMATION : ScheduleSlotStatus.SWAPPED,
+      },
     });
 
     const mappedChangeType =
@@ -2959,6 +3209,23 @@ export class SchedulesService {
         performedByUserId: actor.sub,
       },
     });
+
+    if (!forceFill) {
+      await this.eventBus.emit({
+        name: 'SLOT_ASSIGNED',
+        occurredAt: new Date(),
+        actorUserId: actor.sub,
+        churchId: slot.churchId,
+        payload: {
+          slotId,
+          fromServantId: oldServantId,
+          toServantId: dto.substituteServantId,
+          context: dto.context,
+        },
+      });
+    }
+
+    this.invalidateSchedulingCaches(slot.serviceId, slot.ministryId);
 
     return this.prisma.scheduleSlot.findUnique({
       where: { id: updated.id },
@@ -3167,6 +3434,11 @@ export class SchedulesService {
       link: '/schedules',
       metadata,
     });
+  }
+
+  private invalidateSchedulingCaches(serviceId: string, ministryId: string) {
+    this.cacheService.del(`schedule-board:${serviceId}:${ministryId}`);
+    this.cacheService.del(`eligible:${serviceId}:${ministryId}`);
   }
 }
 

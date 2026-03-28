@@ -1,10 +1,19 @@
 ﻿import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AlertStatus, AttendanceStatus, AuditAction, Prisma, RewardSource, Role } from '@prisma/client';
+import {
+  AlertStatus,
+  AttendanceStatus,
+  AuditAction,
+  Prisma,
+  RewardSource,
+  Role,
+  ScheduleSlotStatus,
+} from '@prisma/client';
 import {
   assertServantAccess,
   getAttendanceAccessWhere,
   getScheduleAccessWhere,
 } from 'src/common/auth/access-scope';
+import { EventBusService } from 'src/common/events/event-bus.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
@@ -22,6 +31,7 @@ export class AttendancesService {
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
+    private readonly eventBus: EventBusService,
   ) {}
 
   async findAll(query: ListAttendancesQueryDto, actor: JwtPayload) {
@@ -61,6 +71,7 @@ export class AttendancesService {
         },
       },
       update: {
+        churchId: actor.churchId ?? null,
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
@@ -69,6 +80,7 @@ export class AttendancesService {
       create: {
         serviceId: dto.serviceId,
         servantId: dto.servantId,
+        churchId: actor.churchId ?? null,
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
@@ -82,13 +94,32 @@ export class AttendancesService {
 
     await this.recalculateServantAbsenceMetrics(dto.servantId);
     await this.ensurePastoralAlertIfNeeded(dto.servantId, actor.sub);
+    await this.updateRelatedSlotStatus(
+      attendance.serviceId,
+      attendance.servantId,
+      attendance.status,
+      actor.sub,
+    );
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: AuditAction.ATTENDANCE_REGISTERED,
       entity: 'Attendance',
       entityId: attendance.id,
       userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
+    });
+
+    await this.eventBus.emit({
+      name: 'ATTENDANCE_REGISTERED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: attendance.churchId,
+      payload: {
+        attendanceId: attendance.id,
+        serviceId: attendance.serviceId,
+        servantId: attendance.servantId,
+        status: attendance.status,
+      },
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
@@ -127,6 +158,7 @@ export class AttendancesService {
     const attendance = await this.prisma.attendance.update({
       where: { id },
       data: {
+        churchId: actor.churchId ?? null,
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
@@ -136,9 +168,15 @@ export class AttendancesService {
 
     await this.recalculateServantAbsenceMetrics(attendance.servantId);
     await this.ensurePastoralAlertIfNeeded(attendance.servantId, actor.sub);
+    await this.updateRelatedSlotStatus(
+      attendance.serviceId,
+      attendance.servantId,
+      attendance.status,
+      actor.sub,
+    );
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: AuditAction.ATTENDANCE_REGISTERED,
       entity: 'Attendance',
       entityId: attendance.id,
       userId: actor.sub,
@@ -279,6 +317,40 @@ export class AttendancesService {
       throw new ForbiddenException(
         'Attendance can only be registered for servants scheduled in services within your scope',
       );
+    }
+  }
+
+  private async updateRelatedSlotStatus(
+    serviceId: string,
+    servantId: string,
+    status: AttendanceStatus,
+    actorUserId: string,
+  ) {
+    const nextSlotStatus =
+      status === AttendanceStatus.PRESENTE ? ScheduleSlotStatus.COMPLETED : ScheduleSlotStatus.NO_SHOW;
+    const updated = await this.prisma.scheduleSlot.updateMany({
+      where: {
+        serviceId,
+        assignedServantId: servantId,
+      },
+      data: { status: nextSlotStatus },
+    });
+
+    if (updated.count > 0) {
+      await this.auditService.log({
+        action:
+          nextSlotStatus === ScheduleSlotStatus.COMPLETED
+            ? AuditAction.SLOT_COMPLETED
+            : AuditAction.SLOT_NO_SHOW,
+        entity: 'ScheduleSlot',
+        entityId: `${serviceId}:${servantId}`,
+        userId: actorUserId,
+        metadata: {
+          serviceId,
+          servantId,
+          nextSlotStatus,
+        },
+      });
     }
   }
 

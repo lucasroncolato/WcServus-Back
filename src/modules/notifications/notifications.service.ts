@@ -153,9 +153,14 @@ export class NotificationsService {
   }
 
   async create(input: CreateNotificationInput) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: input.userId },
+      select: { churchId: true },
+    });
     const created = await this.prisma.notification.create({
       data: {
         userId: input.userId,
+        churchId: user?.churchId ?? null,
         type: input.type,
         title: input.title,
         message: input.message,
@@ -182,9 +187,16 @@ export class NotificationsService {
       return { created: 0 };
     }
 
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: uniqueInputs.map((x) => x.userId) } },
+      select: { id: true, churchId: true },
+    });
+    const churchByUser = new Map(users.map((u) => [u.id, u.churchId]));
+
     await this.prisma.notification.createMany({
       data: uniqueInputs.map((input) => ({
         userId: input.userId,
+        churchId: churchByUser.get(input.userId) ?? null,
         type: input.type,
         title: input.title,
         message: input.message,

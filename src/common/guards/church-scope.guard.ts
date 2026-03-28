@@ -1,0 +1,39 @@
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { JwtPayload } from 'src/modules/auth/types/jwt-payload.type';
+
+@Injectable()
+export class ChurchScopeGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (isPublic) {
+      return true;
+    }
+
+    const request = context
+      .switchToHttp()
+      .getRequest<{ user?: JwtPayload; headers?: Record<string, string | string[] | undefined> }>();
+
+    const userChurchId = request.user?.churchId ?? null;
+    if (!userChurchId) {
+      return true;
+    }
+
+    const rawHeader = request.headers?.['x-church-id'];
+    const headerChurchId = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+
+    if (headerChurchId && headerChurchId !== userChurchId) {
+      throw new ForbiddenException('Church scope mismatch');
+    }
+
+    return true;
+  }
+}
+

@@ -35,6 +35,14 @@ function combineWhere<T>(a: T | undefined, b: T | undefined): T | undefined {
   return { AND: [a, b] } as T;
 }
 
+function withChurchScope<T>(where: T | undefined, actor: JwtPayload): T | undefined {
+  if (!actor.churchId) {
+    return where;
+  }
+  const churchWhere = { churchId: actor.churchId } as T;
+  return combineWhere(where, churchWhere);
+}
+
 export async function resolveServantSelfScope(prisma: Db, actor: JwtPayload) {
   if (actor.servantId) {
     return actor.servantId;
@@ -436,7 +444,10 @@ export async function getServantAccessWhere(
 ): Promise<Prisma.ServantWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
-  return combineWhere(getRoleBaselineServantWhere(actor, roleSectorIds), getScopeServantWhere(ctx));
+  return withChurchScope(
+    combineWhere(getRoleBaselineServantWhere(actor, roleSectorIds), getScopeServantWhere(ctx)),
+    actor,
+  );
 }
 
 export async function getScheduleAccessWhere(
@@ -445,7 +456,10 @@ export async function getScheduleAccessWhere(
 ): Promise<Prisma.ScheduleWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
-  return combineWhere(getRoleBaselineScheduleWhere(actor, roleSectorIds), getScopeScheduleWhere(ctx));
+  return withChurchScope(
+    combineWhere(getRoleBaselineScheduleWhere(actor, roleSectorIds), getScopeScheduleWhere(ctx)),
+    actor,
+  );
 }
 
 export async function getAttendanceAccessWhere(
@@ -454,7 +468,8 @@ export async function getAttendanceAccessWhere(
 ): Promise<Prisma.AttendanceWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
-  return combineWhere(
+  return withChurchScope(
+    combineWhere(
     actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
       ? undefined
       : actor.role === Role.SERVO
@@ -472,6 +487,8 @@ export async function getAttendanceAccessWhere(
             }
           : NO_ACCESS_ATTENDANCE,
     getScopeAttendanceWhere(ctx),
+    ),
+    actor,
   );
 }
 
@@ -481,7 +498,8 @@ export async function getPastoralVisitAccessWhere(
 ): Promise<Prisma.PastoralVisitWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
-  return combineWhere(
+  return withChurchScope(
+    combineWhere(
     actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR
       ? undefined
       : actor.role === Role.SERVO
@@ -499,6 +517,8 @@ export async function getPastoralVisitAccessWhere(
             }
           : NO_ACCESS_PASTORAL,
     getScopePastoralWhere(ctx),
+    ),
+    actor,
   );
 }
 
@@ -508,7 +528,10 @@ export async function getMinistryAccessWhere(
 ): Promise<Prisma.MinistryWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
-  return combineWhere(getRoleBaselineSectorWhere(actor, roleSectorIds), getScopeSectorWhere(ctx));
+  return withChurchScope(
+    combineWhere(getRoleBaselineSectorWhere(actor, roleSectorIds), getScopeSectorWhere(ctx)),
+    actor,
+  );
 }
 
 export async function getTeamAccessWhere(
@@ -517,7 +540,10 @@ export async function getTeamAccessWhere(
 ): Promise<Prisma.TeamWhereInput | undefined> {
   const roleSectorIds = await getRoleBaselineSectorIds(prisma, actor);
   const ctx = await loadActorScopeContext(prisma, actor);
-  return combineWhere(getRoleBaselineTeamWhere(actor, roleSectorIds), getScopeTeamWhere(ctx));
+  return withChurchScope(
+    combineWhere(getRoleBaselineTeamWhere(actor, roleSectorIds), getScopeTeamWhere(ctx)),
+    actor,
+  );
 }
 
 export async function getUserAccessWhere(
@@ -525,7 +551,7 @@ export async function getUserAccessWhere(
   actor: JwtPayload,
 ): Promise<Prisma.UserWhereInput | undefined> {
   const ctx = await loadActorScopeContext(prisma, actor);
-  return getScopeUserWhere(ctx, actor);
+  return withChurchScope(getScopeUserWhere(ctx, actor), actor);
 }
 
 export async function assertMinistryAccess(prisma: Db, actor: JwtPayload, ministryId: string) {

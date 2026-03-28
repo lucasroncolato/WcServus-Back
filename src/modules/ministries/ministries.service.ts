@@ -94,6 +94,7 @@ export class MinistriesService {
     const ministry = await this.prisma.$transaction(async (tx) => {
       const created = await tx.ministry.create({
         data: {
+          churchId: actor.churchId ?? null,
           name: dto.name,
           description: dto.description,
           color: dto.color,
@@ -114,7 +115,7 @@ export class MinistriesService {
     });
 
     await this.auditService.log({
-      action: AuditAction.CREATE,
+      action: AuditAction.CREATE_MINISTRY,
       entity: 'Ministry',
       entityId: ministry.id,
       userId: actor.sub,
@@ -182,7 +183,7 @@ export class MinistriesService {
     });
 
     await this.auditService.log({
-      action: AuditAction.UPDATE,
+      action: AuditAction.UPDATE_MINISTRY,
       entity: 'Ministry',
       entityId: id,
       userId: actor.sub,
@@ -227,13 +228,13 @@ export class MinistriesService {
     await assertMinistryAccess(this.prisma, actor, ministryId);
 
     return this.prisma.ministryResponsibility.findMany({
-      where: { ministryId: ministryId },
+      where: { ministryId: ministryId, deletedAt: null },
       include: {
         responsibleServant: {
           select: { id: true, name: true },
         },
       },
-      orderBy: [{ active: 'desc' }, { title: 'asc' }],
+      orderBy: [{ active: 'desc' }, { name: 'asc' }, { title: 'asc' }],
     });
   }
 
@@ -248,10 +249,13 @@ export class MinistriesService {
     const created = await this.prisma.ministryResponsibility.create({
       data: {
         ministryId: ministryId,
+        name: dto.name ?? dto.title,
         title: dto.title,
         activity: dto.activity,
         functionName: dto.functionName,
         description: dto.description,
+        requiredTraining: dto.requiredTraining ?? false,
+        requiredAptitude: dto.requiredAptitude,
         responsibleServantId: dto.responsibleServantId,
         active: dto.active ?? true,
       },
@@ -296,10 +300,13 @@ export class MinistriesService {
     const updated = await this.prisma.ministryResponsibility.update({
       where: { id: responsibilityId },
       data: {
+        name: dto.name,
         title: dto.title,
         activity: dto.activity,
         functionName: dto.functionName,
         description: dto.description,
+        requiredTraining: dto.requiredTraining,
+        requiredAptitude: dto.requiredAptitude,
         responsibleServantId: dto.responsibleServantId,
         active: dto.active,
       },

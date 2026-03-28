@@ -5,6 +5,7 @@ import {
   getPastoralVisitAccessWhere,
 } from 'src/common/auth/access-scope';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { EventBusService } from 'src/common/events/event-bus.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -18,6 +19,7 @@ export class PastoralVisitsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly eventBus: EventBusService,
   ) {}
 
   async findAll(query: ListPastoralVisitsQueryDto, actor: JwtPayload) {
@@ -62,10 +64,17 @@ export class PastoralVisitsService {
     });
 
     await this.auditService.log({
-      action: AuditAction.CREATE,
+      action: AuditAction.PASTORAL_ACTION,
       entity: 'PastoralVisit',
       entityId: visit.id,
       userId: actor.sub,
+    });
+
+    await this.eventBus.emit({
+      name: 'PASTORAL_PENDING_OPENED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      payload: { pastoralVisitId: visit.id, servantId: visit.servantId },
     });
 
     await this.notificationsService.notifyServantLinkedUser(dto.servantId, {
@@ -110,11 +119,18 @@ export class PastoralVisitsService {
     });
 
     await this.auditService.log({
-      action: AuditAction.VISIT_RESOLVED,
+      action: AuditAction.PASTORAL_ACTION,
       entity: 'PastoralVisit',
       entityId: id,
       userId: actor.sub,
       metadata: { notes: dto.notes },
+    });
+
+    await this.eventBus.emit({
+      name: 'PASTORAL_PENDING_RESOLVED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      payload: { pastoralVisitId: visit.id, servantId: visit.servantId },
     });
 
     await this.notificationsService.notifyServantLinkedUser(visit.servantId, {

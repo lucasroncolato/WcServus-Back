@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { LogService } from './common/log/log.service';
 
 function normalizeOrigin(origin: string): string {
   return origin.trim().replace(/\/+$/, '');
@@ -42,6 +43,7 @@ function buildCorsOptions(frontendUrl: string | undefined): CorsOptions {
 export async function createApp() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+  app.useLogger(app.get(LogService));
 
   app.enableCors(buildCorsOptions(configService.get<string>('FRONTEND_URL')));
 

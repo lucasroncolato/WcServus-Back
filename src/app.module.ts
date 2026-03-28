@@ -2,8 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { ChurchScopeGuard } from './common/guards/church-scope.guard';
 import { PasswordChangeRequiredGuard } from './common/guards/password-change-required.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { AppCacheModule } from './common/cache/cache.module';
+import { EventsModule } from './common/events/events.module';
+import { LogModule } from './common/log/log.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ServantsModule } from './modules/servants/servants.module';
@@ -33,6 +37,9 @@ import { HealthController } from './health.controller';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
     }),
+    LogModule,
+    EventsModule,
+    AppCacheModule,
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -68,6 +75,10 @@ import { HealthController } from './health.controller';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ChurchScopeGuard,
     },
   ],
 })

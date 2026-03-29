@@ -1,107 +1,142 @@
 import { Injectable } from '@nestjs/common';
 import { AttendanceStatus, PastoralVisitStatus, Prisma } from '@prisma/client';
 import { getServantAccessWhere } from 'src/common/auth/access-scope';
+import { AppCacheService } from 'src/common/cache/cache.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PeriodQueryDto } from './dto/period-query.dto';
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: AppCacheService,
+  ) {}
 
   async servantsActivityReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
     const servantWhere = await this.getScopedServantFilter(actor);
+    const cacheKey = this.cacheKey('servants-activity', actor, period);
 
-    const [schedules, attendances] = await Promise.all([
-      this.prisma.schedule.findMany({
-        where: {
-          service: { serviceDate: period },
-          servant: servantWhere ?? undefined,
-        },
-        include: {
-          servant: {
-            include: { mainMinistry: { select: { id: true, name: true } } },
+    return this.cacheService.getOrSet(cacheKey, async () => {
+      const [scheduleGrouped, attendanceGrouped] = await Promise.all([
+        this.prisma.schedule.groupBy({
+          by: ['servantId'],
+          where: {
+            service: { serviceDate: period },
+            servant: servantWhere ?? undefined,
           },
-        },
-      }),
-      this.prisma.attendance.findMany({
-        where: {
-          service: { serviceDate: period },
-          servant: servantWhere ?? undefined,
-        },
-        select: { servantId: true, status: true },
-      }),
-    ]);
+          _count: { _all: true },
+        }),
+        this.prisma.attendance.groupBy({
+          by: ['servantId', 'status'],
+          where: {
+            service: { serviceDate: period },
+            servant: servantWhere ?? undefined,
+          },
+          _count: { _all: true },
+        }),
+      ]);
 
-    const byServant = new Map<string, { servantId: string; servantName: string; ministryName: string | null; assigned: number; absences: number; presences: number }>();
-    for (const schedule of schedules) {
-      const item =
-        byServant.get(schedule.servantId) ??
-        {
-          servantId: schedule.servantId,
-          servantName: schedule.servant.name,
-          ministryName: schedule.servant.mainMinistry?.name ?? null,
-          assigned: 0,
-          absences: 0,
-          presences: 0,
+      const servantIds = [...new Set(scheduleGrouped.map((item) => item.servantId))];
+      const servants = servantIds.length
+        ? await this.prisma.servant.findMany({
+            where: { id: { in: servantIds } },
+            select: {
+              id: true,
+              name: true,
+              mainMinistry: { select: { name: true } },
+            },
+          })
+        : [];
+      const servantById = new Map(servants.map((item) => [item.id, item]));
+
+      const attendanceMap = new Map<string, { presences: number; absences: number }>();
+      for (const item of attendanceGrouped) {
+        const current = attendanceMap.get(item.servantId) ?? { presences: 0, absences: 0 };
+        if (item.status === AttendanceStatus.PRESENTE) {
+          current.presences += item._count._all;
+        } else {
+          current.absences += item._count._all;
+        }
+        attendanceMap.set(item.servantId, current);
+      }
+
+      const rows = scheduleGrouped.map((item) => {
+        const servant = servantById.get(item.servantId);
+        const attendance = attendanceMap.get(item.servantId) ?? { presences: 0, absences: 0 };
+        return {
+          servantId: item.servantId,
+          servantName: servant?.name ?? 'Servo',
+          ministryName: servant?.mainMinistry?.name ?? null,
+          assigned: item._count._all,
+          absences: attendance.absences,
+          presences: attendance.presences,
         };
-      item.assigned += 1;
-      byServant.set(schedule.servantId, item);
-    }
-    for (const attendance of attendances) {
-      const item = byServant.get(attendance.servantId);
-      if (!item) {
-        continue;
-      }
-      if (attendance.status === AttendanceStatus.PRESENTE) {
-        item.presences += 1;
-      } else {
-        item.absences += 1;
-      }
-    }
+      });
 
-    const rows = [...byServant.values()];
-    return {
-      mostAssigned: [...rows].sort((a, b) => b.assigned - a.assigned).slice(0, 20),
-      mostAbsences: [...rows].sort((a, b) => b.absences - a.absences).slice(0, 20),
-      ministryLoadByServant: [...rows].sort((a, b) => b.assigned - a.assigned),
-    };
+      return {
+        mostAssigned: [...rows].sort((a, b) => b.assigned - a.assigned).slice(0, 20),
+        mostAbsences: [...rows].sort((a, b) => b.absences - a.absences).slice(0, 20),
+        ministryLoadByServant: [...rows].sort((a, b) => b.assigned - a.assigned),
+      };
+    }, 30_000);
   }
 
   async attendanceReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
     const servantWhere = await this.getScopedServantFilter(actor);
+    const cacheKey = this.cacheKey('attendance', actor, period);
 
-    const services = await this.prisma.worshipService.findMany({
-      where: {
-        serviceDate: period,
-      },
-      include: {
-        attendances: {
-          where: servantWhere ? { servant: servantWhere } : undefined,
-          include: {
-            servant: { select: { id: true, name: true } },
+    return this.cacheService.getOrSet(cacheKey, async () => {
+      const [services, attendanceGrouped] = await Promise.all([
+        this.prisma.worshipService.findMany({
+          where: {
+            serviceDate: period,
           },
-        },
-      },
-      orderBy: { serviceDate: 'asc' },
-    });
+          select: {
+            id: true,
+            title: true,
+            serviceDate: true,
+          },
+          orderBy: { serviceDate: 'asc' },
+          take: 500,
+        }),
+        this.prisma.attendance.groupBy({
+          by: ['serviceId', 'status'],
+          where: {
+            service: { serviceDate: period },
+            servant: servantWhere ?? undefined,
+          },
+          _count: { _all: true },
+        }),
+      ]);
 
-    return services.map((service) => {
-      const presentes = service.attendances.filter((a) => a.status === AttendanceStatus.PRESENTE).length;
-      const faltas = service.attendances.filter((a) => a.status !== AttendanceStatus.PRESENTE).length;
+      const groupedByService = new Map<string, { presentes: number; faltas: number; total: number }>();
+      for (const item of attendanceGrouped) {
+        const current = groupedByService.get(item.serviceId) ?? { presentes: 0, faltas: 0, total: 0 };
+        if (item.status === AttendanceStatus.PRESENTE) {
+          current.presentes += item._count._all;
+        } else {
+          current.faltas += item._count._all;
+        }
+        current.total += item._count._all;
+        groupedByService.set(item.serviceId, current);
+      }
 
-      return {
-        serviceId: service.id,
-        title: service.title,
-        date: service.serviceDate,
-        totalRegistros: service.attendances.length,
-        presentes,
-        faltas,
-        assiduidade: service.attendances.length === 0 ? 0 : Number(((presentes / service.attendances.length) * 100).toFixed(2)),
-      };
-    });
+      return services.map((service) => {
+        const stats = groupedByService.get(service.id) ?? { presentes: 0, faltas: 0, total: 0 };
+        return {
+          serviceId: service.id,
+          title: service.title,
+          date: service.serviceDate,
+          totalRegistros: stats.total,
+          presentes: stats.presentes,
+          faltas: stats.faltas,
+          assiduidade: stats.total === 0 ? 0 : Number(((stats.presentes / stats.total) * 100).toFixed(2)),
+        };
+      });
+    }, 30_000);
   }
 
   async absencesReport(query: PeriodQueryDto, actor: JwtPayload) {
@@ -213,39 +248,44 @@ export class ReportsService {
   async ministryLoadReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
     const servantWhere = await this.getScopedServantFilter(actor);
-    const schedules = await this.prisma.schedule.findMany({
-      where: {
-        service: { serviceDate: period },
-        servant: servantWhere ?? undefined,
-      },
-      include: {
-        ministry: { select: { id: true, name: true } },
-        servant: { select: { id: true, name: true } },
-      },
-    });
+    const cacheKey = this.cacheKey('ministry-load', actor, period);
+    return this.cacheService.getOrSet(cacheKey, async () => {
+      const [groupedByMinistry, groupedDistinctServant] = await Promise.all([
+        this.prisma.schedule.groupBy({
+          by: ['ministryId'],
+          where: {
+            service: { serviceDate: period },
+            servant: servantWhere ?? undefined,
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.schedule.groupBy({
+          by: ['ministryId', 'servantId'],
+          where: {
+            service: { serviceDate: period },
+            servant: servantWhere ?? undefined,
+          },
+        }),
+      ]);
 
-    const byMinistry = new Map<string, { ministryId: string; ministryName: string; totalAssignments: number; uniqueServants: Set<string> }>();
-    for (const schedule of schedules) {
-      const item =
-        byMinistry.get(schedule.ministryId) ??
-        {
-          ministryId: schedule.ministryId,
-          ministryName: schedule.ministry.name,
-          totalAssignments: 0,
-          uniqueServants: new Set<string>(),
-        };
-      item.totalAssignments += 1;
-      item.uniqueServants.add(schedule.servantId);
-      byMinistry.set(schedule.ministryId, item);
-    }
+      const ministries = await this.prisma.ministry.findMany({
+        where: { id: { in: groupedByMinistry.map((item) => item.ministryId) } },
+        select: { id: true, name: true },
+      });
+      const ministryById = new Map(ministries.map((item) => [item.id, item.name]));
+      const distinctServantsByMinistry = groupedDistinctServant.reduce<Record<string, number>>((acc, item) => {
+        acc[item.ministryId] = (acc[item.ministryId] ?? 0) + 1;
+        return acc;
+      }, {});
 
-    return [...byMinistry.values()].map((item) => ({
-      ministryId: item.ministryId,
-      ministryName: item.ministryName,
-      totalAssignments: item.totalAssignments,
-      uniqueServants: item.uniqueServants.size,
-      fillRateEstimate: item.totalAssignments === 0 ? 0 : 100,
-    }));
+      return groupedByMinistry.map((item) => ({
+        ministryId: item.ministryId,
+        ministryName: ministryById.get(item.ministryId) ?? 'Ministerio',
+        totalAssignments: item._count._all,
+        uniqueServants: distinctServantsByMinistry[item.ministryId] ?? 0,
+        fillRateEstimate: item._count._all === 0 ? 0 : 100,
+      }));
+    }, 30_000);
   }
 
   async trainingPendingReport(query: PeriodQueryDto, actor: JwtPayload) {
@@ -350,34 +390,54 @@ export class ReportsService {
   async ministryTasksByServantReport(query: PeriodQueryDto, actor: JwtPayload) {
     const period = this.resolvePeriod(query);
     const where = await this.getScopedMinistryTaskWhere(actor, period);
-    const rows = await this.prisma.ministryTaskOccurrence.findMany({
-      where,
-      select: {
-        id: true,
-        status: true,
-        assignedServantId: true,
-        assignedServant: { select: { id: true, name: true } },
-        progressPercent: true,
-      },
-    });
-    const grouped = new Map<string, { servantId: string; servantName: string; total: number; completed: number; averageProgress: number }>();
-    for (const item of rows) {
-      if (!item.assignedServantId || !item.assignedServant) continue;
-      const current = grouped.get(item.assignedServantId) ?? {
-        servantId: item.assignedServantId,
-        servantName: item.assignedServant.name,
-        total: 0,
-        completed: 0,
-        averageProgress: 0,
-      };
-      current.total += 1;
-      current.completed += item.status === 'COMPLETED' ? 1 : 0;
-      current.averageProgress += item.progressPercent;
-      grouped.set(item.assignedServantId, current);
-    }
-    return [...grouped.values()]
-      .map((item) => ({ ...item, averageProgress: item.total ? Number((item.averageProgress / item.total).toFixed(2)) : 0 }))
-      .sort((a, b) => b.total - a.total);
+    const cacheKey = this.cacheKey('ministry-tasks-by-servant', actor, period);
+    return this.cacheService.getOrSet(cacheKey, async () => {
+      const [totals, completedTotals] = await Promise.all([
+        this.prisma.ministryTaskOccurrence.groupBy({
+          by: ['assignedServantId'],
+          where: {
+            ...where,
+            assignedServantId: { not: null },
+          },
+          _count: { _all: true },
+          _avg: { progressPercent: true },
+        }),
+        this.prisma.ministryTaskOccurrence.groupBy({
+          by: ['assignedServantId'],
+          where: {
+            ...where,
+            assignedServantId: { not: null },
+            status: 'COMPLETED',
+          },
+          _count: { _all: true },
+        }),
+      ]);
+
+      const servantIds = totals.map((item) => item.assignedServantId).filter((item): item is string => Boolean(item));
+      const servants = servantIds.length
+        ? await this.prisma.servant.findMany({
+            where: { id: { in: servantIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const servantNameById = new Map(servants.map((item) => [item.id, item.name]));
+      const completedByServant = new Map(
+        completedTotals
+          .filter((item) => Boolean(item.assignedServantId))
+          .map((item) => [item.assignedServantId!, item._count._all]),
+      );
+
+      return totals
+        .filter((item) => Boolean(item.assignedServantId))
+        .map((item) => ({
+          servantId: item.assignedServantId!,
+          servantName: servantNameById.get(item.assignedServantId!) ?? 'Servo',
+          total: item._count._all,
+          completed: completedByServant.get(item.assignedServantId!) ?? 0,
+          averageProgress: Number((item._avg.progressPercent ?? 0).toFixed(2)),
+        }))
+        .sort((a, b) => b.total - a.total);
+    }, 30_000);
   }
 
   async ministryTasksByMinistryReport(query: PeriodQueryDto, actor: JwtPayload) {
@@ -465,6 +525,10 @@ export class ReportsService {
       scheduledFor: period,
       ...(servantWhere ? { assignedServant: servantWhere } : {}),
     };
+  }
+
+  private cacheKey(name: string, actor: JwtPayload, period: { gte: Date; lte: Date }) {
+    return `reports:${name}:${actor.sub}:${period.gte.toISOString()}:${period.lte.toISOString()}`;
   }
 }
 

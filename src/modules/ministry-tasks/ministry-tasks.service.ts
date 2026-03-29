@@ -952,28 +952,156 @@ export class MinistryTasksService {
       }),
     ]);
 
-    for (const item of overdueCandidates) {
-      await this.prisma.ministryTaskOccurrence.update({
-        where: { id: item.id },
+    const overdueIds = overdueCandidates.map((item) => item.id);
+    if (overdueIds.length > 0) {
+      await this.prisma.ministryTaskOccurrence.updateMany({
+        where: { id: { in: overdueIds } },
         data: { status: MinistryTaskOccurrenceStatus.OVERDUE },
       });
-      await this.eventBus.emit({
-        name: 'MINISTRY_TASK_OVERDUE',
-        occurredAt: new Date(),
-        churchId: item.churchId,
-        payload: { occurrenceId: item.id },
+      await this.auditService.log({
+        action: AuditAction.MINISTRY_TASK_OVERDUE,
+        entity: 'MinistryTaskOccurrence',
+        entityId: `automation-overdue:${now.toISOString()}`,
+        churchId: overdueCandidates[0]?.churchId ?? null,
+        metadata: {
+          count: overdueIds.length,
+          occurrenceIds: overdueIds,
+          source: 'scheduler',
+        },
       });
     }
-    for (const item of dueSoonCandidates) {
-      await this.eventBus.emit({
-        name: 'MINISTRY_TASK_DUE_SOON',
-        occurredAt: new Date(),
-        churchId: item.churchId,
-        payload: { occurrenceId: item.id },
+
+    await Promise.all(
+      overdueCandidates.map((item) =>
+        this.eventBus.emit({
+          name: 'MINISTRY_TASK_OVERDUE',
+          occurredAt: new Date(),
+          churchId: item.churchId,
+          payload: { occurrenceId: item.id },
+        }),
+      ),
+    );
+
+    await Promise.all(
+      dueSoonCandidates.map((item) =>
+        this.eventBus.emit({
+          name: 'MINISTRY_TASK_DUE_SOON',
+          occurredAt: new Date(),
+          churchId: item.churchId,
+          payload: { occurrenceId: item.id },
+        }),
+      ),
+    );
+
+    await this.emitTaskDeadlineNotifications(overdueIds, dueSoonCandidates.map((item) => item.id));
+
+    if (dueSoonCandidates.length > 0) {
+      await this.auditService.log({
+        action: AuditAction.MINISTRY_TASK_DUE_SOON,
+        entity: 'MinistryTaskOccurrence',
+        entityId: `automation-due-soon:${now.toISOString()}`,
+        churchId: dueSoonCandidates[0]?.churchId ?? null,
+        metadata: {
+          count: dueSoonCandidates.length,
+          occurrenceIds: dueSoonCandidates.map((item) => item.id),
+          source: 'scheduler',
+        },
       });
     }
 
     return { overdueMarked: overdueCandidates.length, dueSoonEmitted: dueSoonCandidates.length };
+  }
+
+  async emitOperationalAlerts() {
+    const now = new Date();
+    const horizon = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const services = await this.prisma.worshipService.findMany({
+      where: {
+        deletedAt: null,
+        serviceDate: { gte: now, lte: horizon },
+      },
+      select: {
+        id: true,
+        churchId: true,
+        title: true,
+        serviceDate: true,
+      },
+      take: 300,
+      orderBy: { serviceDate: 'asc' },
+    });
+    if (services.length === 0) {
+      return { servicesChecked: 0, alertsCreated: 0 };
+    }
+
+    const serviceIds = services.map((item) => item.id);
+    const openSlotsByService = await this.prisma.scheduleSlot.groupBy({
+      by: ['serviceId'],
+      where: {
+        serviceId: { in: serviceIds },
+        status: { in: ['OPEN', 'PENDING_CONFIRMATION'] },
+      },
+      _count: { _all: true },
+    });
+    const openSlotCountByService = new Map(openSlotsByService.map((item) => [item.serviceId, item._count._all]));
+
+    const adminUsers = await this.prisma.user.findMany({
+      where: {
+        churchId: { in: [...new Set(services.map((item) => item.churchId))] },
+        status: 'ACTIVE',
+        role: { in: [Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR] },
+      },
+      select: { id: true, churchId: true },
+    });
+    const usersByChurch = adminUsers.reduce<Record<string, string[]>>((acc, item) => {
+      const key = item.churchId;
+      if (!acc[key]) {
+        acc[key] = [];
+      }
+      acc[key].push(item.id);
+      return acc;
+    }, {});
+
+    let alertsCreated = 0;
+    const alertDayToken = now.toISOString().slice(0, 10);
+    for (const service of services) {
+      const openSlots = openSlotCountByService.get(service.id) ?? 0;
+      if (openSlots === 0) {
+        continue;
+      }
+      const targetUsers = usersByChurch[service.churchId] ?? [];
+      for (const userId of targetUsers) {
+        const created = await this.createInternalAutomationNotification({
+          userId,
+          churchId: service.churchId,
+          type: 'SCHEDULE_INCOMPLETE_ALERT',
+          dedupeKey: `schedule-incomplete:${service.id}:${alertDayToken}`,
+          title: 'Escala com vagas em aberto',
+          message: `${service.title} possui ${openSlots} vaga(s) pendente(s) de preenchimento.`,
+          link: '/schedules',
+          metadata: { serviceId: service.id, openSlots, serviceDate: service.serviceDate.toISOString() },
+          windowMinutes: 24 * 60,
+        });
+        if (created) {
+          alertsCreated += 1;
+        }
+      }
+    }
+
+    if (alertsCreated > 0) {
+      await this.auditService.log({
+        action: AuditAction.CREATE,
+        entity: 'Notification',
+        entityId: `automation-schedule-incomplete:${now.toISOString()}`,
+        churchId: services[0]?.churchId ?? null,
+        metadata: {
+          servicesChecked: services.length,
+          alertsCreated,
+          source: 'scheduler',
+        },
+      });
+    }
+
+    return { servicesChecked: services.length, alertsCreated };
   }
 
   private async applyAssignmentChange(input: {
@@ -1316,6 +1444,124 @@ export class MinistryTasksService {
       occurrenceIds.push(occurrence.id);
     }
     return { impacted: impacted.length, reassigned: 0, unassigned, mode: MinistryTaskReallocationMode.UNASSIGN, occurrenceIds };
+  }
+
+  private async emitTaskDeadlineNotifications(overdueIds: string[], dueSoonIds: string[]) {
+    const targetIds = [...new Set([...overdueIds, ...dueSoonIds])];
+    if (targetIds.length === 0) {
+      return;
+    }
+
+    const occurrences = await this.prisma.ministryTaskOccurrence.findMany({
+      where: { id: { in: targetIds } },
+      select: {
+        id: true,
+        churchId: true,
+        dueAt: true,
+        assignedServantId: true,
+      },
+    });
+    const servantIds = occurrences
+      .map((item) => item.assignedServantId)
+      .filter((item): item is string => Boolean(item));
+    if (servantIds.length === 0) {
+      return;
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        servantId: { in: servantIds },
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        servantId: true,
+        churchId: true,
+      },
+    });
+    const userByServantId = new Map(users.map((item) => [item.servantId ?? '', item]));
+
+    for (const occurrence of occurrences) {
+      if (!occurrence.assignedServantId) {
+        continue;
+      }
+      const user = userByServantId.get(occurrence.assignedServantId);
+      if (!user?.churchId) {
+        continue;
+      }
+
+      if (overdueIds.includes(occurrence.id)) {
+        await this.createInternalAutomationNotification({
+          userId: user.id,
+          churchId: user.churchId,
+          type: 'MINISTRY_TASK_OVERDUE_ALERT',
+          dedupeKey: `task-overdue:${occurrence.id}:${new Date().toISOString().slice(0, 10)}`,
+          title: 'Tarefa ministerial atrasada',
+          message: 'Uma tarefa atribuida a voce esta atrasada.',
+          link: '/ministry-tasks/my',
+          metadata: { occurrenceId: occurrence.id, dueAt: occurrence.dueAt?.toISOString() ?? null },
+          windowMinutes: 24 * 60,
+        });
+      }
+
+      if (dueSoonIds.includes(occurrence.id)) {
+        const hourToken = new Date().toISOString().slice(0, 13);
+        await this.createInternalAutomationNotification({
+          userId: user.id,
+          churchId: user.churchId,
+          type: 'MINISTRY_TASK_DUE_SOON_ALERT',
+          dedupeKey: `task-due-soon:${occurrence.id}:${hourToken}`,
+          title: 'Prazo de tarefa se aproximando',
+          message: 'Uma tarefa atribuida a voce vence em breve.',
+          link: '/ministry-tasks/my',
+          metadata: { occurrenceId: occurrence.id, dueAt: occurrence.dueAt?.toISOString() ?? null },
+          windowMinutes: 120,
+        });
+      }
+    }
+  }
+
+  private async createInternalAutomationNotification(input: {
+    userId: string;
+    churchId: string;
+    type: string;
+    title: string;
+    message: string;
+    link: string;
+    dedupeKey: string;
+    metadata?: Record<string, unknown>;
+    windowMinutes: number;
+  }) {
+    const windowStart = new Date(Date.now() - input.windowMinutes * 60 * 1000);
+    const metadata = {
+      automationKey: input.dedupeKey,
+      ...(input.metadata ?? {}),
+    };
+    const existing = await this.prisma.notification.findFirst({
+      where: {
+        userId: input.userId,
+        type: input.type,
+        createdAt: { gte: windowStart },
+        metadata: { equals: metadata as Prisma.InputJsonValue },
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      return false;
+    }
+
+    await this.prisma.notification.create({
+      data: {
+        userId: input.userId,
+        churchId: input.churchId,
+        type: input.type,
+        title: input.title,
+        message: input.message,
+        link: input.link,
+        metadata: metadata as Prisma.InputJsonValue,
+      },
+    });
+    return true;
   }
 
   private assertTemplateView(actor: JwtPayload) {

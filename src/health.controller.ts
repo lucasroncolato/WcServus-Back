@@ -1,6 +1,9 @@
-import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+﻿import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Role } from '@prisma/client';
 import { Public } from './common/decorators/public.decorator';
+import { Roles } from './common/decorators/roles.decorator';
+import { AppMetricsService } from './common/observability/app-metrics.service';
 import { PrismaService } from './prisma/prisma.service';
 
 @Controller('health')
@@ -8,6 +11,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly metricsService: AppMetricsService,
   ) {}
 
   @Public()
@@ -49,6 +53,61 @@ export class HealthController {
       status: configured ? 'ok' : 'not_configured',
       target: 'queue',
       timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get('metrics')
+  metrics() {
+    return {
+      status: 'ok',
+      target: 'metrics',
+      timestamp: new Date().toISOString(),
+      application: this.metricsService.getSnapshot(),
+    };
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get('metrics/routes')
+  routeMetrics() {
+    return {
+      status: 'ok',
+      target: 'metrics.routes',
+      timestamp: new Date().toISOString(),
+      routes: this.metricsService.getRoutesSnapshot(),
+    };
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get('metrics/jobs')
+  jobMetrics() {
+    return {
+      status: 'ok',
+      target: 'metrics.jobs',
+      timestamp: new Date().toISOString(),
+      jobs: this.metricsService.getJobsSnapshot(),
+    };
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get('metrics/cache')
+  cacheMetrics() {
+    return {
+      status: 'ok',
+      target: 'metrics.cache',
+      timestamp: new Date().toISOString(),
+      cache: this.metricsService.getCacheSnapshot(),
+    };
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get('metrics/db')
+  dbMetrics() {
+    return {
+      status: 'ok',
+      target: 'metrics.db',
+      timestamp: new Date().toISOString(),
+      db: this.metricsService.getDbSnapshot(),
     };
   }
 }

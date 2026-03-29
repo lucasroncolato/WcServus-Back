@@ -1,7 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { capabilities } from 'src/common/auth/capabilities';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { RequireCapabilities } from 'src/common/decorators/require-capabilities.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -19,6 +21,7 @@ import { UsersService } from './users.service';
 @ApiBearerAuth()
 @Controller('users')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+@RequireCapabilities(capabilities.usersManageChurch)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

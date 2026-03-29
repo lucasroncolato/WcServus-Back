@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { AuditAction, Prisma, Role } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -11,6 +11,7 @@ export class AuditService {
     action: AuditAction;
     entity: string;
     entityId: string;
+    churchId?: string | null;
     userId?: string;
     before?: Record<string, unknown> | null;
     after?: Record<string, unknown> | null;
@@ -19,11 +20,21 @@ export class AuditService {
     const resolvedBefore = params.before ?? null;
     const resolvedAfter = params.after ?? params.metadata ?? null;
 
+    let resolvedChurchId = params.churchId ?? null;
+    if (!resolvedChurchId && params.userId) {
+      const actor = await this.prisma.user.findUnique({
+        where: { id: params.userId },
+        select: { churchId: true },
+      });
+      resolvedChurchId = actor?.churchId ?? null;
+    }
+
     await this.prisma.auditLog.create({
       data: {
         action: params.action,
         entity: params.entity,
         entityId: params.entityId,
+        churchId: resolvedChurchId,
         userId: params.userId,
         before:
           resolvedBefore === null ? undefined : (resolvedBefore as Prisma.InputJsonValue | undefined),
@@ -35,14 +46,16 @@ export class AuditService {
 
   async list(limit = 50, actor?: JwtPayload) {
     const records = await this.prisma.auditLog.findMany({
-      where:
-        actor?.role === Role.ADMIN
+      where: {
+        ...(actor?.churchId ? { churchId: actor.churchId } : {}),
+        ...(actor?.role === Role.ADMIN
           ? {
               entity: {
                 in: ['User', 'Servant', 'Schedule', 'Attendance', 'PastoralVisit'],
               },
             }
-          : undefined,
+          : {}),
+      },
       include: {
         user: {
           select: { id: true, name: true, email: true, role: true },

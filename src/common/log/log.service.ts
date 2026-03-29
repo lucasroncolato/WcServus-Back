@@ -1,45 +1,99 @@
-import { Injectable, LoggerService } from '@nestjs/common';
+﻿import { Injectable, LoggerService } from '@nestjs/common';
 
 type LogMeta = Record<string, unknown> | undefined;
+
+type StructuredLogEntry = {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error' | 'debug' | 'verbose';
+  module: string;
+  action: string;
+  message: string;
+  requestId?: string;
+  churchId?: string | null;
+  userId?: string | null;
+  durationMs?: number;
+  metadata?: Record<string, unknown>;
+};
 
 @Injectable()
 export class LogService implements LoggerService {
   log(message: string, context?: string, meta?: LogMeta) {
-    this.write('INFO', message, context, meta);
+    this.event({
+      level: 'info',
+      module: context ?? 'app',
+      action: 'log',
+      message,
+      metadata: meta,
+    });
   }
 
   error(message: string, trace?: string, context?: string, meta?: LogMeta) {
-    this.write('ERROR', message, context, { trace, ...(meta ?? {}) });
+    this.event({
+      level: 'error',
+      module: context ?? 'app',
+      action: 'error',
+      message,
+      metadata: {
+        trace,
+        ...(meta ?? {}),
+      },
+    });
   }
 
   warn(message: string, context?: string, meta?: LogMeta) {
-    this.write('WARN', message, context, meta);
+    this.event({
+      level: 'warn',
+      module: context ?? 'app',
+      action: 'warn',
+      message,
+      metadata: meta,
+    });
   }
 
   debug(message: string, context?: string, meta?: LogMeta) {
-    this.write('DEBUG', message, context, meta);
+    this.event({
+      level: 'debug',
+      module: context ?? 'app',
+      action: 'debug',
+      message,
+      metadata: meta,
+    });
   }
 
   verbose(message: string, context?: string, meta?: LogMeta) {
-    this.write('VERBOSE', message, context, meta);
+    this.event({
+      level: 'verbose',
+      module: context ?? 'app',
+      action: 'verbose',
+      message,
+      metadata: meta,
+    });
   }
 
-  private write(
-    level: 'INFO' | 'ERROR' | 'WARN' | 'DEBUG' | 'VERBOSE',
-    message: string,
-    context?: string,
-    meta?: LogMeta,
-  ) {
-    // Canonical JSON log line for ingestion in observability stacks.
-    process.stdout.write(
-      `${JSON.stringify({
-        ts: new Date().toISOString(),
-        level,
-        context: context ?? null,
-        message,
-        ...(meta ? { meta } : {}),
-      })}\n`,
-    );
+  event(input: {
+    level: StructuredLogEntry['level'];
+    module: string;
+    action: string;
+    message: string;
+    requestId?: string;
+    churchId?: string | null;
+    userId?: string | null;
+    durationMs?: number;
+    metadata?: Record<string, unknown>;
+  }) {
+    const payload: StructuredLogEntry = {
+      timestamp: new Date().toISOString(),
+      level: input.level,
+      module: input.module,
+      action: input.action,
+      message: input.message,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+      ...(input.churchId !== undefined ? { churchId: input.churchId } : {}),
+      ...(input.userId !== undefined ? { userId: input.userId } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: Number(input.durationMs.toFixed(2)) } : {}),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+    };
+
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
   }
 }
-

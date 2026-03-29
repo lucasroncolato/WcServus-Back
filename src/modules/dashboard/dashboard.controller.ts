@@ -22,4 +22,10 @@ export class DashboardController {
   alerts(@CurrentUser() actor: JwtPayload) {
     return this.dashboardService.alerts(actor);
   }
+
+  @Get('operations')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  operations(@CurrentUser() actor: JwtPayload) {
+    return this.dashboardService.operations(actor);
+  }
 }

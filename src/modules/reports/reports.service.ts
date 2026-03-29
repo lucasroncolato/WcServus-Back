@@ -324,6 +324,124 @@ export class ReportsService {
     };
   }
 
+  async ministryTasksSummaryReport(query: PeriodQueryDto, actor: JwtPayload) {
+    const period = this.resolvePeriod(query);
+    const where = await this.getScopedMinistryTaskWhere(actor, period);
+    const [total, completed, overdue, unassigned, pendingReallocation] = await Promise.all([
+      this.prisma.ministryTaskOccurrence.count({ where }),
+      this.prisma.ministryTaskOccurrence.count({
+        where: { ...where, status: 'COMPLETED' },
+      }),
+      this.prisma.ministryTaskOccurrence.count({
+        where: {
+          ...where,
+          dueAt: { lt: new Date() },
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        },
+      }),
+      this.prisma.ministryTaskOccurrence.count({ where: { ...where, assignedServantId: null } }),
+      this.prisma.ministryTaskOccurrence.count({
+        where: { ...where, reallocationStatus: 'PENDING_REALLOCATION' },
+      }),
+    ]);
+    return { total, completed, overdue, unassigned, pendingReallocation };
+  }
+
+  async ministryTasksByServantReport(query: PeriodQueryDto, actor: JwtPayload) {
+    const period = this.resolvePeriod(query);
+    const where = await this.getScopedMinistryTaskWhere(actor, period);
+    const rows = await this.prisma.ministryTaskOccurrence.findMany({
+      where,
+      select: {
+        id: true,
+        status: true,
+        assignedServantId: true,
+        assignedServant: { select: { id: true, name: true } },
+        progressPercent: true,
+      },
+    });
+    const grouped = new Map<string, { servantId: string; servantName: string; total: number; completed: number; averageProgress: number }>();
+    for (const item of rows) {
+      if (!item.assignedServantId || !item.assignedServant) continue;
+      const current = grouped.get(item.assignedServantId) ?? {
+        servantId: item.assignedServantId,
+        servantName: item.assignedServant.name,
+        total: 0,
+        completed: 0,
+        averageProgress: 0,
+      };
+      current.total += 1;
+      current.completed += item.status === 'COMPLETED' ? 1 : 0;
+      current.averageProgress += item.progressPercent;
+      grouped.set(item.assignedServantId, current);
+    }
+    return [...grouped.values()]
+      .map((item) => ({ ...item, averageProgress: item.total ? Number((item.averageProgress / item.total).toFixed(2)) : 0 }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  async ministryTasksByMinistryReport(query: PeriodQueryDto, actor: JwtPayload) {
+    const period = this.resolvePeriod(query);
+    const where = await this.getScopedMinistryTaskWhere(actor, period);
+    const grouped = await this.prisma.ministryTaskOccurrence.groupBy({
+      by: ['ministryId', 'status'],
+      where,
+      _count: { _all: true },
+    });
+    const ministries = await this.prisma.ministry.findMany({
+      where: { id: { in: [...new Set(grouped.map((item) => item.ministryId))] } },
+      select: { id: true, name: true },
+    });
+    const ministryNameById = new Map(ministries.map((m) => [m.id, m.name]));
+    return grouped.map((item) => ({
+      ministryId: item.ministryId,
+      ministryName: ministryNameById.get(item.ministryId) ?? 'Ministerio',
+      status: item.status,
+      total: item._count._all,
+    }));
+  }
+
+  async ministryTasksByServiceReport(query: PeriodQueryDto, actor: JwtPayload) {
+    const period = this.resolvePeriod(query);
+    const where = await this.getScopedMinistryTaskWhere(actor, period);
+    const rows = await this.prisma.ministryTaskOccurrence.groupBy({
+      by: ['serviceId'],
+      where: { ...where, serviceId: { not: null } },
+      _count: { _all: true },
+    });
+    const services = await this.prisma.worshipService.findMany({
+      where: { id: { in: rows.map((item) => item.serviceId!).filter(Boolean) } },
+      select: { id: true, title: true, serviceDate: true },
+    });
+    const serviceById = new Map(services.map((s) => [s.id, s]));
+    return rows.map((item) => ({
+      serviceId: item.serviceId,
+      serviceTitle: item.serviceId ? serviceById.get(item.serviceId)?.title ?? 'Culto' : 'Sem culto',
+      serviceDate: item.serviceId ? serviceById.get(item.serviceId)?.serviceDate ?? null : null,
+      total: item._count._all,
+    }));
+  }
+
+  async ministryTasksOverdueReport(query: PeriodQueryDto, actor: JwtPayload) {
+    const period = this.resolvePeriod(query);
+    const where = await this.getScopedMinistryTaskWhere(actor, period);
+    return this.prisma.ministryTaskOccurrence.findMany({
+      where: {
+        ...where,
+        dueAt: { lt: new Date() },
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      },
+      include: {
+        ministry: { select: { id: true, name: true } },
+        template: { select: { id: true, name: true } },
+        service: { select: { id: true, title: true, serviceDate: true } },
+        assignedServant: { select: { id: true, name: true } },
+      },
+      orderBy: [{ dueAt: 'asc' }],
+      take: 200,
+    });
+  }
+
   private resolvePeriod(query: PeriodQueryDto) {
     const now = new Date();
     const defaultStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
@@ -337,6 +455,16 @@ export class ReportsService {
 
   private async getScopedServantFilter(actor: JwtPayload): Promise<Prisma.ServantWhereInput | undefined> {
     return getServantAccessWhere(this.prisma, actor);
+  }
+
+  private async getScopedMinistryTaskWhere(actor: JwtPayload, period: { gte: Date; lte: Date }): Promise<Prisma.MinistryTaskOccurrenceWhereInput> {
+    const servantWhere = await this.getScopedServantFilter(actor);
+    return {
+      deletedAt: null,
+      ...(actor.churchId ? { churchId: actor.churchId } : {}),
+      scheduledFor: period,
+      ...(servantWhere ? { assignedServant: servantWhere } : {}),
+    };
   }
 }
 

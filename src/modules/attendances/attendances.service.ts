@@ -19,6 +19,7 @@ import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RewardsService } from '../rewards/rewards.service';
+import { GamificationService } from '../gamification/gamification.service';
 import { BatchAttendanceDto } from './dto/batch-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { ListAttendancesQueryDto } from './dto/list-attendances-query.dto';
@@ -31,6 +32,7 @@ export class AttendancesService {
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
+    private readonly gamificationService: GamificationService,
     private readonly eventBus: EventBusService,
   ) {}
 
@@ -397,6 +399,22 @@ export class AttendancesService {
       description: 'Recompensa por presenca registrada em culto.',
       referenceId: attendanceId,
       grantedByUserId: actorUserId,
+    });
+
+    await this.gamificationService.awardPoints({
+      servantId,
+      actionType: 'ATTENDANCE_CONFIRMED',
+      referenceId: `attendance:${attendanceId}:present`,
+      actorUserId,
+      metadata: { attendanceId },
+    });
+
+    await this.gamificationService.awardPoints({
+      servantId,
+      actionType: 'WORSHIP_SERVICE_PARTICIPATION',
+      referenceId: `attendance:${attendanceId}:service-participation`,
+      actorUserId,
+      metadata: { attendanceId },
     });
   }
 }

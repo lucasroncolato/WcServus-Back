@@ -203,6 +203,26 @@ enum AuditAction {
   SLOT_SWAPPED
   ATTENDANCE_REGISTERED
   PASTORAL_ACTION
+  MINISTRY_TASK_TEMPLATE_CREATED
+  MINISTRY_TASK_TEMPLATE_UPDATED
+  MINISTRY_TASK_OCCURRENCE_CREATED
+  MINISTRY_TASK_ASSIGNED
+  MINISTRY_TASK_PROGRESS_UPDATED
+  MINISTRY_TASK_COMPLETED
+  MINISTRY_TASK_CANCELLED
+  MINISTRY_TASK_REASSIGNED
+  MINISTRY_TASK_REALLOCATION_REQUESTED
+  MINISTRY_TASK_REALLOCATED_AUTOMATICALLY
+  MINISTRY_TASK_REALLOCATED_MANUALLY
+  MINISTRY_TASK_UNASSIGNED_AFTER_SCALE_CHANGE
+  MINISTRY_TASK_ASSIGNEE_ADDED
+  MINISTRY_TASK_ASSIGNEE_REMOVED
+  MINISTRY_TASK_OVERDUE
+  MINISTRY_TASK_RECURRING_GENERATED
+  MINISTRY_TASK_DUE_SOON
+  GAMIFICATION_POINTS_GRANTED
+  GAMIFICATION_LEVEL_UPDATED
+  GAMIFICATION_ACHIEVEMENT_UNLOCKED
   DELETE
 }
 
@@ -256,6 +276,107 @@ enum RewardSource {
   MANUAL
 }
 
+enum GamificationActionType {
+  ATTENDANCE_CONFIRMED
+  TASK_COMPLETED
+  CHECKLIST_PERFECT
+  TASK_BEFORE_DUE
+  WORSHIP_SERVICE_PARTICIPATION
+  TRAINING_COMPLETED
+  HELPED_OTHER_TEAM
+  EXTRA_TASK_ASSUMED
+  MONTH_WITHOUT_ABSENCE
+  TEAM_LEADERSHIP
+  SPECIAL_EVENT
+  MANUAL
+}
+
+enum AchievementType {
+  TASKS_COMPLETED
+  ATTENDANCE_STREAK
+  MINISTRY_TIME
+  TRAINING_COMPLETED
+  LEADERSHIP
+  CROSS_TEAM_HELP
+  CRITICAL_TASK_COMPLETED
+  NO_DELAY_STREAK
+  CHECKLIST_PERFECT
+  SPECIAL_EVENT
+  MULTI_MINISTRY
+  MANUAL
+}
+
+enum MinistryTaskRecurrenceType {
+  EVERY_SERVICE
+  WEEKLY
+  MONTHLY
+  FIRST_SERVICE_OF_MONTH
+  LAST_SERVICE_OF_MONTH
+  CUSTOM
+  MANUAL
+}
+
+enum MinistryTaskAssigneeMode {
+  OPTIONAL
+  REQUIRED
+}
+
+enum MinistryTaskOccurrenceStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum MinistryTaskChecklistItemStatus {
+  PENDING
+  DONE
+  NOT_APPLICABLE
+}
+
+enum MinistryTaskReallocationMode {
+  MANUAL
+  AUTO_EQUAL_DISTRIBUTION
+  AUTO_BEST_MATCH
+  UNASSIGN
+}
+
+enum MinistryTaskReallocationStatus {
+  NONE
+  PENDING_REALLOCATION
+  REASSIGNED
+  UNASSIGNED
+  CANCELLED
+}
+
+enum MinistryTaskAssignmentChangeType {
+  ASSIGN
+  REASSIGN_MANUAL
+  REASSIGN_AUTO
+  UNASSIGN
+}
+
+enum MinistryTaskAssigneeRole {
+  PRIMARY
+  SUPPORT
+  REVIEWER
+}
+
+enum MinistryTaskOccurrencePriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum MinistryTaskOccurrenceCriticality {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 model Church {
   id             String        @id @default(cuid())
   name           String
@@ -277,6 +398,18 @@ model Church {
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   notifications  Notification[]
   scheduleVersions ScheduleVersion[]
+  ministryTaskTemplates MinistryTaskTemplate[]
+  ministryTaskOccurrences MinistryTaskOccurrence[]
+  pointRules       PointRule[]
+  servantPointLogs ServantPointLog[]
+  servantGamificationProfiles ServantGamificationProfile[]
+  levelDefinitions ServantLevelDefinition[]
+  achievements     Achievement[]
+  servantAchievements ServantAchievement[]
+  growthTracks     GrowthTrack[]
+  servantGrowthProgress ServantGrowthProgress[]
+  servantRankingSnapshots ServantRankingSnapshot[]
+  servantMonthlyStats ServantMonthlyStats[]
 
   @@index([active])
   @@index([name])
@@ -335,6 +468,17 @@ model User {
   notificationLogs                 NotificationLog[]
   notificationQueue                NotificationQueue[]
   createdScheduleVersions          ScheduleVersion[]
+  createdMinistryTaskTemplates     MinistryTaskTemplate[]         @relation("MinistryTaskTemplateCreatedBy")
+  assignedMinistryTaskOccurrences  MinistryTaskOccurrence[]       @relation("MinistryTaskOccurrenceCompletedBy")
+  checkedMinistryTaskChecklistItems MinistryTaskOccurrenceChecklistItem[] @relation("MinistryTaskChecklistCheckedBy")
+  reassignedMinistryTaskOccurrences MinistryTaskOccurrence[]      @relation("MinistryTaskOccurrenceLastReassignedBy")
+  ministryTaskAssignmentHistory     MinistryTaskOccurrenceAssignmentHistory[] @relation("MinistryTaskOccurrenceAssignmentChangedBy")
+  ministryTaskOccurrenceAssignees   MinistryTaskOccurrenceAssignee[] @relation("MinistryTaskOccurrenceAssigneeLinkedUser")
+  createdAchievements               Achievement[]                 @relation("AchievementCreatedBy")
+  unlockedServantAchievements       ServantAchievement[]          @relation("ServantAchievementUnlockedBy")
+  createdGrowthTracks               GrowthTrack[]                 @relation("GrowthTrackCreatedBy")
+  createdGrowthTrackSteps           GrowthTrackStep[]             @relation("GrowthTrackStepCreatedBy")
+  verifiedGrowthProgress            ServantGrowthProgress[]       @relation("GrowthProgressVerifiedBy")
 
   @@index([role])
   @@index([scope])
@@ -395,6 +539,12 @@ model Ministry {
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   responsibilities        MinistryResponsibility[]
   scheduleVersionSlots    ScheduleVersionSlot[]
+  ministryTaskTemplates   MinistryTaskTemplate[]
+  ministryTaskOccurrences MinistryTaskOccurrence[]
+  growthTracks            GrowthTrack[]
+  servantPointLogs        ServantPointLog[]
+  servantRankingSnapshots ServantRankingSnapshot[]
+  servantMonthlyStats     ServantMonthlyStats[]
 
   @@index([coordinatorUserId])
   @@index([churchId])
@@ -477,6 +627,17 @@ model Servant {
   notificationLogs          NotificationLog[]
   notificationQueue         NotificationQueue[]
   scheduleVersionSlots      ScheduleVersionSlot[]
+  assignedMinistryTaskOccurrences MinistryTaskOccurrence[] @relation("MinistryTaskAssignedServant")
+  originMinistryTaskOccurrences MinistryTaskOccurrence[] @relation("MinistryTaskOriginAssignedServant")
+  ministryTaskAssignmentHistoryFrom MinistryTaskOccurrenceAssignmentHistory[] @relation("MinistryTaskAssignmentHistoryFromServant")
+  ministryTaskAssignmentHistoryTo MinistryTaskOccurrenceAssignmentHistory[] @relation("MinistryTaskAssignmentHistoryToServant")
+  ministryTaskAssignees MinistryTaskOccurrenceAssignee[]
+  pointLogs                 ServantPointLog[]
+  gamificationProfile       ServantGamificationProfile?
+  achievementProgress       ServantAchievement[]
+  growthProgress            ServantGrowthProgress[]
+  rankingSnapshots          ServantRankingSnapshot[]
+  monthlyStats              ServantMonthlyStats[]
 
   @@index([name])
   @@index([status])
@@ -539,6 +700,7 @@ model WorshipService {
   scheduleSlots ScheduleSlot[]
   scheduleVersions ScheduleVersion[]
   attendances   Attendance[]
+  ministryTaskOccurrences MinistryTaskOccurrence[]
 
   @@unique([serviceDate, startTime, title])
   @@index([serviceDate])
@@ -941,6 +1103,165 @@ model MinistryResponsibility {
   @@index([deletedAt])
 }
 
+model MinistryTaskTemplate {
+  id                                String                              @id @default(cuid())
+  churchId                          String?
+  ministryId                        String
+  name                              String
+  description                       String?
+  recurrenceType                    MinistryTaskRecurrenceType          @default(MANUAL)
+  recurrenceConfig                  Json?
+  linkedToServiceType               WorshipServiceType?
+  active                            Boolean                             @default(true)
+  assigneeMode                      MinistryTaskAssigneeMode            @default(OPTIONAL)
+  reallocationMode                  MinistryTaskReallocationMode        @default(MANUAL)
+  maxAssignmentsPerServantPerMonth  Int?
+  createdBy                         String?
+  createdAt                         DateTime                            @default(now())
+  updatedAt                         DateTime                            @updatedAt
+  deletedAt                         DateTime?
+  deletedBy                         String?
+  church                            Church?                             @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  ministry                          Ministry                            @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  createdByUser                     User?                               @relation("MinistryTaskTemplateCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  checklistItems                    MinistryTaskTemplateChecklistItem[]
+  occurrences                       MinistryTaskOccurrence[]
+
+  @@index([churchId])
+  @@index([ministryId, active])
+  @@index([recurrenceType, active])
+  @@index([deletedAt])
+}
+
+model MinistryTaskTemplateChecklistItem {
+  id          String               @id @default(cuid())
+  templateId  String
+  label       String
+  description String?
+  position    Int                  @default(1)
+  required    Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  template    MinistryTaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  occurrenceItems MinistryTaskOccurrenceChecklistItem[]
+
+  @@index([templateId, position])
+}
+
+model MinistryTaskOccurrence {
+  id                String                         @id @default(cuid())
+  churchId          String?
+  templateId        String
+  ministryId        String
+  serviceId         String?
+  scheduledFor      DateTime
+  assignedServantId String?
+  originAssignedServantId String?
+  status            MinistryTaskOccurrenceStatus   @default(PENDING)
+  reallocationMode   MinistryTaskReallocationMode?
+  reallocationStatus MinistryTaskReallocationStatus @default(NONE)
+  lastReassignedAt   DateTime?
+  lastReassignedBy   String?
+  dueAt              DateTime?
+  startedAt          DateTime?
+  slaMinutes         Int?
+  priority           MinistryTaskOccurrencePriority  @default(MEDIUM)
+  criticality        MinistryTaskOccurrenceCriticality @default(MEDIUM)
+  lastProgressAt     DateTime?
+  progressPercent   Int                            @default(0)
+  completedAt       DateTime?
+  completedBy       String?
+  notes             String?
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  church            Church?                        @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  template          MinistryTaskTemplate           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  ministry          Ministry                       @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  service           WorshipService?                @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  assignedServant   Servant?                       @relation("MinistryTaskAssignedServant", fields: [assignedServantId], references: [id], onDelete: SetNull)
+  originAssignedServant Servant?                   @relation("MinistryTaskOriginAssignedServant", fields: [originAssignedServantId], references: [id], onDelete: SetNull)
+  completedByUser   User?                          @relation("MinistryTaskOccurrenceCompletedBy", fields: [completedBy], references: [id], onDelete: SetNull)
+  lastReassignedByUser User?                       @relation("MinistryTaskOccurrenceLastReassignedBy", fields: [lastReassignedBy], references: [id], onDelete: SetNull)
+  checklistItems    MinistryTaskOccurrenceChecklistItem[]
+  assignmentHistory MinistryTaskOccurrenceAssignmentHistory[]
+  assignees         MinistryTaskOccurrenceAssignee[]
+
+  @@index([churchId])
+  @@index([templateId, scheduledFor])
+  @@index([ministryId, status, scheduledFor])
+  @@index([serviceId])
+  @@index([assignedServantId, scheduledFor])
+  @@index([reallocationStatus, scheduledFor])
+  @@index([originAssignedServantId])
+  @@index([lastReassignedBy])
+  @@index([dueAt, status])
+  @@index([priority, criticality, status])
+  @@index([deletedAt])
+}
+
+model MinistryTaskOccurrenceAssignee {
+  id            String                   @id @default(cuid())
+  occurrenceId  String
+  servantId     String
+  role          MinistryTaskAssigneeRole @default(SUPPORT)
+  active        Boolean                  @default(true)
+  createdAt     DateTime                 @default(now())
+  createdBy     String?
+  removedAt     DateTime?
+  removedBy     String?
+  occurrence    MinistryTaskOccurrence   @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  servant       Servant                  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  createdByUser User?                    @relation("MinistryTaskOccurrenceAssigneeLinkedUser", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([occurrenceId, servantId, role])
+  @@index([occurrenceId, active, role])
+  @@index([servantId, active])
+  @@index([removedAt])
+}
+
+model MinistryTaskOccurrenceAssignmentHistory {
+  id                      String                          @id @default(cuid())
+  occurrenceId            String
+  fromServantId           String?
+  toServantId             String?
+  changedBy               String?
+  changeType              MinistryTaskAssignmentChangeType
+  preserveProgress        Boolean                         @default(true)
+  reason                  String?
+  metadata                Json?
+  createdAt               DateTime                        @default(now())
+  occurrence              MinistryTaskOccurrence          @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  fromServant             Servant?                        @relation("MinistryTaskAssignmentHistoryFromServant", fields: [fromServantId], references: [id], onDelete: SetNull)
+  toServant               Servant?                        @relation("MinistryTaskAssignmentHistoryToServant", fields: [toServantId], references: [id], onDelete: SetNull)
+  changedByUser           User?                           @relation("MinistryTaskOccurrenceAssignmentChangedBy", fields: [changedBy], references: [id], onDelete: SetNull)
+
+  @@index([occurrenceId, createdAt])
+  @@index([fromServantId])
+  @@index([toServantId])
+  @@index([changedBy])
+}
+
+model MinistryTaskOccurrenceChecklistItem {
+  id                       String                          @id @default(cuid())
+  occurrenceId             String
+  templateChecklistItemId  String?
+  label                    String
+  description              String?
+  position                 Int                             @default(1)
+  required                 Boolean                         @default(true)
+  status                   MinistryTaskChecklistItemStatus @default(PENDING)
+  checkedAt                DateTime?
+  checkedBy                String?
+  notes                    String?
+  occurrence               MinistryTaskOccurrence          @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  templateChecklistItem    MinistryTaskTemplateChecklistItem? @relation(fields: [templateChecklistItemId], references: [id], onDelete: SetNull)
+  checkedByUser            User?                           @relation("MinistryTaskChecklistCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
+
+  @@index([occurrenceId, position])
+  @@index([templateChecklistItemId])
+}
+
 model ServantReward {
   id              String       @id @default(cuid())
   servantId       String
@@ -959,6 +1280,222 @@ model ServantReward {
   @@index([servantId, rewardedAt])
   @@index([source, rewardedAt])
   @@index([grantedByUserId])
+}
+
+model ServantLevelDefinition {
+  id         String   @id @default(cuid())
+  churchId   String?
+  name       String
+  threshold  Int
+  levelOrder Int
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  church     Church?  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+
+  @@index([churchId, active])
+  @@index([threshold])
+  @@index([levelOrder])
+}
+
+model PointRule {
+  id         String                 @id @default(cuid())
+  churchId   String?
+  actionType GamificationActionType
+  points     Int
+  active     Boolean                @default(true)
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+  church     Church?                @relation(fields: [churchId], references: [id], onDelete: SetNull)
+
+  @@unique([churchId, actionType])
+  @@index([actionType, active])
+}
+
+model ServantPointLog {
+  id          String                 @id @default(cuid())
+  churchId    String?
+  servantId   String
+  ministryId  String?
+  actionType  GamificationActionType
+  points      Int
+  referenceId String?
+  metadata    Json?
+  createdAt   DateTime               @default(now())
+  church      Church?                @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant     Servant                @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  ministry    Ministry?              @relation(fields: [ministryId], references: [id], onDelete: SetNull)
+
+  @@index([churchId, createdAt])
+  @@index([servantId, createdAt])
+  @@index([ministryId, createdAt])
+  @@index([actionType, createdAt])
+  @@index([referenceId])
+}
+
+model ServantGamificationProfile {
+  servantId            String   @id
+  churchId             String?
+  totalPoints          Int      @default(0)
+  currentLevel         String?
+  currentLevelOrder    Int      @default(0)
+  achievementsUnlocked Int      @default(0)
+  attendanceRate       Float    @default(0)
+  completionRate       Float    @default(0)
+  rankingScore         Float    @default(0)
+  updatedAt            DateTime @updatedAt
+  church               Church?  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant              Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@index([churchId, totalPoints])
+  @@index([currentLevelOrder, totalPoints])
+}
+
+model Achievement {
+  id            String               @id @default(cuid())
+  churchId      String?
+  name          String
+  code          String
+  description   String?
+  icon          String?
+  category      String?
+  type          AchievementType
+  pointsBonus   Int                  @default(0)
+  criteria      Json?
+  active        Boolean              @default(true)
+  createdBy     String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  church        Church?              @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  createdByUser User?                @relation("AchievementCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  servantLinks  ServantAchievement[]
+
+  @@unique([churchId, code])
+  @@index([churchId, active])
+  @@index([type, active])
+}
+
+model ServantAchievement {
+  id             String      @id @default(cuid())
+  churchId       String?
+  servantId      String
+  achievementId  String
+  unlockedAt     DateTime    @default(now())
+  progressValue  Float       @default(0)
+  unlockedBy     String?
+  metadata       Json?
+  church         Church?     @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant        Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  achievement    Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  unlockedByUser User?       @relation("ServantAchievementUnlockedBy", fields: [unlockedBy], references: [id], onDelete: SetNull)
+
+  @@unique([servantId, achievementId])
+  @@index([churchId, unlockedAt])
+  @@index([servantId, unlockedAt])
+}
+
+model GrowthTrack {
+  id            String                @id @default(cuid())
+  churchId      String?
+  ministryId    String?
+  name          String
+  description   String?
+  active        Boolean               @default(true)
+  createdBy     String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  church        Church?               @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  ministry      Ministry?             @relation(fields: [ministryId], references: [id], onDelete: SetNull)
+  createdByUser User?                 @relation("GrowthTrackCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  steps         GrowthTrackStep[]
+  progress      ServantGrowthProgress[]
+
+  @@index([churchId, active])
+  @@index([ministryId, active])
+}
+
+model GrowthTrackStep {
+  id            String                @id @default(cuid())
+  growthTrackId String
+  title         String
+  description   String?
+  stepOrder     Int
+  criteria      Json?
+  manualReview  Boolean               @default(false)
+  createdBy     String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  growthTrack   GrowthTrack           @relation(fields: [growthTrackId], references: [id], onDelete: Cascade)
+  createdByUser User?                 @relation("GrowthTrackStepCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  progress      ServantGrowthProgress[]
+
+  @@unique([growthTrackId, stepOrder])
+  @@index([growthTrackId])
+}
+
+model ServantGrowthProgress {
+  id            String          @id @default(cuid())
+  churchId      String?
+  servantId     String
+  growthTrackId String
+  stepId        String
+  completed     Boolean         @default(false)
+  completedAt   DateTime?
+  progressValue Float           @default(0)
+  notes         String?
+  verifiedBy    String?
+  updatedAt     DateTime        @updatedAt
+  church        Church?         @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant       Servant         @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  growthTrack   GrowthTrack     @relation(fields: [growthTrackId], references: [id], onDelete: Cascade)
+  step          GrowthTrackStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  verifiedByUser User?          @relation("GrowthProgressVerifiedBy", fields: [verifiedBy], references: [id], onDelete: SetNull)
+
+  @@unique([servantId, stepId])
+  @@index([churchId, servantId])
+  @@index([growthTrackId, completed])
+}
+
+model ServantRankingSnapshot {
+  id               String    @id @default(cuid())
+  churchId         String?
+  ministryId       String?
+  servantId        String
+  referenceMonth   DateTime
+  totalPoints      Int
+  positionChurch   Int?
+  positionMinistry Int?
+  createdAt        DateTime  @default(now())
+  church           Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  ministry         Ministry? @relation(fields: [ministryId], references: [id], onDelete: SetNull)
+  servant          Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, referenceMonth, ministryId])
+  @@index([churchId, referenceMonth, positionChurch])
+  @@index([ministryId, referenceMonth, positionMinistry])
+}
+
+model ServantMonthlyStats {
+  id                  String    @id @default(cuid())
+  churchId            String?
+  ministryId          String?
+  servantId           String
+  referenceMonth      DateTime
+  attendanceConfirmed Int       @default(0)
+  absences            Int       @default(0)
+  tasksCompleted      Int       @default(0)
+  tasksOverdue        Int       @default(0)
+  checklistPerfect    Int       @default(0)
+  pointsEarned        Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  church              Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  ministry            Ministry? @relation(fields: [ministryId], references: [id], onDelete: SetNull)
+  servant             Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, referenceMonth, ministryId])
+  @@index([churchId, referenceMonth])
+  @@index([ministryId, referenceMonth])
 }
 
 model AuditLog {

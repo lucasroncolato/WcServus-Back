@@ -14,6 +14,7 @@ import {
   PastoralVisitStatus,
   Prisma,
   Role,
+  MinistryTaskReallocationMode,
   ScheduleResponseStatus,
   ScheduleSlotChangeType,
   ScheduleSlotStatus,
@@ -65,6 +66,7 @@ import { ListSwapHistoryQueryDto } from './dto/list-swap-history-query.dto';
 import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { ScheduleGenerationWeightsDto } from './dto/schedule-generation-weights.dto';
+import { MinistryTasksService } from '../ministry-tasks/ministry-tasks.service';
 
 type GenerationWeights = {
   monthlyLoad: number;
@@ -149,6 +151,9 @@ export class SchedulesService {
     private readonly eventBus: EventBusService = {
       emit: async () => undefined,
     } as unknown as EventBusService,
+    private readonly ministryTasksService: MinistryTasksService = {
+      reallocateFromRemovedServant: async () => null,
+    } as unknown as MinistryTasksService,
     private readonly cacheService: AppCacheService = {
       get: () => null,
       set: () => undefined,
@@ -1591,7 +1596,23 @@ export class SchedulesService {
       },
     );
 
-    return this.toApiSchedule(updated);
+    let ministryTasksReallocation: unknown = null;
+    if (dto.servantId !== undefined && dto.servantId !== existing.servantId) {
+      ministryTasksReallocation = await this.ministryTasksService.reallocateFromRemovedServant(
+        {
+          serviceId: existing.serviceId,
+          removedServantId: existing.servantId,
+          mode: dto.ministryTaskReallocationMode ?? MinistryTaskReallocationMode.UNASSIGN,
+          manualAssignments: dto.ministryTaskManualAssignments,
+          reason:
+            dto.ministryTaskReallocationReason ??
+            'Triggered by schedule responsible change',
+        },
+        actor,
+      );
+    }
+
+    return { ...this.toApiSchedule(updated), ministryTasksReallocation };
   }
 
   async duplicate(scheduleId: string, dto: DuplicateScheduleDto, actor: JwtPayload) {

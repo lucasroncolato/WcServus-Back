@@ -58,4 +58,29 @@ export class ReportsController {
   talents(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
     return this.reportsService.talentsReport(query, user);
   }
+
+  @Get('ministry-tasks/summary')
+  ministryTasksSummary(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.ministryTasksSummaryReport(query, user);
+  }
+
+  @Get('ministry-tasks/by-servant')
+  ministryTasksByServant(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.ministryTasksByServantReport(query, user);
+  }
+
+  @Get('ministry-tasks/by-ministry')
+  ministryTasksByMinistry(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.ministryTasksByMinistryReport(query, user);
+  }
+
+  @Get('ministry-tasks/by-service')
+  ministryTasksByService(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.ministryTasksByServiceReport(query, user);
+  }
+
+  @Get('ministry-tasks/overdue')
+  ministryTasksOverdue(@Query() query: PeriodQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.ministryTasksOverdueReport(query, user);
+  }
 }

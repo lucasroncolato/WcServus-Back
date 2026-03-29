@@ -8,7 +8,26 @@ export type DomainEventName =
   | 'SLOT_ASSIGNED'
   | 'SLOT_CONFIRMED'
   | 'SLOT_DECLINED'
-  | 'ATTENDANCE_REGISTERED';
+  | 'ATTENDANCE_REGISTERED'
+  | 'MINISTRY_TASK_TEMPLATE_CREATED'
+  | 'MINISTRY_TASK_OCCURRENCE_CREATED'
+  | 'MINISTRY_TASK_ASSIGNED'
+  | 'MINISTRY_TASK_REASSIGNED'
+  | 'MINISTRY_TASK_REALLOCATION_REQUESTED'
+  | 'MINISTRY_TASK_REALLOCATED_AUTOMATICALLY'
+  | 'MINISTRY_TASK_REALLOCATED_MANUALLY'
+  | 'MINISTRY_TASK_UNASSIGNED_AFTER_SCALE_CHANGE'
+  | 'MINISTRY_TASK_ASSIGNEE_ADDED'
+  | 'MINISTRY_TASK_ASSIGNEE_REMOVED'
+  | 'MINISTRY_TASK_OVERDUE'
+  | 'MINISTRY_TASK_RECURRING_GENERATED'
+  | 'MINISTRY_TASK_DUE_SOON'
+  | 'MINISTRY_TASK_PROGRESS_UPDATED'
+  | 'MINISTRY_TASK_COMPLETED'
+  | 'MINISTRY_TASK_CANCELLED'
+  | 'GAMIFICATION_POINTS_GRANTED'
+  | 'GAMIFICATION_LEVEL_UPDATED'
+  | 'GAMIFICATION_ACHIEVEMENT_UNLOCKED';
 
 export type DomainEvent<TPayload extends Record<string, unknown> = Record<string, unknown>> = {
   name: DomainEventName;
@@ -21,4 +40,3 @@ export type DomainEvent<TPayload extends Record<string, unknown> = Record<string
 export type DomainEventHandler<TPayload extends Record<string, unknown> = Record<string, unknown>> = (
   event: DomainEvent<TPayload>,
 ) => Promise<void> | void;
-

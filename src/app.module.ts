@@ -28,6 +28,8 @@ import { SpiritualDisciplinesModule } from './modules/spiritual-disciplines/spir
 import { SupportRequestsModule } from './modules/support-requests/support-requests.module';
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { MinistriesModule } from './modules/ministries/ministries.module';
+import { MinistryTasksModule } from './modules/ministry-tasks/ministry-tasks.module';
+import { GamificationModule } from './modules/gamification/gamification.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 
@@ -61,6 +63,8 @@ import { HealthController } from './health.controller';
     SupportRequestsModule,
     RewardsModule,
     MinistriesModule,
+    MinistryTasksModule,
+    GamificationModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -1,0 +1,3 @@
+ALTER TABLE "Achievement"
+  ADD COLUMN IF NOT EXISTS "icon" TEXT,
+  ADD COLUMN IF NOT EXISTS "category" TEXT;

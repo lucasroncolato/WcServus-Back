@@ -33,6 +33,9 @@ describe('ServantsService - training completion flow', () => {
     create: jest.fn().mockResolvedValue(undefined),
     notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
   } as unknown as NotificationsService;
+  const gamificationService = {
+    awardPoints: jest.fn().mockResolvedValue(undefined),
+  } as any;
 
   const actor: JwtPayload = {
     sub: 'admin-1',
@@ -53,7 +56,8 @@ describe('ServantsService - training completion flow', () => {
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
     (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset().mockResolvedValue(undefined);
-    service = new ServantsService(prisma, configService, auditService, notificationsService);
+    (gamificationService.awardPoints as jest.Mock).mockReset().mockResolvedValue(undefined);
+    service = new ServantsService(prisma, configService, auditService, notificationsService, gamificationService);
   });
 
   it('promotes RECRUTAMENTO to ATIVO when training is completed', async () => {
@@ -213,6 +217,9 @@ describe('ServantsService - profile update with training completion', () => {
     create: jest.fn().mockResolvedValue(undefined),
     notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
   } as unknown as NotificationsService;
+  const gamificationService = {
+    awardPoints: jest.fn().mockResolvedValue(undefined),
+  } as any;
 
   const actor: JwtPayload = {
     sub: 'admin-1',
@@ -233,7 +240,8 @@ describe('ServantsService - profile update with training completion', () => {
     prisma.servantStatusHistory.create.mockReset();
     prisma.$transaction.mockReset();
     (auditService.log as jest.Mock).mockReset().mockResolvedValue(undefined);
-    service = new ServantsService(prisma, configService, auditService, notificationsService);
+    (gamificationService.awardPoints as jest.Mock).mockReset().mockResolvedValue(undefined);
+    service = new ServantsService(prisma, configService, auditService, notificationsService, gamificationService);
   });
 
   it('auto-promotes to ATIVO when update receives trainingStatus=COMPLETED and no explicit status', async () => {

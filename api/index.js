@@ -1,20 +1,16 @@
 let cachedHandler = null;
-const path = require('path');
-const fs = require('fs');
-
-function resolveBootstrapPath() {
-  const candidates = ['../dist/app.bootstrap.js', '../dist/src/app.bootstrap.js'];
-
-  for (const candidate of candidates) {
-    const absolutePath = path.resolve(__dirname, candidate);
-    if (fs.existsSync(absolutePath)) {
-      return absolutePath;
+function loadBootstrapModule() {
+  try {
+    // Prefer current build output (dist/app.bootstrap.js)
+    return require('../dist/app.bootstrap.js');
+  } catch (error) {
+    if (!error || error.code !== 'MODULE_NOT_FOUND') {
+      throw error;
     }
-  }
 
-  throw new Error(
-    `Bootstrap file not found. Tried: ${candidates.map((candidate) => path.resolve(__dirname, candidate)).join(', ')}`,
-  );
+    // Fallback for previous output layout (dist/src/app.bootstrap.js)
+    return require('../dist/src/app.bootstrap.js');
+  }
 }
 
 async function getHandler() {
@@ -22,8 +18,7 @@ async function getHandler() {
     return cachedHandler;
   }
 
-  const bootstrapPath = resolveBootstrapPath();
-  const { createApp } = require(bootstrapPath);
+  const { createApp } = loadBootstrapModule();
   const app = await createApp();
   await app.init();
 

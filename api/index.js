@@ -1,12 +1,29 @@
 let cachedHandler = null;
+const path = require('path');
+const fs = require('fs');
+
+function resolveBootstrapPath() {
+  const candidates = ['../dist/app.bootstrap.js', '../dist/src/app.bootstrap.js'];
+
+  for (const candidate of candidates) {
+    const absolutePath = path.resolve(__dirname, candidate);
+    if (fs.existsSync(absolutePath)) {
+      return absolutePath;
+    }
+  }
+
+  throw new Error(
+    `Bootstrap file not found. Tried: ${candidates.map((candidate) => path.resolve(__dirname, candidate)).join(', ')}`,
+  );
+}
 
 async function getHandler() {
   if (cachedHandler) {
     return cachedHandler;
   }
 
-  // Load compiled app to avoid TS path-alias resolution issues in serverless runtime.
-  const { createApp } = require('../dist/src/app.bootstrap.js');
+  const bootstrapPath = resolveBootstrapPath();
+  const { createApp } = require(bootstrapPath);
   const app = await createApp();
   await app.init();
 

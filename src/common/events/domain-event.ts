@@ -24,10 +24,7 @@ export type DomainEventName =
   | 'MINISTRY_TASK_DUE_SOON'
   | 'MINISTRY_TASK_PROGRESS_UPDATED'
   | 'MINISTRY_TASK_COMPLETED'
-  | 'MINISTRY_TASK_CANCELLED'
-  | 'GAMIFICATION_POINTS_GRANTED'
-  | 'GAMIFICATION_LEVEL_UPDATED'
-  | 'GAMIFICATION_ACHIEVEMENT_UNLOCKED';
+  | 'MINISTRY_TASK_CANCELLED';
 
 export type DomainEvent<TPayload extends Record<string, unknown> = Record<string, unknown>> = {
   name: DomainEventName;

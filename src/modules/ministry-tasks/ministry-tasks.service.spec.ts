@@ -18,10 +18,9 @@ function createService() {
 
   const auditService = { log: jest.fn() } as any;
   const notificationsService = { notifyServantLinkedUser: jest.fn(), createMany: jest.fn() } as any;
-  const gamificationService = { awardPoints: jest.fn() } as any;
   const eventBus = { emit: jest.fn() } as any;
 
-  const service = new MinistryTasksService(prisma, auditService, notificationsService, gamificationService, eventBus);
+  const service = new MinistryTasksService(prisma, auditService, notificationsService, eventBus);
   return { service, prisma };
 }
 

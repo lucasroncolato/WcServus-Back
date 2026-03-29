@@ -4,7 +4,6 @@ import {
   AttendanceStatus,
   AuditAction,
   Prisma,
-  RewardSource,
   Role,
   ScheduleSlotStatus,
 } from '@prisma/client';
@@ -18,8 +17,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { RewardsService } from '../rewards/rewards.service';
-import { GamificationService } from '../gamification/gamification.service';
 import { BatchAttendanceDto } from './dto/batch-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { ListAttendancesQueryDto } from './dto/list-attendances-query.dto';
@@ -31,8 +28,6 @@ export class AttendancesService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
-    private readonly rewardsService: RewardsService,
-    private readonly gamificationService: GamificationService,
     private readonly eventBus: EventBusService,
   ) {}
 
@@ -125,7 +120,6 @@ export class AttendancesService {
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
-    await this.maybeGrantAttendanceReward(attendance.servantId, attendance.id, attendance.status, actor.sub);
 
     return attendance;
   }
@@ -186,7 +180,6 @@ export class AttendancesService {
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
-    await this.maybeGrantAttendanceReward(attendance.servantId, attendance.id, attendance.status, actor.sub);
 
     return attendance;
   }
@@ -381,40 +374,4 @@ export class AttendancesService {
     });
   }
 
-  private async maybeGrantAttendanceReward(
-    servantId: string,
-    attendanceId: string,
-    status: AttendanceStatus,
-    actorUserId: string,
-  ) {
-    if (status !== AttendanceStatus.PRESENTE) {
-      return;
-    }
-
-    await this.rewardsService.grantReward({
-      servantId,
-      source: RewardSource.ATTENDANCE_PRESENT,
-      points: 5,
-      title: 'Presenca em culto',
-      description: 'Recompensa por presenca registrada em culto.',
-      referenceId: attendanceId,
-      grantedByUserId: actorUserId,
-    });
-
-    await this.gamificationService.awardPoints({
-      servantId,
-      actionType: 'ATTENDANCE_CONFIRMED',
-      referenceId: `attendance:${attendanceId}:present`,
-      actorUserId,
-      metadata: { attendanceId },
-    });
-
-    await this.gamificationService.awardPoints({
-      servantId,
-      actionType: 'WORSHIP_SERVICE_PARTICIPATION',
-      referenceId: `attendance:${attendanceId}:service-participation`,
-      actorUserId,
-      metadata: { attendanceId },
-    });
-  }
 }

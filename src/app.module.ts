@@ -29,7 +29,7 @@ import { SupportRequestsModule } from './modules/support-requests/support-reques
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { MinistriesModule } from './modules/ministries/ministries.module';
 import { MinistryTasksModule } from './modules/ministry-tasks/ministry-tasks.module';
-import { GamificationModule } from './modules/gamification/gamification.module';
+import { JourneyModule } from './modules/journey/journey.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 
@@ -64,7 +64,7 @@ import { HealthController } from './health.controller';
     RewardsModule,
     MinistriesModule,
     MinistryTasksModule,
-    GamificationModule,
+    JourneyModule,
   ],
   controllers: [HealthController],
   providers: [

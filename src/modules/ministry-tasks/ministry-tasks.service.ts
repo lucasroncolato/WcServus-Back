@@ -8,7 +8,6 @@ import {
   MinistryTaskOccurrenceCriticality,
   MinistryTaskOccurrencePriority,
   MinistryTaskOccurrenceStatus,
-  GamificationActionType,
   MinistryTaskReallocationMode,
   MinistryTaskReallocationStatus,
   MinistryTaskRecurrenceType,
@@ -23,7 +22,6 @@ import { EventBusService } from 'src/common/events/event-bus.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
-import { GamificationService } from '../gamification/gamification.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AssignMinistryTaskOccurrenceDto } from './dto/assign-ministry-task-occurrence.dto';
 import { CancelMinistryTaskOccurrenceDto } from './dto/cancel-ministry-task-occurrence.dto';
@@ -46,7 +44,6 @@ export class MinistryTasksService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
-    private readonly gamificationService: GamificationService,
     private readonly eventBus: EventBusService,
   ) {}
 
@@ -576,37 +573,6 @@ export class MinistryTasksService {
     await this.auditService.log({ action: AuditAction.MINISTRY_TASK_COMPLETED, entity: 'MinistryTaskOccurrence', entityId: id, userId: actor.sub });
     await this.eventBus.emit({ name: 'MINISTRY_TASK_COMPLETED', occurredAt: new Date(), actorUserId: actor.sub, churchId: data.churchId, payload: { occurrenceId: id } });
     await this.notifyCompleted(data.id, data.churchId, data.ministryId);
-    const rewardedServantId = data.assignedServantId ?? (await this.resolveActorServantId(actor));
-    if (rewardedServantId) {
-      await this.gamificationService.awardPoints({
-        servantId: rewardedServantId,
-        churchId: data.churchId,
-        ministryId: data.ministryId,
-        actionType: GamificationActionType.TASK_COMPLETED,
-        referenceId: `task:${data.id}:completed`,
-        actorUserId: actor.sub,
-      });
-      if (progress.totalItems > 0 && progress.doneItems >= progress.totalItems) {
-        await this.gamificationService.awardPoints({
-          servantId: rewardedServantId,
-          churchId: data.churchId,
-          ministryId: data.ministryId,
-          actionType: GamificationActionType.CHECKLIST_PERFECT,
-          referenceId: `task:${data.id}:checklist-perfect`,
-          actorUserId: actor.sub,
-        });
-      }
-      if (data.dueAt && data.completedAt && data.completedAt.getTime() <= data.dueAt.getTime()) {
-        await this.gamificationService.awardPoints({
-          servantId: rewardedServantId,
-          churchId: data.churchId,
-          ministryId: data.ministryId,
-          actionType: GamificationActionType.TASK_BEFORE_DUE,
-          referenceId: `task:${data.id}:before-due`,
-          actorUserId: actor.sub,
-        });
-      }
-    }
     return { data: this.withProgress(data) };
   }
 

@@ -377,6 +377,18 @@ enum MinistryTaskOccurrenceCriticality {
   CRITICAL
 }
 
+enum JourneyLogType {
+  SERVICE
+  TASK
+  CHECKLIST
+  TRAINING
+  TRACK
+  EVENT
+  SUBSTITUTE
+  HELP
+  MILESTONE
+}
+
 model Church {
   id             String        @id @default(cuid())
   name           String
@@ -400,6 +412,10 @@ model Church {
   scheduleVersions ScheduleVersion[]
   ministryTaskTemplates MinistryTaskTemplate[]
   ministryTaskOccurrences MinistryTaskOccurrence[]
+  servantJourneys ServantJourney[]
+  journeyMilestones JourneyMilestone[]
+  servantMilestones ServantMilestone[]
+  journeyLogs JourneyLog[]
   pointRules       PointRule[]
   servantPointLogs ServantPointLog[]
   servantGamificationProfiles ServantGamificationProfile[]
@@ -632,6 +648,9 @@ model Servant {
   ministryTaskAssignmentHistoryFrom MinistryTaskOccurrenceAssignmentHistory[] @relation("MinistryTaskAssignmentHistoryFromServant")
   ministryTaskAssignmentHistoryTo MinistryTaskOccurrenceAssignmentHistory[] @relation("MinistryTaskAssignmentHistoryToServant")
   ministryTaskAssignees MinistryTaskOccurrenceAssignee[]
+  journey                ServantJourney?
+  journeyMilestones      ServantMilestone[]
+  journeyLogs            JourneyLog[]
   pointLogs                 ServantPointLog[]
   gamificationProfile       ServantGamificationProfile?
   achievementProgress       ServantAchievement[]
@@ -1262,6 +1281,78 @@ model MinistryTaskOccurrenceChecklistItem {
   @@index([templateChecklistItemId])
 }
 
+model ServantJourney {
+  id                     String   @id @default(cuid())
+  servantId              String   @unique
+  churchId               String?
+  startedAt              DateTime
+  totalServices          Int      @default(0)
+  totalTasksCompleted    Int      @default(0)
+  totalTrainingsCompleted Int     @default(0)
+  totalEventsServed      Int      @default(0)
+  monthsServing          Int      @default(0)
+  lastActivityAt         DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  servant                Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  church                 Church?  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+
+  @@index([churchId])
+  @@index([startedAt])
+}
+
+model JourneyMilestone {
+  id          String            @id @default(cuid())
+  churchId    String?
+  code        String            @unique
+  name        String
+  description String?
+  icon        String?
+  category    String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  church      Church?           @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servants    ServantMilestone[]
+
+  @@index([churchId, category])
+}
+
+model ServantMilestone {
+  id          String           @id @default(cuid())
+  churchId    String?
+  servantId   String
+  milestoneId String
+  achievedAt  DateTime         @default(now())
+  createdAt   DateTime         @default(now())
+  church      Church?          @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant     Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
+  milestone   JourneyMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, milestoneId])
+  @@index([churchId, achievedAt])
+  @@index([servantId, achievedAt])
+}
+
+model JourneyLog {
+  id          String         @id @default(cuid())
+  churchId    String?
+  servantId   String
+  type        JourneyLogType
+  title       String
+  description String?
+  referenceId String?
+  occurredAt  DateTime       @default(now())
+  createdAt   DateTime       @default(now())
+  church      Church?        @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant     Servant        @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@index([churchId, occurredAt])
+  @@index([servantId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([referenceId])
+}
+
+/// @deprecated Replaced by Journey Milestones + Journey Logs (no points/ranking).
 model ServantReward {
   id              String       @id @default(cuid())
   servantId       String
@@ -1282,6 +1373,7 @@ model ServantReward {
   @@index([grantedByUserId])
 }
 
+/// @deprecated Legacy gamification artifact.
 model ServantLevelDefinition {
   id         String   @id @default(cuid())
   churchId   String?
@@ -1298,6 +1390,7 @@ model ServantLevelDefinition {
   @@index([levelOrder])
 }
 
+/// @deprecated Legacy gamification artifact.
 model PointRule {
   id         String                 @id @default(cuid())
   churchId   String?
@@ -1312,6 +1405,7 @@ model PointRule {
   @@index([actionType, active])
 }
 
+/// @deprecated Legacy gamification artifact.
 model ServantPointLog {
   id          String                 @id @default(cuid())
   churchId    String?
@@ -1333,6 +1427,7 @@ model ServantPointLog {
   @@index([referenceId])
 }
 
+/// @deprecated Legacy gamification artifact.
 model ServantGamificationProfile {
   servantId            String   @id
   churchId             String?
@@ -1351,6 +1446,7 @@ model ServantGamificationProfile {
   @@index([currentLevelOrder, totalPoints])
 }
 
+/// @deprecated Replaced by JourneyMilestone.
 model Achievement {
   id            String               @id @default(cuid())
   churchId      String?
@@ -1375,6 +1471,7 @@ model Achievement {
   @@index([type, active])
 }
 
+/// @deprecated Replaced by ServantMilestone.
 model ServantAchievement {
   id             String      @id @default(cuid())
   churchId       String?
@@ -1456,6 +1553,7 @@ model ServantGrowthProgress {
   @@index([growthTrackId, completed])
 }
 
+/// @deprecated Legacy gamification artifact.
 model ServantRankingSnapshot {
   id               String    @id @default(cuid())
   churchId         String?

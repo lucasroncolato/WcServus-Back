@@ -9,7 +9,6 @@ import { ConfigService } from '@nestjs/config';
 import {
   AuditAction,
   Aptitude,
-  GamificationActionType,
   Gender,
   Prisma,
   Role,
@@ -29,7 +28,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
-import { GamificationService } from '../gamification/gamification.service';
 import { CompleteTrainingDto } from './dto/complete-training.dto';
 import { CreateServantAccessDto } from './dto/create-servant-access.dto';
 import { CreateServantWithUserDto } from './dto/create-servant-with-user.dto';
@@ -67,7 +65,6 @@ export class ServantsService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
-    private readonly gamificationService: GamificationService,
     private readonly eventBus: EventBusService = {
       emit: async () => undefined,
     } as unknown as EventBusService,
@@ -909,16 +906,6 @@ export class ServantsService {
       message: 'Seu status de treinamento foi atualizado para concluido.',
       link: `/servants/${id}`,
       metadata: { servantId: id },
-    });
-
-    await this.gamificationService.awardPoints({
-      servantId: id,
-      churchId: (updated as unknown as { churchId?: string | null }).churchId ?? null,
-      ministryId: targetMinistryId,
-      actionType: GamificationActionType.TRAINING_COMPLETED,
-      referenceId: `training:${id}:${targetMinistryId}`,
-      actorUserId: actor.sub,
-      metadata: { ministryId: targetMinistryId },
     });
 
     return this.toApiServant(updated);

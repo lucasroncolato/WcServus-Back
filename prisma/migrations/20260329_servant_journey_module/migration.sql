@@ -1,4 +1,4 @@
-﻿CREATE TYPE "JourneyLogType" AS ENUM (
+CREATE TYPE "JourneyLogType" AS ENUM (
   'SERVICE',
   'TASK',
   'CHECKLIST',

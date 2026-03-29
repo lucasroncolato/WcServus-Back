@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LogService } from './common/log/log.service';
@@ -12,16 +13,13 @@ function normalizeOrigin(origin: string): string {
 }
 
 function buildCorsOptions(frontendUrl: string | undefined): CorsOptions {
-  const rawOrigins = (frontendUrl ?? '*')
+  const rawOrigins = (frontendUrl ?? '')
     .split(',')
     .map((origin) => normalizeOrigin(origin))
     .filter(Boolean);
 
   if (rawOrigins.length === 0 || rawOrigins.includes('*')) {
-    return {
-      origin: true,
-      credentials: true,
-    };
+    return { origin: false };
   }
 
   const allowedOrigins = new Set(rawOrigins);
@@ -44,6 +42,15 @@ export async function createApp() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   app.useLogger(app.get(LogService));
+
+  app.use(
+    helmet({
+      crossOriginEmbedderPolicy: false,
+      contentSecurityPolicy: false,
+      frameguard: { action: 'deny' },
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+  );
 
   app.enableCors(buildCorsOptions(configService.get<string>('FRONTEND_URL')));
 

@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getUserAccessWhere } from 'src/common/auth/access-scope';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -113,6 +114,10 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly tenantIntegrity: TenantIntegrityService = {
+      assertSameChurch: () => undefined,
+      assertActorChurch: () => '',
+    } as unknown as TenantIntegrityService,
   ) {}
 
   async findAll(query: ListUsersQueryDto, actor: JwtPayload) {
@@ -220,6 +225,7 @@ export class UsersService {
 
   async create(dto: CreateUserDto, actor: JwtPayload) {
     this.assertCanCreateUser(actor.role, dto.role);
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
 
     const existing = await this.prisma.user.findUnique({
       where: { email: this.normalizeEmail(dto.email) },
@@ -231,7 +237,7 @@ export class UsersService {
     }
 
     if (dto.servantId) {
-      await this.assertServantAvailableForUser(dto.servantId);
+      await this.assertServantAvailableForUser(dto.servantId, undefined, actorChurchId);
     }
 
     if (dto.role === Role.SERVO && !dto.servantId) {
@@ -254,6 +260,7 @@ export class UsersService {
       targetRole: dto.role,
       ministryIds,
       teamIds: finalTeamIds,
+      actorChurchId,
     });
 
     const user = await this.updateUserWithConflictHandling(() =>
@@ -268,7 +275,7 @@ export class UsersService {
             status: dto.status ?? UserStatus.ACTIVE,
             phone: dto.phone,
             servantId: dto.servantId,
-            churchId: actor.churchId ?? null,
+            churchId: actorChurchId,
           },
           select: USER_SELECT,
         });
@@ -588,6 +595,7 @@ export class UsersService {
       targetRole: target.role,
       ministryIds,
       teamIds: finalTeamIds,
+      actorChurchId: this.tenantIntegrity.assertActorChurch(actor),
     });
 
     const user = await this.prisma.$transaction(async (tx) => {
@@ -638,7 +646,18 @@ export class UsersService {
     }
 
     if (dto.servantId) {
-      await this.assertServantAvailableForUser(dto.servantId, id);
+      await this.assertServantAvailableForUser(
+        dto.servantId,
+        id,
+        actorUserId
+          ? (
+              await this.prisma.user.findUnique({
+                where: { id: actorUserId },
+                select: { churchId: true },
+              })
+            )?.churchId ?? null
+          : null,
+      );
     }
 
     const user = await this.updateUserWithConflictHandling(() =>
@@ -733,14 +752,21 @@ export class UsersService {
     }
   }
 
-  private async assertServantAvailableForUser(servantId: string, userIdToIgnore?: string) {
+  private async assertServantAvailableForUser(
+    servantId: string,
+    userIdToIgnore?: string,
+    actorChurchId?: string | null,
+  ) {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
 
     if (!servant) {
       throw new NotFoundException('Servant not found');
+    }
+    if (actorChurchId) {
+      this.tenantIntegrity.assertSameChurch(actorChurchId, servant.churchId, 'Servant');
     }
 
     const linkedUser = await this.prisma.user.findFirst({
@@ -761,8 +787,9 @@ export class UsersService {
     targetRole: Role;
     ministryIds: string[];
     teamIds: string[];
+    actorChurchId?: string | null;
   }) {
-    const { scopeType, ministryIds, teamIds } = input;
+    const { scopeType, ministryIds, teamIds, actorChurchId } = input;
 
     if (scopeType === MINISTRY_SCOPE && ministryIds.length === 0) {
       throw new BadRequestException('scopeType=MINISTRY requires at least one ministryId');
@@ -783,22 +810,32 @@ export class UsersService {
     if (ministryIds.length > 0) {
       const ministries = await this.prisma.ministry.findMany({
         where: { id: { in: ministryIds } },
-        select: { id: true },
+        select: { id: true, churchId: true },
       });
 
       if (ministries.length !== ministryIds.length) {
         throw new NotFoundException('One or more informed ministries were not found');
+      }
+      if (actorChurchId) {
+        ministries.forEach((ministry) =>
+          this.tenantIntegrity.assertSameChurch(actorChurchId, ministry.churchId, 'Ministry'),
+        );
       }
     }
 
     if (teamIds.length > 0) {
       const teams = await this.prisma.team.findMany({
         where: { id: { in: teamIds } },
-        select: { id: true, ministryId: true },
+        select: { id: true, ministryId: true, churchId: true },
       });
 
       if (teams.length !== teamIds.length) {
         throw new NotFoundException('One or more informed teams were not found');
+      }
+      if (actorChurchId) {
+        teams.forEach((team) =>
+          this.tenantIntegrity.assertSameChurch(actorChurchId, team.churchId, 'Team'),
+        );
       }
 
       if (ministryIds.length > 0) {
@@ -986,6 +1023,7 @@ export class UsersService {
         email: true,
         role: true,
         servantId: true,
+        churchId: true,
       },
     });
 
@@ -995,7 +1033,7 @@ export class UsersService {
 
     const target = await this.prisma.user.findUnique({
       where: { id: targetUserId },
-      select: { id: true, role: true },
+      select: { id: true, role: true, churchId: true },
     });
 
     if (!target) {
@@ -1004,6 +1042,9 @@ export class UsersService {
 
     if (actor.role !== Role.SUPER_ADMIN && target.role === Role.SUPER_ADMIN) {
       throw new ForbiddenException('Only SUPER_ADMIN can manage SUPER_ADMIN users');
+    }
+    if (actor.churchId) {
+      this.tenantIntegrity.assertSameChurch(actor.churchId, target.churchId, 'User');
     }
 
     await this.assertCanAccessTargetUser(

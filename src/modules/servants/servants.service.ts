@@ -23,6 +23,7 @@ import {
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { getServantAccessWhere, resolveScopedSectorIds } from 'src/common/auth/access-scope';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { EventBusService } from 'src/common/events/event-bus.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -68,6 +69,11 @@ export class ServantsService {
     private readonly eventBus: EventBusService = {
       emit: async () => undefined,
     } as unknown as EventBusService,
+    private readonly tenantIntegrity: TenantIntegrityService = {
+      assertSameChurch: () => undefined,
+      assertActorChurch: () => '',
+      assertLinkIntegrity: () => undefined,
+    } as unknown as TenantIntegrityService,
   ) {}
 
   private readonly servantInclude = {
@@ -211,7 +217,6 @@ export class ServantsService {
           'joinedAt',
           'user.name',
           'user.phone',
-          'user.password (legacy ignored)',
         ],
       },
       sections: [
@@ -290,12 +295,13 @@ export class ServantsService {
     const ministryIds = isCoordinatorRequest
       ? await this.resolveCoordinatorCreationSectorIds(actor, dto.ministryIds, dto.mainMinistryId)
       : await this.resolveAndValidateSectorIds(
+          actor,
           dto.ministryIds ?? dto.ministryIds,
           dto.mainMinistryId ?? dto.mainMinistryId,
           true,
         );
     await this.assertCanManageSectorSet(actor, ministryIds);
-    const teamId = await this.resolveAndValidateTeamId(dto.teamId, ministryIds);
+    const teamId = await this.resolveAndValidateTeamId(actor, dto.teamId, ministryIds);
 
     const email = dto.user.email.toLowerCase();
     const existingByEmail = await this.prisma.user.findUnique({
@@ -310,12 +316,6 @@ export class ServantsService {
     if (dto.user.role && dto.user.role !== Role.SERVO) {
       throw new BadRequestException('Every new servant user account must use role SERVO');
     }
-    if (dto.user.password) {
-      throw new BadRequestException(
-        'Manual password is not allowed. New servant password is defined automatically by backend.',
-      );
-    }
-
     const targetRole = Role.SERVO;
 
     const initialPassword = this.configService.get<string>(
@@ -325,9 +325,10 @@ export class ServantsService {
     const passwordHash = await bcrypt.hash(initialPassword, 10);
 
     const servant = await this.prisma.$transaction(async (tx) => {
+      const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
       const createdServant = await tx.servant.create({
         data: {
-          churchId: actor.churchId ?? null,
+          churchId: actorChurchId,
           name: dto.name,
           phone: dto.phone,
           gender: dto.gender,
@@ -375,6 +376,7 @@ export class ServantsService {
           status: isCoordinatorRequest ? UserStatus.INACTIVE : dto.user.status ?? UserStatus.ACTIVE,
           phone: dto.user.phone ?? createdServant.phone ?? null,
           servantId: createdServant.id,
+          churchId: actorChurchId,
           mustChangePassword: true,
         },
       });
@@ -423,12 +425,17 @@ export class ServantsService {
     } else if (dto.userId) {
       const user = await this.prisma.user.findUnique({
         where: { id: dto.userId },
-        select: { id: true, servantId: true },
+        select: { id: true, servantId: true, churchId: true },
       });
 
       if (!user) {
         throw new NotFoundException('User not found');
       }
+      this.tenantIntegrity.assertSameChurch(
+        this.tenantIntegrity.assertActorChurch(actor),
+        user.churchId,
+        'User',
+      );
 
       if (user.servantId && user.servantId !== servantId) {
         throw new ConflictException('User is already linked to another servant');
@@ -481,6 +488,7 @@ export class ServantsService {
       where: { id: servantId },
       select: {
         id: true,
+        churchId: true,
         name: true,
         phone: true,
         team: { select: { id: true, name: true } },
@@ -493,6 +501,11 @@ export class ServantsService {
     if (!servant) {
       throw new NotFoundException('Servant not found');
     }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      servant.churchId,
+      'Servant',
+    );
 
     if (servant.userAccount) {
       throw new ConflictException('Servant already has a linked user account');
@@ -527,6 +540,7 @@ export class ServantsService {
         status: dto.status ?? UserStatus.ACTIVE,
         phone: servant.phone ?? null,
         servantId,
+        churchId: this.tenantIntegrity.assertActorChurch(actor),
         mustChangePassword: true,
       },
       select: {
@@ -605,6 +619,7 @@ export class ServantsService {
       dto.ministryIds !== undefined ||
       dto.mainMinistryId !== undefined
         ? await this.resolveAndValidateSectorIds(
+            actor,
             dto.ministryIds ?? dto.ministryIds,
             dto.mainMinistryId ?? dto.mainMinistryId,
             true,
@@ -623,7 +638,7 @@ export class ServantsService {
       ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
     const resolvedTeamId =
       dto.teamId !== undefined || resolvedSectorIds !== undefined
-        ? await this.resolveAndValidateTeamId(dto.teamId, fallbackSectorIds)
+        ? await this.resolveAndValidateTeamId(actor, dto.teamId, fallbackSectorIds)
         : undefined;
 
     const explicitStatus = dto.status ? this.mapDtoStatus(dto.status) : undefined;
@@ -1106,6 +1121,7 @@ export class ServantsService {
   }
 
   private async resolveAndValidateSectorIds(
+    actor: JwtPayload,
     ministryIds: string[] | undefined,
     mainMinistryId: string | undefined,
     requireAtLeastOne: boolean,
@@ -1125,7 +1141,7 @@ export class ServantsService {
 
     const ministries = await this.prisma.ministry.findMany({
       where: { id: { in: merged } },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
 
     if (ministries.length !== merged.length) {
@@ -1134,6 +1150,10 @@ export class ServantsService {
         message: 'One or more informed ministries were not found',
       });
     }
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
+    ministries.forEach((ministry) =>
+      this.tenantIntegrity.assertSameChurch(actorChurchId, ministry.churchId, 'Ministry'),
+    );
 
     return merged;
   }
@@ -1162,6 +1182,7 @@ export class ServantsService {
   }
 
   private async resolveAndValidateTeamId(
+    actor: JwtPayload,
     teamId: string | undefined,
     ministryIds: string[],
   ) {
@@ -1172,7 +1193,7 @@ export class ServantsService {
     if (teamId) {
       const team = await this.prisma.team.findUnique({
         where: { id: teamId },
-        select: { id: true, ministryId: true },
+        select: { id: true, ministryId: true, churchId: true },
       });
 
       if (!team) {
@@ -1181,6 +1202,11 @@ export class ServantsService {
           message: 'Team not found',
         });
       }
+      this.tenantIntegrity.assertSameChurch(
+        this.tenantIntegrity.assertActorChurch(actor),
+        team.churchId,
+        'Team',
+      );
 
       if (!ministryIds.includes(team.ministryId)) {
         throw new BadRequestException({

@@ -39,7 +39,6 @@ type NotificationOriginType =
   | 'SERVANT'
   | 'WORSHIP_SERVICE'
   | 'SUPPORT_REQUEST'
-  | 'SERVANT_REWARD'
   | 'SELF_ROUTE'
   | 'UNKNOWN';
 
@@ -157,10 +156,13 @@ export class NotificationsService {
       where: { id: input.userId },
       select: { churchId: true },
     });
+    if (!user?.churchId) {
+      throw new Error('Target user has no church context');
+    }
     const created = await this.prisma.notification.create({
       data: {
         userId: input.userId,
-        churchId: user?.churchId ?? null,
+        churchId: user.churchId,
         type: input.type,
         title: input.title,
         message: input.message,
@@ -192,11 +194,15 @@ export class NotificationsService {
       select: { id: true, churchId: true },
     });
     const churchByUser = new Map(users.map((u) => [u.id, u.churchId]));
+    const hasMissingChurch = uniqueInputs.some((input) => !churchByUser.get(input.userId));
+    if (hasMissingChurch) {
+      throw new Error('One or more target users have no church context');
+    }
 
     await this.prisma.notification.createMany({
       data: uniqueInputs.map((input) => ({
         userId: input.userId,
-        churchId: churchByUser.get(input.userId) ?? null,
+        churchId: churchByUser.get(input.userId)!,
         type: input.type,
         title: input.title,
         message: input.message,
@@ -294,7 +300,6 @@ export class NotificationsService {
       { key: 'servantId', type: 'SERVANT' },
       { key: 'serviceId', type: 'WORSHIP_SERVICE' },
       { key: 'supportRequestId', type: 'SUPPORT_REQUEST' },
-      { key: 'rewardId', type: 'SERVANT_REWARD' },
     ];
 
     for (const candidate of map) {
@@ -363,22 +368,6 @@ export class NotificationsService {
     if (origin.type === 'TALENT') {
       const scopeWhere = await getServantAccessWhere(this.prisma, actor);
       const found = await this.prisma.talent.findFirst({
-        where: scopeWhere
-          ? {
-              AND: [
-                { id: origin.id },
-                { servant: scopeWhere },
-              ],
-            }
-          : { id: origin.id },
-        select: { id: true },
-      });
-      return Boolean(found);
-    }
-
-    if (origin.type === 'SERVANT_REWARD') {
-      const scopeWhere = await getServantAccessWhere(this.prisma, actor);
-      const found = await this.prisma.servantReward.findFirst({
         where: scopeWhere
           ? {
               AND: [

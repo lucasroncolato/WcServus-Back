@@ -267,45 +267,6 @@ enum SupportRequestStatus {
   RESOLVIDO
 }
 
-enum RewardSource {
-  DEVOTIONAL_DAILY
-  FASTING_MONTHLY
-  ATTENDANCE_PRESENT
-  SCHEDULE_CONFIRMED
-  TASK_COMPLETED
-  MANUAL
-}
-
-enum GamificationActionType {
-  ATTENDANCE_CONFIRMED
-  TASK_COMPLETED
-  CHECKLIST_PERFECT
-  TASK_BEFORE_DUE
-  WORSHIP_SERVICE_PARTICIPATION
-  TRAINING_COMPLETED
-  HELPED_OTHER_TEAM
-  EXTRA_TASK_ASSUMED
-  MONTH_WITHOUT_ABSENCE
-  TEAM_LEADERSHIP
-  SPECIAL_EVENT
-  MANUAL
-}
-
-enum AchievementType {
-  TASKS_COMPLETED
-  ATTENDANCE_STREAK
-  MINISTRY_TIME
-  TRAINING_COMPLETED
-  LEADERSHIP
-  CROSS_TEAM_HELP
-  CRITICAL_TASK_COMPLETED
-  NO_DELAY_STREAK
-  CHECKLIST_PERFECT
-  SPECIAL_EVENT
-  MULTI_MINISTRY
-  MANUAL
-}
-
 enum MinistryTaskRecurrenceType {
   EVERY_SERVICE
   WEEKLY
@@ -416,15 +377,8 @@ model Church {
   journeyMilestones JourneyMilestone[]
   servantMilestones ServantMilestone[]
   journeyLogs JourneyLog[]
-  pointRules       PointRule[]
-  servantPointLogs ServantPointLog[]
-  servantGamificationProfiles ServantGamificationProfile[]
-  levelDefinitions ServantLevelDefinition[]
-  achievements     Achievement[]
-  servantAchievements ServantAchievement[]
   growthTracks     GrowthTrack[]
   servantGrowthProgress ServantGrowthProgress[]
-  servantRankingSnapshots ServantRankingSnapshot[]
   servantMonthlyStats ServantMonthlyStats[]
 
   @@index([active])
@@ -444,12 +398,12 @@ model User {
   phone                            String?
   avatarUrl                        String?
   lastLoginAt                      DateTime?
-  churchId                         String?
+  churchId                         String
   deletedAt                        DateTime?
   deletedBy                        String?
   createdAt                        DateTime                  @default(now())
   updatedAt                        DateTime                  @updatedAt
-  church                           Church?                   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church                           Church                   @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant                          Servant?                  @relation(fields: [servantId], references: [id], onDelete: SetNull)
   refreshTokens                    RefreshToken[]
   passwordResetTokens              PasswordResetToken[]
@@ -475,7 +429,6 @@ model User {
   reviewedTalents                  Talent[]                  @relation("TalentReviewedBy")
   supportRequests                  SupportRequest[]          @relation("SupportRequestAuthor")
   handledSupportRequests           SupportRequest[]          @relation("SupportRequestHandler")
-  grantedRewards                   ServantReward[]           @relation("ServantRewardGrantedBy")
   auditLogs                        AuditLog[]
   scopeBindings                    UserMinistryBinding[]
   permissionOverrides              UserPermissionOverride[]
@@ -490,8 +443,6 @@ model User {
   reassignedMinistryTaskOccurrences MinistryTaskOccurrence[]      @relation("MinistryTaskOccurrenceLastReassignedBy")
   ministryTaskAssignmentHistory     MinistryTaskOccurrenceAssignmentHistory[] @relation("MinistryTaskOccurrenceAssignmentChangedBy")
   ministryTaskOccurrenceAssignees   MinistryTaskOccurrenceAssignee[] @relation("MinistryTaskOccurrenceAssigneeLinkedUser")
-  createdAchievements               Achievement[]                 @relation("AchievementCreatedBy")
-  unlockedServantAchievements       ServantAchievement[]          @relation("ServantAchievementUnlockedBy")
   createdGrowthTracks               GrowthTrack[]                 @relation("GrowthTrackCreatedBy")
   createdGrowthTrackSteps           GrowthTrackStep[]             @relation("GrowthTrackStepCreatedBy")
   verifiedGrowthProgress            ServantGrowthProgress[]       @relation("GrowthProgressVerifiedBy")
@@ -533,7 +484,7 @@ model PasswordResetToken {
 
 model Ministry {
   id                      String                   @id @default(cuid())
-  churchId                String?
+  churchId                String
   name                    String                   @unique
   description             String?
   color                   String?
@@ -544,7 +495,7 @@ model Ministry {
   updatedAt               DateTime                 @updatedAt
   deletedAt               DateTime?
   deletedBy               String?
-  church                  Church?                  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church                  Church                  @relation(fields: [churchId], references: [id], onDelete: Restrict)
   coordinator             User?                    @relation(fields: [coordinatorUserId], references: [id])
   servants                Servant[]
   servantMinistries       ServantMinistry[]
@@ -558,8 +509,6 @@ model Ministry {
   ministryTaskTemplates   MinistryTaskTemplate[]
   ministryTaskOccurrences MinistryTaskOccurrence[]
   growthTracks            GrowthTrack[]
-  servantPointLogs        ServantPointLog[]
-  servantRankingSnapshots ServantRankingSnapshot[]
   servantMonthlyStats     ServantMonthlyStats[]
 
   @@index([coordinatorUserId])
@@ -573,14 +522,14 @@ model Team {
   slug              String?
   description       String?
   ministryId        String
-  churchId          String?
+  churchId          String
   leaderUserId      String?
   status            TeamStatus            @default(ACTIVE)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
   deletedAt         DateTime?
   deletedBy         String?
-  church            Church?               @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church            Church               @relation(fields: [churchId], references: [id], onDelete: Restrict)
   ministry          Ministry              @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   leader            User?                 @relation("TeamLeader", fields: [leaderUserId], references: [id], onDelete: SetNull)
   servants          Servant[]
@@ -610,7 +559,7 @@ model Servant {
   aptitude                  Aptitude?
   mainMinistryId            String?
   teamId                    String?
-  churchId                  String?
+  churchId                  String
   notes                     String?
   joinedAt                  DateTime?
   consecutiveAbsences       Int                      @default(0)
@@ -619,7 +568,7 @@ model Servant {
   updatedAt                 DateTime                 @updatedAt
   deletedAt                 DateTime?
   deletedBy                 String?
-  church                    Church?                  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church                    Church                  @relation(fields: [churchId], references: [id], onDelete: Restrict)
   mainMinistry              Ministry?                @relation(fields: [mainMinistryId], references: [id])
   team                      Team?                    @relation(fields: [teamId], references: [id], onDelete: SetNull)
   servantMinistries         ServantMinistry[]
@@ -633,7 +582,6 @@ model Servant {
   devotionals               DailyDevotional[]
   monthlyFastings           MonthlyFasting[]
   responsibilities          MinistryResponsibility[] @relation("ResponsibilityOwnerServant")
-  rewards                   ServantReward[]
   talents                   Talent[]
   statusHistory             ServantStatusHistory[]
   userAccount               User?
@@ -651,11 +599,7 @@ model Servant {
   journey                ServantJourney?
   journeyMilestones      ServantMilestone[]
   journeyLogs            JourneyLog[]
-  pointLogs                 ServantPointLog[]
-  gamificationProfile       ServantGamificationProfile?
-  achievementProgress       ServantAchievement[]
   growthProgress            ServantGrowthProgress[]
-  rankingSnapshots          ServantRankingSnapshot[]
   monthlyStats              ServantMonthlyStats[]
 
   @@index([name])
@@ -703,7 +647,7 @@ model ServantStatusHistory {
 
 model WorshipService {
   id            String               @id @default(cuid())
-  churchId      String?
+  churchId      String
   type          WorshipServiceType
   title         String
   serviceDate   DateTime
@@ -714,7 +658,7 @@ model WorshipService {
   updatedAt     DateTime             @updatedAt
   deletedAt     DateTime?
   deletedBy     String?
-  church        Church?              @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church        Church              @relation(fields: [churchId], references: [id], onDelete: Restrict)
   schedules     Schedule[]
   scheduleSlots ScheduleSlot[]
   scheduleVersions ScheduleVersion[]
@@ -731,13 +675,13 @@ model WorshipService {
 model ScheduleVersion {
   id              String                @id @default(cuid())
   worshipServiceId String
-  churchId        String?
+  churchId        String
   versionNumber   Int
   status          ScheduleVersionStatus @default(DRAFT)
   createdBy       String
   createdAt       DateTime              @default(now())
   worshipService  WorshipService        @relation(fields: [worshipServiceId], references: [id], onDelete: Cascade)
-  church          Church?               @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church          Church               @relation(fields: [churchId], references: [id], onDelete: Restrict)
   createdByUser   User                  @relation(fields: [createdBy], references: [id], onDelete: Cascade)
   slots           ScheduleVersionSlot[]
 
@@ -771,7 +715,7 @@ model Schedule {
   serviceId               String
   servantId               String
   ministryId              String
-  churchId                String?
+  churchId                String
   assignedByUserId        String
   status                  ScheduleStatus            @default(ASSIGNED)
   responseStatus          ScheduleResponseStatus    @default(PENDING)
@@ -781,7 +725,7 @@ model Schedule {
   updatedAt               DateTime                  @updatedAt
   deletedAt               DateTime?
   deletedBy               String?
-  church                  Church?                   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church                  Church                   @relation(fields: [churchId], references: [id], onDelete: Restrict)
   service                 WorshipService            @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   servant                 Servant                   @relation(fields: [servantId], references: [id], onDelete: Cascade)
   ministry                Ministry                  @relation(fields: [ministryId], references: [id], onDelete: Cascade)
@@ -806,7 +750,7 @@ model ScheduleSlot {
   id                String                  @id @default(cuid())
   serviceId         String
   ministryId        String
-  churchId          String?
+  churchId          String
   scheduleId        String?
   responsibilityId  String?
   functionName      String
@@ -824,7 +768,7 @@ model ScheduleSlot {
   updatedAt         DateTime                @updatedAt
   deletedAt         DateTime?
   deletedBy         String?
-  church            Church?                 @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church            Church                 @relation(fields: [churchId], references: [id], onDelete: Restrict)
   service           WorshipService          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   ministry          Ministry                @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   schedule          Schedule?               @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
@@ -909,7 +853,7 @@ model Attendance {
   id                 String           @id @default(cuid())
   serviceId          String
   servantId          String
-  churchId           String?
+  churchId           String
   status             AttendanceStatus
   justification      String?
   notes              String?
@@ -918,7 +862,7 @@ model Attendance {
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
   deletedBy          String?
-  church             Church?          @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church             Church          @relation(fields: [churchId], references: [id], onDelete: Restrict)
   service            WorshipService   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   servant            Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
   registeredBy       User             @relation("RegisteredAttendances", fields: [registeredByUserId], references: [id])
@@ -934,7 +878,7 @@ model Attendance {
 model PastoralVisit {
   id               String              @id @default(cuid())
   servantId        String
-  churchId         String?
+  churchId         String
   reason           String
   status           PastoralVisitStatus @default(ABERTA)
   openedAt         DateTime            @default(now())
@@ -946,7 +890,7 @@ model PastoralVisit {
   updatedAt        DateTime            @updatedAt
   deletedAt        DateTime?
   deletedBy        String?
-  church           Church?             @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church           Church             @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant          Servant             @relation(fields: [servantId], references: [id], onDelete: Cascade)
   createdBy        User                @relation("CreatedPastoralVisits", fields: [createdByUserId], references: [id])
   resolvedBy       User?               @relation("ResolvedPastoralVisits", fields: [resolvedByUserId], references: [id])
@@ -962,7 +906,7 @@ model PastoralWeeklyFollowUp {
   id                String    @id @default(cuid())
   servantId         String
   ministryId        String
-  churchId          String?
+  churchId          String
   scheduleId        String?
   weekStartDate     DateTime
   contactedAt       DateTime  @default(now())
@@ -972,7 +916,7 @@ model PastoralWeeklyFollowUp {
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
   deletedBy         String?
-  church            Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church            Church   @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant           Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
   ministry          Ministry  @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   schedule          Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
@@ -1028,7 +972,7 @@ model MonthlyFasting {
 model PastoralAlert {
   id               String      @id @default(cuid())
   servantId        String
-  churchId         String?
+  churchId         String
   message          String
   status           AlertStatus @default(OPEN)
   trigger          String
@@ -1038,7 +982,7 @@ model PastoralAlert {
   resolvedByUserId String?
   deletedAt        DateTime?
   deletedBy        String?
-  church           Church?     @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church           Church     @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant          Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
   createdBy        User?       @relation("AlertCreatedBy", fields: [createdByUserId], references: [id])
   resolvedBy       User?       @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id])
@@ -1124,7 +1068,7 @@ model MinistryResponsibility {
 
 model MinistryTaskTemplate {
   id                                String                              @id @default(cuid())
-  churchId                          String?
+  churchId                          String
   ministryId                        String
   name                              String
   description                       String?
@@ -1140,7 +1084,7 @@ model MinistryTaskTemplate {
   updatedAt                         DateTime                            @updatedAt
   deletedAt                         DateTime?
   deletedBy                         String?
-  church                            Church?                             @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church                            Church                             @relation(fields: [churchId], references: [id], onDelete: Restrict)
   ministry                          Ministry                            @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   createdByUser                     User?                               @relation("MinistryTaskTemplateCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   checklistItems                    MinistryTaskTemplateChecklistItem[]
@@ -1168,7 +1112,7 @@ model MinistryTaskTemplateChecklistItem {
 
 model MinistryTaskOccurrence {
   id                String                         @id @default(cuid())
-  churchId          String?
+  churchId          String
   templateId        String
   ministryId        String
   serviceId         String?
@@ -1194,7 +1138,7 @@ model MinistryTaskOccurrence {
   updatedAt         DateTime                       @updatedAt
   deletedAt         DateTime?
   deletedBy         String?
-  church            Church?                        @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church            Church                        @relation(fields: [churchId], references: [id], onDelete: Restrict)
   template          MinistryTaskTemplate           @relation(fields: [templateId], references: [id], onDelete: Cascade)
   ministry          Ministry                       @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   service           WorshipService?                @relation(fields: [serviceId], references: [id], onDelete: SetNull)
@@ -1284,7 +1228,7 @@ model MinistryTaskOccurrenceChecklistItem {
 model ServantJourney {
   id                     String   @id @default(cuid())
   servantId              String   @unique
-  churchId               String?
+  churchId               String
   startedAt              DateTime
   totalServices          Int      @default(0)
   totalTasksCompleted    Int      @default(0)
@@ -1295,7 +1239,7 @@ model ServantJourney {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
   servant                Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  church                 Church?  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church                 Church  @relation(fields: [churchId], references: [id], onDelete: Restrict)
 
   @@index([churchId])
   @@index([startedAt])
@@ -1303,7 +1247,7 @@ model ServantJourney {
 
 model JourneyMilestone {
   id          String            @id @default(cuid())
-  churchId    String?
+  churchId    String
   code        String            @unique
   name        String
   description String?
@@ -1311,7 +1255,7 @@ model JourneyMilestone {
   category    String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
-  church      Church?           @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church      Church           @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servants    ServantMilestone[]
 
   @@index([churchId, category])
@@ -1319,12 +1263,12 @@ model JourneyMilestone {
 
 model ServantMilestone {
   id          String           @id @default(cuid())
-  churchId    String?
+  churchId    String
   servantId   String
   milestoneId String
   achievedAt  DateTime         @default(now())
   createdAt   DateTime         @default(now())
-  church      Church?          @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church      Church          @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant     Servant          @relation(fields: [servantId], references: [id], onDelete: Cascade)
   milestone   JourneyMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
 
@@ -1335,7 +1279,7 @@ model ServantMilestone {
 
 model JourneyLog {
   id          String         @id @default(cuid())
-  churchId    String?
+  churchId    String
   servantId   String
   type        JourneyLogType
   title       String
@@ -1343,7 +1287,7 @@ model JourneyLog {
   referenceId String?
   occurredAt  DateTime       @default(now())
   createdAt   DateTime       @default(now())
-  church      Church?        @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church      Church        @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant     Servant        @relation(fields: [servantId], references: [id], onDelete: Cascade)
 
   @@index([churchId, occurredAt])
@@ -1352,148 +1296,10 @@ model JourneyLog {
   @@index([referenceId])
 }
 
-/// @deprecated Replaced by Journey Milestones + Journey Logs (no points/ranking).
-model ServantReward {
-  id              String       @id @default(cuid())
-  servantId       String
-  source          RewardSource
-  points          Int
-  title           String
-  description     String?
-  referenceId     String?
-  grantedByUserId String?
-  rewardedAt      DateTime     @default(now())
-  createdAt       DateTime     @default(now())
-  servant         Servant      @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  grantedBy       User?        @relation("ServantRewardGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
-
-  @@unique([servantId, source, referenceId])
-  @@index([servantId, rewardedAt])
-  @@index([source, rewardedAt])
-  @@index([grantedByUserId])
-}
-
-/// @deprecated Legacy gamification artifact.
-model ServantLevelDefinition {
-  id         String   @id @default(cuid())
-  churchId   String?
-  name       String
-  threshold  Int
-  levelOrder Int
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  church     Church?  @relation(fields: [churchId], references: [id], onDelete: SetNull)
-
-  @@index([churchId, active])
-  @@index([threshold])
-  @@index([levelOrder])
-}
-
-/// @deprecated Legacy gamification artifact.
-model PointRule {
-  id         String                 @id @default(cuid())
-  churchId   String?
-  actionType GamificationActionType
-  points     Int
-  active     Boolean                @default(true)
-  createdAt  DateTime               @default(now())
-  updatedAt  DateTime               @updatedAt
-  church     Church?                @relation(fields: [churchId], references: [id], onDelete: SetNull)
-
-  @@unique([churchId, actionType])
-  @@index([actionType, active])
-}
-
-/// @deprecated Legacy gamification artifact.
-model ServantPointLog {
-  id          String                 @id @default(cuid())
-  churchId    String?
-  servantId   String
-  ministryId  String?
-  actionType  GamificationActionType
-  points      Int
-  referenceId String?
-  metadata    Json?
-  createdAt   DateTime               @default(now())
-  church      Church?                @relation(fields: [churchId], references: [id], onDelete: SetNull)
-  servant     Servant                @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  ministry    Ministry?              @relation(fields: [ministryId], references: [id], onDelete: SetNull)
-
-  @@index([churchId, createdAt])
-  @@index([servantId, createdAt])
-  @@index([ministryId, createdAt])
-  @@index([actionType, createdAt])
-  @@index([referenceId])
-}
-
-/// @deprecated Legacy gamification artifact.
-model ServantGamificationProfile {
-  servantId            String   @id
-  churchId             String?
-  totalPoints          Int      @default(0)
-  currentLevel         String?
-  currentLevelOrder    Int      @default(0)
-  achievementsUnlocked Int      @default(0)
-  attendanceRate       Float    @default(0)
-  completionRate       Float    @default(0)
-  rankingScore         Float    @default(0)
-  updatedAt            DateTime @updatedAt
-  church               Church?  @relation(fields: [churchId], references: [id], onDelete: SetNull)
-  servant              Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
-
-  @@index([churchId, totalPoints])
-  @@index([currentLevelOrder, totalPoints])
-}
-
-/// @deprecated Replaced by JourneyMilestone.
-model Achievement {
-  id            String               @id @default(cuid())
-  churchId      String?
-  name          String
-  code          String
-  description   String?
-  icon          String?
-  category      String?
-  type          AchievementType
-  pointsBonus   Int                  @default(0)
-  criteria      Json?
-  active        Boolean              @default(true)
-  createdBy     String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  church        Church?              @relation(fields: [churchId], references: [id], onDelete: SetNull)
-  createdByUser User?                @relation("AchievementCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  servantLinks  ServantAchievement[]
-
-  @@unique([churchId, code])
-  @@index([churchId, active])
-  @@index([type, active])
-}
-
-/// @deprecated Replaced by ServantMilestone.
-model ServantAchievement {
-  id             String      @id @default(cuid())
-  churchId       String?
-  servantId      String
-  achievementId  String
-  unlockedAt     DateTime    @default(now())
-  progressValue  Float       @default(0)
-  unlockedBy     String?
-  metadata       Json?
-  church         Church?     @relation(fields: [churchId], references: [id], onDelete: SetNull)
-  servant        Servant     @relation(fields: [servantId], references: [id], onDelete: Cascade)
-  achievement    Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
-  unlockedByUser User?       @relation("ServantAchievementUnlockedBy", fields: [unlockedBy], references: [id], onDelete: SetNull)
-
-  @@unique([servantId, achievementId])
-  @@index([churchId, unlockedAt])
-  @@index([servantId, unlockedAt])
-}
 
 model GrowthTrack {
   id            String                @id @default(cuid())
-  churchId      String?
+  churchId      String
   ministryId    String?
   name          String
   description   String?
@@ -1501,7 +1307,7 @@ model GrowthTrack {
   createdBy     String?
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
-  church        Church?               @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church        Church               @relation(fields: [churchId], references: [id], onDelete: Restrict)
   ministry      Ministry?             @relation(fields: [ministryId], references: [id], onDelete: SetNull)
   createdByUser User?                 @relation("GrowthTrackCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   steps         GrowthTrackStep[]
@@ -1532,7 +1338,7 @@ model GrowthTrackStep {
 
 model ServantGrowthProgress {
   id            String          @id @default(cuid())
-  churchId      String?
+  churchId      String
   servantId     String
   growthTrackId String
   stepId        String
@@ -1542,7 +1348,7 @@ model ServantGrowthProgress {
   notes         String?
   verifiedBy    String?
   updatedAt     DateTime        @updatedAt
-  church        Church?         @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church        Church         @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant       Servant         @relation(fields: [servantId], references: [id], onDelete: Cascade)
   growthTrack   GrowthTrack     @relation(fields: [growthTrackId], references: [id], onDelete: Cascade)
   step          GrowthTrackStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
@@ -1553,29 +1359,9 @@ model ServantGrowthProgress {
   @@index([growthTrackId, completed])
 }
 
-/// @deprecated Legacy gamification artifact.
-model ServantRankingSnapshot {
-  id               String    @id @default(cuid())
-  churchId         String?
-  ministryId       String?
-  servantId        String
-  referenceMonth   DateTime
-  totalPoints      Int
-  positionChurch   Int?
-  positionMinistry Int?
-  createdAt        DateTime  @default(now())
-  church           Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
-  ministry         Ministry? @relation(fields: [ministryId], references: [id], onDelete: SetNull)
-  servant          Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
-
-  @@unique([servantId, referenceMonth, ministryId])
-  @@index([churchId, referenceMonth, positionChurch])
-  @@index([ministryId, referenceMonth, positionMinistry])
-}
-
 model ServantMonthlyStats {
   id                  String    @id @default(cuid())
-  churchId            String?
+  churchId            String
   ministryId          String?
   servantId           String
   referenceMonth      DateTime
@@ -1587,7 +1373,7 @@ model ServantMonthlyStats {
   pointsEarned        Int       @default(0)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
-  church              Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church              Church   @relation(fields: [churchId], references: [id], onDelete: Restrict)
   ministry            Ministry? @relation(fields: [ministryId], references: [id], onDelete: SetNull)
   servant             Servant   @relation(fields: [servantId], references: [id], onDelete: Cascade)
 
@@ -1647,7 +1433,7 @@ model UserPermissionOverride {
 model Notification {
   id        String    @id @default(cuid())
   userId    String
-  churchId  String?
+  churchId  String
   type      String
   title     String
   message   String
@@ -1656,7 +1442,7 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  church    Church?   @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  church    Church   @relation(fields: [churchId], references: [id], onDelete: Restrict)
 
   @@index([userId, createdAt])
   @@index([userId, readAt])

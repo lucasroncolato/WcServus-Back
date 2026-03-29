@@ -11,6 +11,7 @@ import {
   Role,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateNotificationTemplateDto } from './dto/create-notification-template.dto';
 import { ListNotificationManagementLogsQueryDto } from './dto/list-notification-management-logs-query.dto';
@@ -26,6 +27,7 @@ import { WhatsappService } from './whatsapp/whatsapp.service';
 export class NotificationsManagementService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly tenantIntegrity: TenantIntegrityService,
     private readonly notificationSettingsService: NotificationSettingsService,
     private readonly notificationTemplatesService: NotificationTemplatesService,
     private readonly whatsappService: WhatsappService,
@@ -82,6 +84,7 @@ export class NotificationsManagementService {
 
   async getUserPreferences(userId: string, actor: JwtPayload) {
     this.assertCanReadPreferences(actor, userId);
+    await this.assertTargetUserTenant(userId, actor);
 
     const rows = await this.prisma.notificationPreference.findMany({
       where: {
@@ -121,6 +124,7 @@ export class NotificationsManagementService {
     actor: JwtPayload,
   ) {
     this.assertCanWritePreferences(actor, userId);
+    await this.assertTargetUserTenant(userId, actor);
 
     if (dto.channels?.EMAIL !== undefined) {
       throw new NotImplementedException('EMAIL channel is not supported by backend.');
@@ -381,6 +385,23 @@ export class NotificationsManagementService {
     if (actor.sub !== userId) {
       throw new ForbiddenException('You can only update your own notification preferences.');
     }
+  }
+
+  private async assertTargetUserTenant(userId: string, actor: JwtPayload) {
+    if (!actor.churchId) {
+      return;
+    }
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, churchId: true },
+    });
+
+    if (!target) {
+      throw new BadRequestException('Target user not found');
+    }
+
+    this.tenantIntegrity.assertSameChurch(actor.churchId, target.churchId, 'User');
   }
 }
 

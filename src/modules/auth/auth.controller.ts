@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AllowWhenPasswordChangeRequired } from 'src/common/decorators/allow-password-change-required.decorator';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Public } from 'src/common/decorators/public.decorator';
@@ -18,12 +19,14 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Public()
   @Post('refresh')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto);
   }
@@ -37,12 +40,14 @@ export class AuthController {
 
   @Public()
   @Post('forgot-password')
+  @Throttle({ default: { limit: 4, ttl: 60_000 } })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
   }
 
   @Public()
   @Post('reset-password')
+  @Throttle({ default: { limit: 4, ttl: 60_000 } })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
   }

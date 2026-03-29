@@ -294,7 +294,8 @@ export class JourneyService implements OnModuleInit {
     referenceId?: string;
     occurredAt?: Date;
   }) {
-    await this.ensureJourney(input.servantId, input.churchId);
+    const resolvedChurchId = await this.ensureChurchForServant(input.servantId, input.churchId);
+    await this.ensureJourney(input.servantId, resolvedChurchId);
 
     if (input.referenceId) {
       const existing = await this.prisma.journeyLog.findFirst({
@@ -307,7 +308,7 @@ export class JourneyService implements OnModuleInit {
     const log = await this.prisma.journeyLog.create({
       data: {
         servantId: input.servantId,
-        churchId: input.churchId,
+        churchId: resolvedChurchId,
         type: input.type,
         title: input.title,
         description: input.description,
@@ -316,8 +317,8 @@ export class JourneyService implements OnModuleInit {
       },
     });
 
-    await this.refreshJourney(input.servantId, input.churchId);
-    await this.evaluateMilestones(input.servantId, input.churchId);
+    await this.refreshJourney(input.servantId, resolvedChurchId);
+    await this.evaluateMilestones(input.servantId, resolvedChurchId);
     return log;
   }
 
@@ -338,7 +339,7 @@ export class JourneyService implements OnModuleInit {
     await this.prisma.servantJourney.create({
       data: {
         servantId,
-        churchId: servant.churchId ?? churchId,
+        churchId: await this.ensureChurchForServant(servantId, servant.churchId ?? churchId),
         startedAt,
       },
     });
@@ -378,7 +379,7 @@ export class JourneyService implements OnModuleInit {
       where: { servantId },
       create: {
         servantId,
-        churchId: servant?.churchId ?? churchId,
+        churchId: await this.ensureChurchForServant(servantId, servant?.churchId ?? churchId),
         startedAt,
         totalServices: services,
         totalTasksCompleted: tasks,
@@ -388,7 +389,7 @@ export class JourneyService implements OnModuleInit {
         lastActivityAt: lastLog?.occurredAt ?? startedAt,
       },
       update: {
-        churchId: servant?.churchId ?? churchId,
+        churchId: await this.ensureChurchForServant(servantId, servant?.churchId ?? churchId),
         startedAt,
         totalServices: services,
         totalTasksCompleted: tasks,
@@ -407,7 +408,14 @@ export class JourneyService implements OnModuleInit {
         select: { id: true },
       });
       if (exists) continue;
-      await this.prisma.journeyMilestone.create({ data: item });
+      const firstChurch = await this.prisma.church.findFirst({
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!firstChurch) {
+        continue;
+      }
+      await this.prisma.journeyMilestone.create({ data: { ...item, churchId: firstChurch.id } });
     }
   }
 
@@ -486,7 +494,7 @@ export class JourneyService implements OnModuleInit {
     return [...byTrack.values()].filter((item) => item.total > 0 && item.done >= item.total).length;
   }
 
-  private async buildIndicators(servantId: string, churchId: string | null): Promise<Indicator[]> {
+  private async buildIndicators(servantId: string, _churchId: string | null): Promise<Indicator[]> {
     const [journey, attendance, totalAttendance, tracksCompleted] = await Promise.all([
       this.prisma.servantJourney.findUnique({ where: { servantId } }),
       this.prisma.attendance.count({ where: { servantId, status: AttendanceStatus.PRESENTE } }),
@@ -635,5 +643,26 @@ export class JourneyService implements OnModuleInit {
     const endMonth = end.getUTCMonth();
     const raw = (endYear - startYear) * 12 + (endMonth - startMonth);
     return Math.max(0, raw);
+  }
+
+  private async ensureChurchForServant(servantId: string, fallbackChurchId: string | null) {
+    if (fallbackChurchId) {
+      return fallbackChurchId;
+    }
+    const servant = await this.prisma.servant.findUnique({
+      where: { id: servantId },
+      select: { churchId: true },
+    });
+    if (servant?.churchId) {
+      return servant.churchId;
+    }
+    const firstChurch = await this.prisma.church.findFirst({
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!firstChurch) {
+      throw new Error('No church found to resolve Journey tenant');
+    }
+    return firstChurch.id;
   }
 }

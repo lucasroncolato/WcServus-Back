@@ -112,7 +112,7 @@ export class PastoralWeeklyFollowUpsService {
 
     const schedule = await this.prisma.schedule.findFirst({
       where: scheduleScope ? { AND: [scheduleBaseWhere, scheduleScope] } : scheduleBaseWhere,
-      select: { id: true, ministryId: true, serviceId: true },
+      select: { id: true, ministryId: true, serviceId: true, churchId: true },
     });
 
     if (!schedule) {
@@ -142,6 +142,7 @@ export class PastoralWeeklyFollowUpsService {
       create: {
         servantId: dto.servantId,
         ministryId: schedule.ministryId,
+        churchId: schedule.churchId,
         scheduleId: schedule.id,
         weekStartDate,
         contactedAt: dto.contactedAt ? new Date(dto.contactedAt) : new Date(),

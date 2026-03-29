@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import { getAttendanceAccessWhere, getScheduleAccessWhere } from 'src/common/auth/access-scope';
 import { AuditAction } from '@prisma/client';
 import { getSaoPauloWeekday, resolvePlanningWindow } from 'src/common/utils/planning-window.utils';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
@@ -15,6 +16,7 @@ import { UpdateWorshipServiceDto } from './dto/update-worship-service.dto';
 export class WorshipServicesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly tenantIntegrity: TenantIntegrityService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -23,8 +25,7 @@ export class WorshipServicesService {
     return (
       role === Role.SUPER_ADMIN ||
       role === Role.ADMIN ||
-      role === Role.PASTOR ||
-      role === Role.COORDENADOR
+      role === Role.PASTOR
     );
   }
 
@@ -44,6 +45,7 @@ export class WorshipServicesService {
 
     return this.prisma.worshipService.findMany({
       where: {
+        ...(actor.churchId ? { churchId: actor.churchId } : {}),
         ...(this.isFullVisibilityRole(actor.role)
           ? {}
           : {
@@ -85,6 +87,7 @@ export class WorshipServicesService {
       const visible = await this.prisma.worshipService.findFirst({
         where: {
           id,
+          ...(actor.churchId ? { churchId: actor.churchId } : {}),
           OR: [
             {
               schedules: {
@@ -132,14 +135,20 @@ export class WorshipServicesService {
       },
     });
 
+    if (actor.churchId) {
+      this.tenantIntegrity.assertSameChurch(actor.churchId, record.churchId, 'Worship service');
+    }
+
     return record;
   }
 
-  async create(dto: CreateWorshipServiceDto, actorUserId?: string) {
+  async create(dto: CreateWorshipServiceDto, actor: JwtPayload) {
+    const churchId = this.tenantIntegrity.assertActorChurch(actor);
     const service = await this.prisma.worshipService.create({
       data: {
         ...dto,
         serviceDate: new Date(dto.serviceDate),
+        churchId,
       },
     });
 
@@ -147,7 +156,7 @@ export class WorshipServicesService {
       action: AuditAction.CREATE,
       entity: 'WorshipService',
       entityId: service.id,
-      userId: actorUserId,
+      userId: actor.sub,
     });
 
     await this.notifyServiceReminder(service.id, service.title, 'Novo culto cadastrado no sistema.');
@@ -155,8 +164,8 @@ export class WorshipServicesService {
     return service;
   }
 
-  async update(id: string, dto: UpdateWorshipServiceDto, actorUserId?: string) {
-    await this.ensureExists(id);
+  async update(id: string, dto: UpdateWorshipServiceDto, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
 
     const service = await this.prisma.worshipService.update({
       where: { id },
@@ -170,7 +179,7 @@ export class WorshipServicesService {
       action: AuditAction.UPDATE,
       entity: 'WorshipService',
       entityId: id,
-      userId: actorUserId,
+      userId: actor.sub,
       metadata: dto as unknown as Record<string, unknown>,
     });
 
@@ -179,14 +188,19 @@ export class WorshipServicesService {
     return service;
   }
 
-  private async ensureExists(id: string) {
+  private async ensureExists(id: string, actor: JwtPayload) {
     const found = await this.prisma.worshipService.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
     if (!found) {
       throw new NotFoundException('Worship service not found');
     }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      found.churchId,
+      'Worship service',
+    );
   }
 
   private async notifyServiceReminder(serviceId: string, serviceTitle: string, message: string) {

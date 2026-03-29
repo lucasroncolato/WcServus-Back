@@ -41,6 +41,7 @@ import {
 } from 'src/common/auth/access-scope';
 import { EventBusService } from 'src/common/events/event-bus.service';
 import { AppCacheService } from 'src/common/cache/cache.service';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -159,6 +160,12 @@ export class SchedulesService {
       set: () => undefined,
       del: () => undefined,
     } as unknown as AppCacheService,
+    private readonly tenantIntegrity: TenantIntegrityService = {
+      getActorChurchId: () => null,
+      assertSameChurch: () => undefined,
+      assertLinkIntegrity: () => undefined,
+      assertActorChurch: () => '',
+    } as unknown as TenantIntegrityService,
   ) {}
 
   async findAll(query: ListSchedulesQueryDto, actor: JwtPayload) {
@@ -661,7 +668,7 @@ export class SchedulesService {
       data: {
         serviceId,
         ministryId,
-        churchId: actor.churchId ?? null,
+        churchId: this.requireActorChurch(actor),
         responsibilityId: dto.responsibilityId,
         functionName: dto.functionName.trim(),
         slotLabel: dto.slotLabel,
@@ -695,7 +702,7 @@ export class SchedulesService {
     return slot;
   }
 
-  async listVersions(serviceId: string, actor: JwtPayload) {
+  async listVersions(serviceId: string, _actor: JwtPayload) {
     await this.ensureServiceExists(serviceId);
     return this.prisma.scheduleVersion.findMany({
       where: { worshipServiceId: serviceId },
@@ -1082,6 +1089,7 @@ export class SchedulesService {
   }
 
   async create(dto: CreateScheduleDto, actor: JwtPayload) {
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
     const ministryId = dto.ministryId;
     if (!ministryId) {
       throw new BadRequestException('ministryId is required');
@@ -1089,7 +1097,7 @@ export class SchedulesService {
     await this.assertCanManageMinistry(actor, ministryId);
     await assertServantAccess(this.prisma, actor, dto.servantId);
 
-    await this.validateScheduleInput(dto.serviceId, ministryId, dto.servantId);
+    await this.validateScheduleInput(dto.serviceId, ministryId, dto.servantId, actor);
     await this.ensureNoConflict(dto.serviceId, dto.servantId, ministryId);
 
     const schedule = await this.prisma.schedule.create({
@@ -1098,6 +1106,7 @@ export class SchedulesService {
         ministryId,
         servantId: dto.servantId,
         assignedByUserId: actor.sub,
+        churchId: actorChurchId,
       },
       include: {
         service: true,
@@ -1660,6 +1669,7 @@ export class SchedulesService {
         serviceId: dto.worshipServiceId,
         servantId: source.servantId,
         ministryId: source.ministryId,
+        churchId: source.churchId,
         status: ScheduleStatus.ASSIGNED,
         assignedByUserId: actor.sub,
       },
@@ -2154,6 +2164,7 @@ export class SchedulesService {
               serviceId: service.id,
               ministryId: ministry.id,
               servantId: winner.servantId,
+              churchId: this.requireActorChurch(actor),
               status: ScheduleStatus.ASSIGNED,
               assignedByUserId: actor.sub,
             },
@@ -2599,10 +2610,25 @@ export class SchedulesService {
     });
   }
 
-  private async validateScheduleInput(serviceId: string, ministryId: string, servantId: string) {
-    const [service, ministry] = await Promise.all([
-      this.prisma.worshipService.findUnique({ where: { id: serviceId }, select: { id: true } }),
-      this.prisma.ministry.findUnique({ where: { id: ministryId }, select: { id: true } }),
+  private async validateScheduleInput(
+    serviceId: string,
+    ministryId: string,
+    servantId: string,
+    actor: JwtPayload,
+  ) {
+    const [service, ministry, servant] = await Promise.all([
+      this.prisma.worshipService.findUnique({
+        where: { id: serviceId },
+        select: { id: true, churchId: true },
+      }),
+      this.prisma.ministry.findUnique({
+        where: { id: ministryId },
+        select: { id: true, churchId: true },
+      }),
+      this.prisma.servant.findUnique({
+        where: { id: servantId },
+        select: { id: true, churchId: true },
+      }),
     ]);
 
     if (!service) {
@@ -2612,6 +2638,15 @@ export class SchedulesService {
     if (!ministry) {
       throw new NotFoundException('Ministry not found');
     }
+    if (!servant) {
+      throw new NotFoundException('Servant not found');
+    }
+
+    this.tenantIntegrity.assertLinkIntegrity(actor, [
+      { churchId: service.churchId, name: 'Worship service' },
+      { churchId: ministry.churchId, name: 'Ministry' },
+      { churchId: servant.churchId, name: 'Servant' },
+    ]);
 
     await this.ensureServantEligibleForSector(servantId, ministryId, serviceId);
   }
@@ -3337,12 +3372,25 @@ export class SchedulesService {
   }
 
   private async resolveAllowedMinistryIds(actor: JwtPayload, requestedSectorIds?: string[]) {
+    const actorChurchId = this.tenantIntegrity.getActorChurchId(actor);
     if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN || actor.role === Role.PASTOR) {
       if (requestedSectorIds?.length) {
+        if (actorChurchId) {
+          const rows = await this.prisma.ministry.findMany({
+            where: { id: { in: requestedSectorIds } },
+            select: { id: true, churchId: true },
+          });
+          rows.forEach((row) =>
+            this.tenantIntegrity.assertSameChurch(actorChurchId, row.churchId, 'Ministry'),
+          );
+        }
         return [...new Set(requestedSectorIds)];
       }
 
-      const allSectors = await this.prisma.ministry.findMany({ select: { id: true } });
+      const allSectors = await this.prisma.ministry.findMany({
+        where: actorChurchId ? { churchId: actorChurchId } : undefined,
+        select: { id: true },
+      });
       return allSectors.map((ministry) => ministry.id);
     }
 
@@ -3460,6 +3508,13 @@ export class SchedulesService {
   private invalidateSchedulingCaches(serviceId: string, ministryId: string) {
     this.cacheService.del(`schedule-board:${serviceId}:${ministryId}`);
     this.cacheService.del(`eligible:${serviceId}:${ministryId}`);
+  }
+
+  private requireActorChurch(actor: JwtPayload) {
+    if (!actor.churchId) {
+      throw new ForbiddenException('Actor must be bound to a church context');
+    }
+    return actor.churchId;
   }
 }
 

@@ -56,6 +56,7 @@ export class AttendancesService {
   }
 
   async checkIn(dto: CheckInDto, actor: JwtPayload) {
+    const churchId = this.requireActorChurch(actor);
     await this.assertCanRegisterAttendance(actor, dto.servantId);
     await this.ensureReferences(dto.serviceId, dto.servantId);
     await this.assertAttendanceCanBeRegisteredForSchedule(actor, dto.serviceId, dto.servantId);
@@ -68,7 +69,7 @@ export class AttendancesService {
         },
       },
       update: {
-        churchId: actor.churchId ?? null,
+        churchId,
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
@@ -77,7 +78,7 @@ export class AttendancesService {
       create: {
         serviceId: dto.serviceId,
         servantId: dto.servantId,
-        churchId: actor.churchId ?? null,
+        churchId,
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
@@ -90,7 +91,7 @@ export class AttendancesService {
     });
 
     await this.recalculateServantAbsenceMetrics(dto.servantId);
-    await this.ensurePastoralAlertIfNeeded(dto.servantId, actor.sub);
+    await this.ensurePastoralAlertIfNeeded(dto.servantId, actor.sub, churchId);
     await this.updateRelatedSlotStatus(
       attendance.serviceId,
       attendance.servantId,
@@ -143,6 +144,7 @@ export class AttendancesService {
   }
 
   async update(id: string, dto: UpdateAttendanceDto, actor: JwtPayload) {
+    const churchId = this.requireActorChurch(actor);
     const current = await this.prisma.attendance.findUnique({ where: { id } });
     if (!current) {
       throw new NotFoundException('Attendance not found');
@@ -154,7 +156,7 @@ export class AttendancesService {
     const attendance = await this.prisma.attendance.update({
       where: { id },
       data: {
-        churchId: actor.churchId ?? null,
+        churchId,
         status: dto.status,
         justification: dto.justification,
         notes: dto.notes,
@@ -163,7 +165,7 @@ export class AttendancesService {
     });
 
     await this.recalculateServantAbsenceMetrics(attendance.servantId);
-    await this.ensurePastoralAlertIfNeeded(attendance.servantId, actor.sub);
+    await this.ensurePastoralAlertIfNeeded(attendance.servantId, actor.sub, churchId);
     await this.updateRelatedSlotStatus(
       attendance.serviceId,
       attendance.servantId,
@@ -238,7 +240,7 @@ export class AttendancesService {
     });
   }
 
-  private async ensurePastoralAlertIfNeeded(servantId: string, actorUserId: string) {
+  private async ensurePastoralAlertIfNeeded(servantId: string, actorUserId: string, churchId: string) {
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
       select: { id: true, monthlyAbsences: true, consecutiveAbsences: true },
@@ -275,6 +277,7 @@ export class AttendancesService {
     await this.prisma.pastoralAlert.create({
       data: {
         servantId,
+        churchId,
         trigger,
         message:
           trigger === 'CONSECUTIVE_ABSENCES'
@@ -291,6 +294,13 @@ export class AttendancesService {
     }
 
     await assertServantAccess(this.prisma, actor, servantId);
+  }
+
+  private requireActorChurch(actor: JwtPayload) {
+    if (!actor.churchId) {
+      throw new ForbiddenException('Actor must be bound to a church context');
+    }
+    return actor.churchId;
   }
 
   private async assertAttendanceCanBeRegisteredForSchedule(

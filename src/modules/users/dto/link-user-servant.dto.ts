@@ -4,7 +4,7 @@ import { IsOptional, IsString, ValidateIf } from 'class-validator';
 export class LinkUserServantDto {
   @ApiProperty({
     nullable: true,
-    description: 'ID do servo a ser vinculado. Envie null para remover o vínculo.',
+    description: 'ID do servo a ser vinculado. Envie null para remover o vÃ­nculo.',
     example: 'clx9l8w7y0000xv9d28h2i6v7',
   })
   @IsOptional()

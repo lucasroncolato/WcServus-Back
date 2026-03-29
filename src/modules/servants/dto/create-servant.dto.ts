@@ -31,8 +31,7 @@ export class CreateServantDto {
   @ApiPropertyOptional({
     enum: ServantActiveStatusDto,
     default: ServantActiveStatusDto.ACTIVE,
-    deprecated: true,
-    description: 'Campo legado. O backend decide o status conforme regra de aprovacao.',
+    description: 'Status inicial administrativo do servo.',
   })
   @IsOptional()
   @IsEnum(ServantActiveStatusDto)
@@ -41,8 +40,7 @@ export class CreateServantDto {
   @ApiPropertyOptional({
     enum: TrainingStatus,
     default: TrainingStatus.PENDING,
-    deprecated: true,
-    description: 'Campo legado. Novo servo sempre inicia com treinamento pendente.',
+    description: 'Status inicial de treinamento.',
   })
   @IsOptional()
   @IsEnum(TrainingStatus)

@@ -4,6 +4,7 @@ import {
   assertServantAccess,
   getPastoralVisitAccessWhere,
 } from 'src/common/auth/access-scope';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { EventBusService } from 'src/common/events/event-bus.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -17,6 +18,7 @@ import { ResolvePastoralVisitDto } from './dto/resolve-pastoral-visit.dto';
 export class PastoralVisitsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly tenantIntegrity: TenantIntegrityService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
     private readonly eventBus: EventBusService,
@@ -44,15 +46,17 @@ export class PastoralVisitsService {
 
   async create(dto: CreatePastoralVisitDto, actor: JwtPayload) {
     await assertServantAccess(this.prisma, actor, dto.servantId);
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
 
     const servant = await this.prisma.servant.findUnique({
       where: { id: dto.servantId },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
 
     if (!servant) {
       throw new NotFoundException('Servant not found');
     }
+    this.tenantIntegrity.assertSameChurch(actorChurchId, servant.churchId, 'Servant');
 
     const visit = await this.prisma.pastoralVisit.create({
       data: {
@@ -60,6 +64,7 @@ export class PastoralVisitsService {
         reason: dto.reason,
         notes: dto.notes,
         createdByUserId: actor.sub,
+        churchId: actorChurchId,
       },
     });
 
@@ -74,6 +79,7 @@ export class PastoralVisitsService {
       name: 'PASTORAL_PENDING_OPENED',
       occurredAt: new Date(),
       actorUserId: actor.sub,
+      churchId: visit.churchId,
       payload: { pastoralVisitId: visit.id, servantId: visit.servantId },
     });
 
@@ -93,6 +99,11 @@ export class PastoralVisitsService {
     if (!current) {
       throw new NotFoundException('Pastoral visit not found');
     }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      current.churchId,
+      'Pastoral visit',
+    );
 
     await assertServantAccess(this.prisma, actor, current.servantId);
 
@@ -130,6 +141,7 @@ export class PastoralVisitsService {
       name: 'PASTORAL_PENDING_RESOLVED',
       occurredAt: new Date(),
       actorUserId: actor.sub,
+      churchId: visit.churchId,
       payload: { pastoralVisitId: visit.id, servantId: visit.servantId },
     });
 
@@ -146,9 +158,13 @@ export class PastoralVisitsService {
 
   async historyByServant(servantId: string, actor: JwtPayload) {
     await assertServantAccess(this.prisma, actor, servantId);
+    await this.tenantIntegrity.assertServantChurch(servantId, actor);
 
     return this.prisma.pastoralVisit.findMany({
-      where: { servantId },
+      where: {
+        servantId,
+        ...(actor.churchId ? { churchId: actor.churchId } : {}),
+      },
       orderBy: { openedAt: 'desc' },
     });
   }

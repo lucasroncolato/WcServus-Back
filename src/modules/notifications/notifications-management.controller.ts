@@ -4,14 +4,16 @@ import { Role } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
+import { CreateNotificationManagementTemplateDto } from './dto/create-notification-management-template.dto';
 import { ListNotificationManagementLogsQueryDto } from './dto/list-notification-management-logs-query.dto';
 import {
-  NotificationManagementChannel,
   NotificationManagementChannelParamDto,
 } from './dto/notification-management-channel.dto';
 import { SendNotificationManagementTestDto } from './dto/send-notification-management-test.dto';
+import { SetNotificationManagementTemplateStatusDto } from './dto/set-notification-management-template-status.dto';
 import { UpdateNotificationManagementChannelDto } from './dto/update-notification-management-channel.dto';
 import { UpdateNotificationManagementPreferencesDto } from './dto/update-notification-management-preferences.dto';
+import { UpdateNotificationManagementTemplateDto } from './dto/update-notification-management-template.dto';
 import { NotificationsManagementService } from './notifications-management.service';
 
 @ApiTags('Notifications Management')
@@ -58,24 +60,19 @@ export class NotificationsManagementController {
 
   @Post('templates')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  createTemplate(
-    @Body() dto: { name: string; event: string; channel: NotificationManagementChannel; content: string },
-  ) {
+  createTemplate(@Body() dto: CreateNotificationManagementTemplateDto) {
     return this.managementService.createTemplate(dto);
   }
 
   @Patch('templates/:id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  updateTemplate(
-    @Param('id') id: string,
-    @Body() dto: { name?: string; event?: string; channel?: NotificationManagementChannel; content?: string },
-  ) {
+  updateTemplate(@Param('id') id: string, @Body() dto: UpdateNotificationManagementTemplateDto) {
     return this.managementService.updateTemplate(id, dto);
   }
 
   @Patch('templates/:id/status')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  setTemplateActive(@Param('id') id: string, @Body() dto: { isActive: boolean }) {
+  setTemplateActive(@Param('id') id: string, @Body() dto: SetNotificationManagementTemplateStatusDto) {
     return this.managementService.setTemplateActive(id, dto.isActive);
   }
 

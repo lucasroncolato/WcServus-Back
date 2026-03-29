@@ -28,7 +28,7 @@ export class WorshipServicesController {
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   create(@Body() dto: CreateWorshipServiceDto, @CurrentUser() user: JwtPayload) {
-    return this.worshipServicesService.create(dto, user.sub);
+    return this.worshipServicesService.create(dto, user);
   }
 
   @Patch(':id')
@@ -38,6 +38,6 @@ export class WorshipServicesController {
     @Body() dto: UpdateWorshipServiceDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.worshipServicesService.update(id, dto, user.sub);
+    return this.worshipServicesService.update(id, dto, user);
   }
 }

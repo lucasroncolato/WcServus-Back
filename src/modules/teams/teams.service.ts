@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { AuditAction, Prisma, Role, TeamStatus } from '@prisma/client';
 import { assertTeamAccess, getTeamAccessWhere, assertMinistryAccess } from 'src/common/auth/access-scope';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -19,6 +20,7 @@ import { UpdateTeamDto } from './dto/update-team.dto';
 export class TeamsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly tenantIntegrity: TenantIntegrityService,
     private readonly auditService: AuditService,
   ) {}
 
@@ -84,7 +86,9 @@ export class TeamsService {
       await assertMinistryAccess(this.prisma, actor, dto.ministryId);
     }
 
-    await this.ensureMinistryExists(dto.ministryId);
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
+    const ministry = await this.ensureMinistryExists(dto.ministryId);
+    this.tenantIntegrity.assertSameChurch(actorChurchId, ministry.churchId, 'Ministry');
 
     const existing = await this.prisma.team.findFirst({
       where: { ministryId: dto.ministryId, name: dto.name },
@@ -100,6 +104,7 @@ export class TeamsService {
         slug: dto.slug,
         description: dto.description,
         ministryId: dto.ministryId,
+        churchId: actorChurchId,
         status: dto.status ?? TeamStatus.ACTIVE,
       },
       include: {
@@ -126,12 +131,17 @@ export class TeamsService {
 
     const current = await this.prisma.team.findUnique({
       where: { id },
-      select: { id: true, name: true, ministryId: true, status: true },
+      select: { id: true, name: true, ministryId: true, status: true, churchId: true },
     });
 
     if (!current) {
       throw new NotFoundException('Team not found');
     }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      current.churchId,
+      'Team',
+    );
 
     if (actor.role === Role.COORDENADOR) {
       await assertMinistryAccess(this.prisma, actor, current.ministryId);
@@ -222,11 +232,16 @@ export class TeamsService {
     const [team, servant] = await Promise.all([
       this.prisma.team.findUnique({
         where: { id: teamId },
-        select: { id: true, ministryId: true, status: true },
+        select: { id: true, ministryId: true, status: true, churchId: true },
       }),
       this.prisma.servant.findUnique({
         where: { id: servantId },
-        select: { id: true, mainMinistryId: true, servantMinistries: { select: { ministryId: true } } },
+        select: {
+          id: true,
+          churchId: true,
+          mainMinistryId: true,
+          servantMinistries: { select: { ministryId: true } },
+        },
       }),
     ]);
 
@@ -236,6 +251,10 @@ export class TeamsService {
     if (!servant) {
       throw new NotFoundException('Servant not found');
     }
+    this.tenantIntegrity.assertLinkIntegrity(actor, [
+      { churchId: team.churchId, name: 'Team' },
+      { churchId: servant.churchId, name: 'Servant' },
+    ]);
     if (team.status !== TeamStatus.ACTIVE) {
       throw new BadRequestException('Cannot add member to an inactive team');
     }
@@ -274,7 +293,7 @@ export class TeamsService {
 
     const servant = await this.prisma.servant.findUnique({
       where: { id: servantId },
-      select: { id: true, teamId: true },
+      select: { id: true, teamId: true, churchId: true },
     });
     if (!servant) {
       throw new NotFoundException('Servant not found');
@@ -282,6 +301,12 @@ export class TeamsService {
     if (servant.teamId !== teamId) {
       throw new BadRequestException('Servant is not a member of this team');
     }
+    await this.tenantIntegrity.assertTeamChurch(teamId, actor);
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      servant.churchId,
+      'Servant',
+    );
 
     const updated = await this.prisma.servant.update({
       where: { id: servantId },
@@ -384,12 +409,17 @@ export class TeamsService {
 
     const team = await this.prisma.team.findUnique({
       where: { id: teamId },
-      select: { id: true, ministryId: true },
+      select: { id: true, ministryId: true, churchId: true },
     });
 
     if (!team) {
       throw new NotFoundException('Team not found');
     }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      team.churchId,
+      'Team',
+    );
 
     await assertMinistryAccess(this.prisma, actor, team.ministryId);
   }
@@ -407,11 +437,12 @@ export class TeamsService {
   private async ensureMinistryExists(id: string) {
     const found = await this.prisma.ministry.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
     if (!found) {
       throw new NotFoundException('Ministry not found');
     }
+    return found;
   }
 
   private serializeTeam<T extends { ministryId: string; ministry?: { id: string; name: string } | null }>(team: T) {

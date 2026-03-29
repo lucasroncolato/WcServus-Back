@@ -89,10 +89,10 @@ export class MinistryTasksService {
   async createTemplate(dto: CreateMinistryTaskTemplateDto, actor: JwtPayload) {
     this.assertTemplateManage(actor);
     if (actor.role === Role.COORDENADOR) await assertMinistryAccess(this.prisma, actor, dto.ministryId);
-    await this.ensureMinistry(dto.ministryId, actor.churchId ?? null);
+    await this.ensureMinistry(dto.ministryId, this.requireActorChurch(actor));
     const data = await this.prisma.ministryTaskTemplate.create({
       data: {
-        churchId: actor.churchId ?? null,
+        churchId: this.requireActorChurch(actor),
         ministryId: dto.ministryId,
         name: dto.name,
         description: dto.description,
@@ -120,7 +120,7 @@ export class MinistryTasksService {
     if (actor.role === Role.COORDENADOR) await assertMinistryAccess(this.prisma, actor, existing.ministryId);
     if (dto.ministryId && dto.ministryId !== existing.ministryId) {
       if (actor.role === Role.COORDENADOR) await assertMinistryAccess(this.prisma, actor, dto.ministryId);
-      await this.ensureMinistry(dto.ministryId, actor.churchId ?? null);
+      await this.ensureMinistry(dto.ministryId, this.requireActorChurch(actor));
     }
     const data = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.ministryTaskTemplate.update({
@@ -215,7 +215,7 @@ export class MinistryTasksService {
     if (actor.role === Role.COORDENADOR) await assertMinistryAccess(this.prisma, actor, template.ministryId);
     if (template.assigneeMode === 'REQUIRED' && !dto.assignedServantId) throw new BadRequestException('This template requires an assignee');
     if (dto.serviceId) {
-      const service = await this.ensureService(dto.serviceId, actor.churchId ?? null);
+      const service = await this.ensureService(dto.serviceId, this.requireActorChurch(actor));
       if (template.linkedToServiceType && service.type !== template.linkedToServiceType) {
         throw new BadRequestException('Service type does not match template linked service type');
       }
@@ -234,7 +234,7 @@ export class MinistryTasksService {
     }
     const data = await this.prisma.ministryTaskOccurrence.create({
       data: {
-        churchId: actor.churchId ?? null,
+        churchId: this.requireActorChurch(actor),
         templateId: template.id,
         ministryId: template.ministryId,
         serviceId: dto.serviceId,
@@ -343,7 +343,7 @@ export class MinistryTasksService {
     });
 
     const preserveProgress = dto.preserveProgress ?? true;
-    const data = await this.applyAssignmentChange({
+    await this.applyAssignmentChange({
       occurrenceId: occurrence.id,
       fromServantId: occurrence.assignedServantId,
       toServantId: dto.newAssignedServantId,
@@ -411,7 +411,7 @@ export class MinistryTasksService {
       name: 'MINISTRY_TASK_ASSIGNEE_ADDED',
       occurredAt: new Date(),
       actorUserId: actor.sub,
-      churchId: actor.churchId ?? null,
+      churchId: this.requireActorChurch(actor),
       payload: { occurrenceId: id, servantId: dto.servantId, role: dto.role },
     });
     await this.notifyAssigned(dto.servantId, id);
@@ -460,7 +460,7 @@ export class MinistryTasksService {
       name: 'MINISTRY_TASK_ASSIGNEE_REMOVED',
       occurredAt: new Date(),
       actorUserId: actor.sub,
-      churchId: actor.churchId ?? null,
+      churchId: this.requireActorChurch(actor),
       payload: { occurrenceId: id, servantId, role: match.role },
     });
 
@@ -592,7 +592,7 @@ export class MinistryTasksService {
   async reallocateFromRemovedServant(dto: ReallocateFromRemovedServantDto, actor: JwtPayload) {
     this.assertOccurrenceManage(actor);
     const mode = dto.mode ?? MinistryTaskReallocationMode.MANUAL;
-    const service = await this.ensureService(dto.serviceId, actor.churchId ?? null);
+    await this.ensureService(dto.serviceId, this.requireActorChurch(actor));
 
     const impacted = await this.prisma.ministryTaskOccurrence.findMany({
       where: {
@@ -632,7 +632,7 @@ export class MinistryTasksService {
       name: 'MINISTRY_TASK_REALLOCATION_REQUESTED',
       occurredAt: new Date(),
       actorUserId: actor.sub,
-      churchId: actor.churchId ?? null,
+      churchId: this.requireActorChurch(actor),
       payload: { serviceId: dto.serviceId, removedServantId: dto.removedServantId, mode, impactedCount: impacted.length },
     });
 
@@ -1357,5 +1357,12 @@ export class MinistryTasksService {
       ? new Date(query.endDate)
       : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59));
     return { start, end };
+  }
+
+  private requireActorChurch(actor: JwtPayload) {
+    if (!actor.churchId) {
+      throw new ForbiddenException('Actor must be bound to a church context');
+    }
+    return actor.churchId;
   }
 }

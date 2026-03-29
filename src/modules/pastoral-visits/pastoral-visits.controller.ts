@@ -28,7 +28,7 @@ export class PastoralVisitsController {
   }
 
   @Patch(':id/resolve')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR)
   resolve(
     @Param('id') id: string,
     @Body() dto: ResolvePastoralVisitDto,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ChurchScopeGuard } from './common/guards/church-scope.guard';
 import { PasswordChangeRequiredGuard } from './common/guards/password-change-required.guard';
@@ -26,7 +27,6 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { PastoralWeeklyFollowUpsModule } from './modules/pastoral-weekly-follow-ups/pastoral-weekly-follow-ups.module';
 import { SpiritualDisciplinesModule } from './modules/spiritual-disciplines/spiritual-disciplines.module';
 import { SupportRequestsModule } from './modules/support-requests/support-requests.module';
-import { RewardsModule } from './modules/rewards/rewards.module';
 import { MinistriesModule } from './modules/ministries/ministries.module';
 import { MinistryTasksModule } from './modules/ministry-tasks/ministry-tasks.module';
 import { JourneyModule } from './modules/journey/journey.module';
@@ -39,6 +39,12 @@ import { HealthController } from './health.controller';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 120,
+      },
+    ]),
     LogModule,
     EventsModule,
     AppCacheModule,
@@ -61,13 +67,16 @@ import { HealthController } from './health.controller';
     PastoralWeeklyFollowUpsModule,
     SpiritualDisciplinesModule,
     SupportRequestsModule,
-    RewardsModule,
     MinistriesModule,
     MinistryTasksModule,
     JourneyModule,
   ],
   controllers: [HealthController],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

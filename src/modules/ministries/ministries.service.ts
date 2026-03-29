@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { AuditAction, Role, ServantStatus, TrainingStatus } from '@prisma/client';
 import { assertMinistryAccess, getMinistryAccessWhere } from 'src/common/auth/access-scope';
+import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
@@ -19,6 +20,7 @@ import { UpdateMinistryDto } from './dto/update-ministry.dto';
 export class MinistriesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly tenantIntegrity: TenantIntegrityService,
     private readonly auditService: AuditService,
   ) {}
 
@@ -78,6 +80,8 @@ export class MinistriesService {
       throw new ForbiddenException('Only SUPER_ADMIN and ADMIN can create ministries');
     }
 
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
+
     const duplicated = await this.prisma.ministry.findUnique({
       where: { name: dto.name },
       select: { id: true },
@@ -88,13 +92,13 @@ export class MinistriesService {
     }
 
     if (dto.servantIds?.length) {
-      await this.ensureServantsExist(dto.servantIds);
+      await this.ensureServantsExist(dto.servantIds, actor);
     }
 
     const ministry = await this.prisma.$transaction(async (tx) => {
       const created = await tx.ministry.create({
         data: {
-          churchId: actor.churchId ?? null,
+          churchId: actorChurchId,
           name: dto.name,
           description: dto.description,
           color: dto.color,
@@ -139,6 +143,7 @@ export class MinistriesService {
     }
 
     await this.ensureExists(id);
+    await this.tenantIntegrity.assertMinistryChurch(id, actor);
 
     if (dto.name) {
       const duplicated = await this.prisma.ministry.findFirst({
@@ -152,7 +157,7 @@ export class MinistriesService {
     }
 
     if (dto.servantIds) {
-      await this.ensureServantsExist(dto.servantIds);
+      await this.ensureServantsExist(dto.servantIds, actor);
     }
 
     const ministry = await this.prisma.$transaction(async (tx) => {
@@ -328,16 +333,21 @@ export class MinistriesService {
     return updated;
   }
 
-  private async ensureServantsExist(servantIds: string[]) {
+  private async ensureServantsExist(servantIds: string[], actor: JwtPayload) {
     const uniqueServantIds = [...new Set(servantIds)];
     const servants = await this.prisma.servant.findMany({
       where: { id: { in: uniqueServantIds } },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
 
     if (servants.length !== uniqueServantIds.length) {
       throw new NotFoundException('One or more servants were not found');
     }
+
+    const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
+    servants.forEach((servant) =>
+      this.tenantIntegrity.assertSameChurch(actorChurchId, servant.churchId, 'Servant'),
+    );
   }
 
   private async ensureExists(id: string) {

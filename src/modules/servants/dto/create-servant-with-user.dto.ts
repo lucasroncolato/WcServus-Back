@@ -6,7 +6,6 @@ import {
   IsEnum,
   IsOptional,
   IsString,
-  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { CreateServantDto } from './create-servant.dto';
@@ -20,16 +19,6 @@ export class CreateServantUserDto {
   @ApiProperty()
   @IsEmail()
   email: string;
-
-  @ApiPropertyOptional({
-    deprecated: true,
-    description:
-      'Campo legado. A senha inicial do novo servo e definida automaticamente pelo backend.',
-  })
-  @IsOptional()
-  @IsString()
-  @MinLength(6)
-  password?: string;
 
   @ApiPropertyOptional({ enum: Role, default: Role.SERVO })
   @IsOptional()

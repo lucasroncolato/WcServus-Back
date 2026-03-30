@@ -17,6 +17,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ServantsModule } from './modules/servants/servants.module';
 import { WorshipServicesModule } from './modules/worship-services/worship-services.module';
+import { ServiceTemplatesModule } from './modules/service-templates/service-templates.module';
 import { SchedulesModule } from './modules/schedules/schedules.module';
 import { AttendancesModule } from './modules/attendances/attendances.module';
 import { PastoralVisitsModule } from './modules/pastoral-visits/pastoral-visits.module';
@@ -66,6 +67,7 @@ import { PermissionPolicyService } from './common/auth/permission-policy.service
     UsersModule,
     ServantsModule,
     WorshipServicesModule,
+    ServiceTemplatesModule,
     SchedulesModule,
     AttendancesModule,
     PastoralVisitsModule,

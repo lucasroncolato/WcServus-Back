@@ -9,6 +9,7 @@ import {
   Prisma,
   Role,
   ScheduleResponseStatus,
+  ScheduleSlotConfirmationStatus,
   ScheduleSlotStatus,
   ScheduleStatus,
   ServantStatus,
@@ -540,6 +541,10 @@ export class MeService {
             dto.responseStatus === ScheduleResponseStatus.CONFIRMED
               ? ScheduleSlotStatus.CONFIRMED
               : ScheduleSlotStatus.DECLINED,
+          confirmationStatus:
+            dto.responseStatus === ScheduleResponseStatus.CONFIRMED
+              ? ScheduleSlotConfirmationStatus.CONFIRMED
+              : ScheduleSlotConfirmationStatus.DECLINED,
         },
       });
 

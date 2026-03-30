@@ -1,12 +1,17 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WorshipServiceStatus, WorshipServiceType } from '@prisma/client';
-import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class UpdateWorshipServiceDto {
   @ApiPropertyOptional({ enum: WorshipServiceType })
   @IsOptional()
   @IsEnum(WorshipServiceType)
   type?: WorshipServiceType;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  templateId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -32,4 +37,14 @@ export class UpdateWorshipServiceDto {
   @IsOptional()
   @IsEnum(WorshipServiceStatus)
   status?: WorshipServiceStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  locked?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  canceled?: boolean;
 }

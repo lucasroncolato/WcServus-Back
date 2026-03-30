@@ -79,6 +79,12 @@ enum WorshipServiceType {
   CONGRESSO
 }
 
+enum ServiceTemplateRecurrenceType {
+  NONE
+  WEEKLY
+  MONTHLY
+}
+
 enum WorshipServiceStatus {
   PLANEJADO
   CONFIRMADO
@@ -108,6 +114,17 @@ enum ScheduleSlotStatus {
   NO_SHOW
   COMPLETED
   SWAPPED
+  EMPTY
+  FILLED
+  SUBSTITUTE_PENDING
+  REPLACED
+  LOCKED
+}
+
+enum ScheduleSlotConfirmationStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
 }
 
 enum ScheduleVersionStatus {
@@ -425,6 +442,7 @@ model Church {
   ministries              Ministry[]
   teams                   Team[]
   servants                Servant[]
+  serviceTemplates        ServiceTemplate[]
   worshipServices         WorshipService[]
   schedules               Schedule[]
   scheduleSlots           ScheduleSlot[]
@@ -583,6 +601,7 @@ model Ministry {
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   responsibilities        MinistryResponsibility[]
   scheduleVersionSlots    ScheduleVersionSlot[]
+  serviceTemplateSlots    ServiceTemplateSlot[]
   ministryTaskTemplates   MinistryTaskTemplate[]
   ministryTaskOccurrences MinistryTaskOccurrence[]
   growthTracks            GrowthTrack[]
@@ -611,6 +630,8 @@ model Team {
   ministry          Ministry              @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   leader            User?                 @relation("TeamLeader", fields: [leaderUserId], references: [id], onDelete: SetNull)
   servants          Servant[]
+  scheduleSlots     ScheduleSlot[]
+  serviceTemplateSlots ServiceTemplateSlot[]
   userScopeBindings UserMinistryBinding[]
 
   @@unique([ministryId, name])
@@ -724,13 +745,37 @@ model ServantStatusHistory {
   @@index([servantId, createdAt])
 }
 
+model ServiceTemplate {
+  id                String                        @id @default(cuid())
+  churchId          String
+  name              String
+  type              WorshipServiceType
+  recurrenceType    ServiceTemplateRecurrenceType @default(WEEKLY)
+  weekday           Int
+  startTime         String
+  duration          Int
+  active            Boolean                       @default(true)
+  generateAheadDays Int                           @default(30)
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+  church            Church                        @relation(fields: [churchId], references: [id], onDelete: Restrict)
+  slots             ServiceTemplateSlot[]
+  worshipServices   WorshipService[]
+
+  @@index([churchId, active])
+  @@index([churchId, recurrenceType])
+}
+
 model WorshipService {
   id                      String                   @id @default(cuid())
   churchId                String
+  templateId              String?
   type                    WorshipServiceType
   title                   String
   serviceDate             DateTime
   startTime               String
+  locked                  Boolean                  @default(false)
+  canceled                Boolean                  @default(false)
   notes                   String?
   status                  WorshipServiceStatus     @default(PLANEJADO)
   createdAt               DateTime                 @default(now())
@@ -738,6 +783,7 @@ model WorshipService {
   deletedAt               DateTime?
   deletedBy               String?
   church                  Church                   @relation(fields: [churchId], references: [id], onDelete: Restrict)
+  template                ServiceTemplate?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
   schedules               Schedule[]
   scheduleSlots           ScheduleSlot[]
   scheduleVersions        ScheduleVersion[]
@@ -748,7 +794,30 @@ model WorshipService {
   @@index([serviceDate])
   @@index([type])
   @@index([churchId])
+  @@index([templateId])
   @@index([deletedAt])
+}
+
+model ServiceTemplateSlot {
+  id               String                  @id @default(cuid())
+  templateId       String
+  ministryId       String
+  teamId           String?
+  responsibilityId String?
+  quantity         Int                     @default(1)
+  requiredTalentId String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  template         ServiceTemplate         @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  ministry         Ministry                @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  team             Team?                   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  responsibility   MinistryResponsibility? @relation(fields: [responsibilityId], references: [id], onDelete: SetNull)
+  scheduleSlots    ScheduleSlot[]
+
+  @@index([templateId])
+  @@index([ministryId])
+  @@index([teamId])
+  @@index([responsibilityId])
 }
 
 model ScheduleVersion {
@@ -829,8 +898,10 @@ model ScheduleSlot {
   id                String                  @id @default(cuid())
   serviceId         String
   ministryId        String
+  teamId            String?
   churchId          String
   scheduleId        String?
+  templateSlotId    String?
   responsibilityId  String?
   functionName      String
   slotLabel         String?
@@ -840,6 +911,7 @@ model ScheduleSlot {
   blocked           Boolean                 @default(false)
   blockedReason     String?
   status            ScheduleSlotStatus      @default(OPEN)
+  confirmationStatus ScheduleSlotConfirmationStatus @default(PENDING)
   assignedServantId String?
   assignedByUserId  String?
   notes             String?
@@ -850,7 +922,9 @@ model ScheduleSlot {
   church            Church                  @relation(fields: [churchId], references: [id], onDelete: Restrict)
   service           WorshipService          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   ministry          Ministry                @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  team              Team?                   @relation(fields: [teamId], references: [id], onDelete: SetNull)
   schedule          Schedule?               @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  templateSlot      ServiceTemplateSlot?    @relation(fields: [templateSlotId], references: [id], onDelete: SetNull)
   responsibility    MinistryResponsibility? @relation(fields: [responsibilityId], references: [id], onDelete: SetNull)
   assignedServant   Servant?                @relation(fields: [assignedServantId], references: [id], onDelete: SetNull)
   assignedBy        User?                   @relation("AssignedScheduleSlots", fields: [assignedByUserId], references: [id], onDelete: SetNull)
@@ -858,10 +932,12 @@ model ScheduleSlot {
 
   @@unique([serviceId, ministryId, functionName, position])
   @@index([serviceId, ministryId])
+  @@index([teamId])
   @@index([status])
   @@index([assignedServantId])
   @@index([responsibilityId])
   @@index([scheduleId])
+  @@index([templateSlotId])
   @@index([churchId])
   @@index([deletedAt])
 }
@@ -1138,6 +1214,7 @@ model MinistryResponsibility {
   responsibleServant   Servant?              @relation("ResponsibilityOwnerServant", fields: [responsibleServantId], references: [id], onDelete: SetNull)
   scheduleSlots        ScheduleSlot[]
   scheduleVersionSlots ScheduleVersionSlot[]
+  serviceTemplateSlots ServiceTemplateSlot[]
 
   @@index([ministryId, active])
   @@index([responsibleServantId])

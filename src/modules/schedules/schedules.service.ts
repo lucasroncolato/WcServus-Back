@@ -17,6 +17,7 @@ import {
   MinistryTaskReallocationMode,
   ScheduleResponseStatus,
   ScheduleSlotChangeType,
+  ScheduleSlotConfirmationStatus,
   ScheduleSlotStatus,
   ScheduleVersionStatus,
   ScheduleStatus,
@@ -594,6 +595,7 @@ export class SchedulesService {
         where: { serviceId, ministryId },
         include: {
           responsibility: { select: { id: true, title: true, functionName: true } },
+          team: { select: { id: true, name: true } },
           assignedServant: { select: { id: true, name: true, status: true, trainingStatus: true } },
         },
         orderBy: [{ functionName: 'asc' }, { position: 'asc' }],
@@ -619,6 +621,8 @@ export class SchedulesService {
         blocked: slot.blocked,
         blockedReason: slot.blockedReason,
         status: slot.status,
+        confirmationStatus: slot.confirmationStatus,
+        team: slot.team ? { id: slot.team.id, name: slot.team.name } : null,
         assignedServant: slot.assignedServant
           ? {
               id: slot.assignedServant.id,
@@ -842,6 +846,7 @@ export class SchedulesService {
       slot.assignedServantId === dto.servantId &&
       (slot.status === ScheduleSlotStatus.ASSIGNED ||
         slot.status === ScheduleSlotStatus.PENDING_CONFIRMATION ||
+        slot.status === ScheduleSlotStatus.FILLED ||
         slot.status === ScheduleSlotStatus.CONFIRMED);
     if (isIdempotentRepeat) {
       return this.prisma.scheduleSlot.findUnique({
@@ -854,13 +859,28 @@ export class SchedulesService {
     }
 
     const previousServantId = slot.assignedServantId;
+    const duplicateAssignment = await this.prisma.scheduleSlot.findFirst({
+      where: {
+        serviceId: slot.serviceId,
+        assignedServantId: dto.servantId,
+        NOT: { id: slotId },
+      },
+      select: { id: true, ministryId: true },
+    });
+    if (duplicateAssignment) {
+      throw new ConflictException(
+        'Servant is already assigned to another ministry/team in this worship service',
+      );
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const updatedSlot = await tx.scheduleSlot.update({
         where: { id: slotId },
         data: {
           assignedServantId: dto.servantId,
           assignedByUserId: actor.sub,
-          status: ScheduleSlotStatus.PENDING_CONFIRMATION,
+          status: ScheduleSlotStatus.FILLED,
+          confirmationStatus: ScheduleSlotConfirmationStatus.PENDING,
           blocked: false,
           blockedReason: null,
         },
@@ -980,6 +1000,237 @@ export class SchedulesService {
     return this.swapOrFillSlot(slotId, dto, actor, true);
   }
 
+  async generateSlotsFromTemplate(serviceId: string, actor: JwtPayload) {
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: serviceId },
+      select: { id: true, churchId: true, templateId: true, locked: true },
+    });
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+    if (!service.templateId) {
+      return { serviceId, created: 0, skipped: true, reason: 'SERVICE_WITHOUT_TEMPLATE' };
+    }
+
+    const actorChurchId = this.tenantIntegrity.getActorChurchId(actor);
+    if (actorChurchId) {
+      this.tenantIntegrity.assertSameChurch(actorChurchId, service.churchId, 'Worship service');
+    }
+
+    const template = await this.prisma.serviceTemplate.findUnique({
+      where: { id: service.templateId },
+      include: {
+        slots: {
+          include: {
+            responsibility: {
+              select: { id: true, title: true, functionName: true, requiredTraining: true },
+            },
+          },
+          orderBy: [{ createdAt: 'asc' }],
+        },
+      },
+    });
+
+    if (!template) {
+      throw new NotFoundException('Service template not found');
+    }
+
+    const existing = await this.prisma.scheduleSlot.findMany({
+      where: { serviceId, templateSlotId: { not: null } },
+      select: { templateSlotId: true, position: true },
+    });
+    const occupiedPositions = new Set(existing.map((item) => `${item.templateSlotId}:${item.position}`));
+
+    const createdRows: Prisma.ScheduleSlotCreateManyInput[] = [];
+    for (const slot of template.slots) {
+      await this.assertCanManageMinistry(actor, slot.ministryId);
+      const quantity = Math.max(1, slot.quantity);
+      for (let position = 1; position <= quantity; position += 1) {
+        const slotKey = `${slot.id}:${position}`;
+        if (occupiedPositions.has(slotKey)) {
+          continue;
+        }
+        createdRows.push({
+          serviceId,
+          ministryId: slot.ministryId,
+          teamId: slot.teamId ?? null,
+          churchId: service.churchId,
+          templateSlotId: slot.id,
+          responsibilityId: slot.responsibilityId ?? null,
+          functionName:
+            slot.responsibility?.functionName ??
+            slot.responsibility?.title ??
+            `Slot ${position}`,
+          slotLabel: slot.responsibility?.title ?? null,
+          position,
+          required: true,
+          requiredTraining: slot.responsibility?.requiredTraining ?? true,
+          blocked: Boolean(service.locked),
+          blockedReason: service.locked ? 'SERVICE_LOCKED' : null,
+          status: service.locked ? ScheduleSlotStatus.LOCKED : ScheduleSlotStatus.EMPTY,
+          confirmationStatus: ScheduleSlotConfirmationStatus.PENDING,
+        });
+      }
+    }
+
+    if (createdRows.length > 0) {
+      await this.prisma.scheduleSlot.createMany({ data: createdRows });
+    }
+
+    await this.auditService.log({
+      action: AuditAction.GENERATE_SCHEDULE,
+      entity: 'WorshipService',
+      entityId: serviceId,
+      userId: actor.sub,
+      metadata: {
+        source: 'SERVICE_TEMPLATE',
+        templateId: template.id,
+        createdSlots: createdRows.length,
+      },
+    });
+
+    return {
+      serviceId,
+      templateId: template.id,
+      created: createdRows.length,
+      skipped: false,
+    };
+  }
+
+  async autoGenerateSchedule(serviceId: string, actor: JwtPayload) {
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: serviceId },
+      select: { id: true, churchId: true, locked: true },
+    });
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+    if (service.locked) {
+      throw new BadRequestException('Worship service is locked');
+    }
+
+    await this.generateSlotsFromTemplate(serviceId, actor);
+
+    const slots = await this.prisma.scheduleSlot.findMany({
+      where: {
+        serviceId,
+        OR: [
+          { assignedServantId: null },
+          { status: ScheduleSlotStatus.EMPTY },
+          { status: ScheduleSlotStatus.OPEN },
+          { status: ScheduleSlotStatus.DECLINED },
+          { status: ScheduleSlotStatus.SUBSTITUTE_PENDING },
+        ],
+      },
+      orderBy: [{ ministryId: 'asc' }, { position: 'asc' }],
+    });
+
+    let assigned = 0;
+    let skipped = 0;
+    const blockedServants = new Set<string>();
+
+    for (const slot of slots) {
+      const eligible = await this.listSlotEligibility(serviceId, slot.ministryId, slot);
+      const candidate = eligible
+        .filter((item) => item.eligible && !blockedServants.has(item.servantId))
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+
+      if (!candidate) {
+        skipped += 1;
+        continue;
+      }
+
+      await this.assignSlot(
+        slot.id,
+        {
+          servantId: candidate.servantId,
+          reason: 'AUTO_GENERATED',
+        },
+        actor,
+        {
+          auditAction: AuditAction.GENERATE_SCHEDULE,
+          auditMetadata: { source: 'AUTO_GENERATION' },
+        },
+      );
+      blockedServants.add(candidate.servantId);
+      assigned += 1;
+    }
+
+    await this.eventBus.emit({
+      name: 'SCHEDULE_GENERATED',
+      occurredAt: new Date(),
+      actorUserId: actor.sub,
+      churchId: service.churchId,
+      payload: {
+        serviceId,
+        assigned,
+        skipped,
+      },
+    });
+
+    return {
+      serviceId,
+      assigned,
+      skipped,
+      totalSlots: slots.length,
+    };
+  }
+
+  async assignServantToSlot(slotId: string, dto: AssignScheduleSlotDto, actor: JwtPayload) {
+    return this.assignSlot(slotId, dto, actor);
+  }
+
+  async swapServant(
+    slotId: string,
+    dto: { substituteServantId: string; reason?: string; context?: ScheduleSlotSwapContextDto },
+    actor: JwtPayload,
+  ) {
+    return this.contextualSwapSlot(
+      slotId,
+      {
+        substituteServantId: dto.substituteServantId,
+        reason: dto.reason,
+        context: dto.context ?? ScheduleSlotSwapContextDto.REPLACEMENT,
+      },
+      actor,
+    );
+  }
+
+  async confirmSchedule(slotId: string, actor: JwtPayload) {
+    return this.respondSlotConfirmation(slotId, ScheduleResponseStatus.CONFIRMED, actor);
+  }
+
+  async declineSchedule(slotId: string, actor: JwtPayload, declineReason?: string) {
+    return this.respondSlotConfirmation(slotId, ScheduleResponseStatus.DECLINED, actor, declineReason);
+  }
+
+  async suggestSubstitute(slotId: string, actor: JwtPayload) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    await this.assertCanManageMinistry(actor, slot.ministryId);
+
+    const candidates = await this.listSlotEligibility(slot.serviceId, slot.ministryId, slot);
+    return candidates
+      .filter((item) => item.eligible && item.servantId !== slot.assignedServantId)
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, 5);
+  }
+
+  async listEligibleServantsForSlot(slotId: string, actor: JwtPayload) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    await this.assertCanManageMinistry(actor, slot.ministryId);
+    return this.listSlotEligibility(slot.serviceId, slot.ministryId, slot);
+  }
+
   async autoGenerateExplained(dto: AutoGenerateScheduleSlotsDto, actor: JwtPayload) {
     const ministryId = dto.ministryId;
     if (!ministryId) {
@@ -1016,7 +1267,12 @@ export class SchedulesService {
 
     const results: Array<Record<string, unknown>> = [];
     const usedServants = new Set<string>();
-    const targetSlots = slots.filter((slot) => slot.status === ScheduleSlotStatus.OPEN || !slot.assignedServantId);
+    const targetSlots = slots.filter(
+      (slot) =>
+        slot.status === ScheduleSlotStatus.OPEN ||
+        slot.status === ScheduleSlotStatus.EMPTY ||
+        !slot.assignedServantId,
+    );
 
     for (const slot of targetSlots) {
       const eligible = await this.listSlotEligibility(dto.serviceId, ministryId, slot);
@@ -2915,6 +3171,131 @@ export class SchedulesService {
     throw new ForbiddenException(WORKSPACE_CONTEXT_ERRORS.roleWithoutWorkspacePermission);
   }
 
+  private async respondSlotConfirmation(
+    slotId: string,
+    responseStatus: ScheduleResponseStatus,
+    actor: JwtPayload,
+    declineReason?: string,
+  ) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      include: {
+        schedule: {
+          select: { id: true, servantId: true },
+        },
+      },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    if (!slot.scheduleId || !slot.schedule) {
+      throw new BadRequestException('Slot is not linked to a schedule assignment');
+    }
+
+    if (responseStatus === ScheduleResponseStatus.DECLINED && !declineReason?.trim()) {
+      throw new BadRequestException('declineReason is required when declining a slot');
+    }
+
+    if (actor.role === Role.SERVO) {
+      if (!actor.servantId || actor.servantId !== slot.schedule.servantId) {
+        throw new ForbiddenException('You do not have permission to respond this slot');
+      }
+    } else {
+      await this.assertCanManageMinistry(actor, slot.ministryId);
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const schedule = await tx.schedule.update({
+        where: { id: slot.scheduleId! },
+        data: {
+          responseStatus,
+          responseAt: now,
+          declineReason: responseStatus === ScheduleResponseStatus.DECLINED ? declineReason?.trim() : null,
+          status:
+            responseStatus === ScheduleResponseStatus.CONFIRMED
+              ? ScheduleStatus.CONFIRMED
+              : ScheduleStatus.ASSIGNED,
+        },
+      });
+
+      const nextSlot = await tx.scheduleSlot.update({
+        where: { id: slotId },
+        data: {
+          status:
+            responseStatus === ScheduleResponseStatus.CONFIRMED
+              ? ScheduleSlotStatus.CONFIRMED
+              : ScheduleSlotStatus.DECLINED,
+          confirmationStatus:
+            responseStatus === ScheduleResponseStatus.CONFIRMED
+              ? ScheduleSlotConfirmationStatus.CONFIRMED
+              : ScheduleSlotConfirmationStatus.DECLINED,
+          blocked: responseStatus === ScheduleResponseStatus.DECLINED,
+          blockedReason:
+            responseStatus === ScheduleResponseStatus.DECLINED
+              ? declineReason?.trim() ?? 'DECLINED_BY_SERVANT'
+              : null,
+        },
+      });
+
+      await tx.scheduleResponseHistory.create({
+        data: {
+          scheduleId: slot.scheduleId!,
+          responseStatus,
+          declineReason: responseStatus === ScheduleResponseStatus.DECLINED ? declineReason?.trim() : null,
+          respondedByUserId: actor.sub,
+        },
+      });
+
+      return { schedule, nextSlot };
+    });
+
+    await this.auditService.log({
+      action:
+        responseStatus === ScheduleResponseStatus.CONFIRMED
+          ? AuditAction.SLOT_CONFIRMED
+          : AuditAction.SLOT_DECLINED,
+      entity: 'ScheduleSlot',
+      entityId: slotId,
+      userId: actor.sub,
+      metadata: {
+        scheduleId: slot.scheduleId,
+        responseStatus,
+        declineReason: declineReason?.trim() ?? null,
+      },
+    });
+
+    await this.eventBus.emit({
+      name: responseStatus === ScheduleResponseStatus.CONFIRMED ? 'SLOT_CONFIRMED' : 'SLOT_DECLINED',
+      occurredAt: now,
+      actorUserId: actor.sub,
+      churchId: slot.churchId,
+      payload: {
+        slotId,
+        scheduleId: slot.scheduleId,
+        responseStatus,
+      },
+    });
+
+    await this.notifyScheduleEvent(
+      slot.schedule.servantId,
+      responseStatus === ScheduleResponseStatus.CONFIRMED ? 'SCHEDULE_CONFIRMED' : 'SCHEDULE_DECLINED',
+      responseStatus === ScheduleResponseStatus.CONFIRMED
+        ? 'Escala confirmada'
+        : 'Escala recusada',
+      responseStatus === ScheduleResponseStatus.CONFIRMED
+        ? 'Sua confirmacao foi registrada.'
+        : `Recusa registrada${declineReason?.trim() ? `: ${declineReason.trim()}` : '.'}`,
+      {
+        slotId,
+        scheduleId: slot.scheduleId,
+      },
+    );
+
+    this.invalidateSchedulingCaches(slot.serviceId, slot.ministryId);
+    return updated.nextSlot;
+  }
+
   private evaluateServiceOperationalStatus(
     serviceStatus: WorshipServiceStatus,
     slots: Array<{
@@ -2961,7 +3342,10 @@ export class SchedulesService {
     ).length;
 
     const slotPending = slots.filter(
-      (slot) => slot.status === ScheduleSlotStatus.PENDING_CONFIRMATION,
+      (slot) =>
+        slot.status === ScheduleSlotStatus.PENDING_CONFIRMATION ||
+        slot.status === ScheduleSlotStatus.FILLED ||
+        slot.status === ScheduleSlotStatus.SUBSTITUTE_PENDING,
     ).length;
     const schedulePending = schedules.filter(
       (schedule) => schedule.responseStatus === ScheduleResponseStatus.PENDING,
@@ -2985,7 +3369,11 @@ export class SchedulesService {
     }
 
     const hasSwap =
-      slots.some((slot) => slot.status === ScheduleSlotStatus.SWAPPED) ||
+      slots.some(
+        (slot) =>
+          slot.status === ScheduleSlotStatus.SWAPPED ||
+          slot.status === ScheduleSlotStatus.REPLACED,
+      ) ||
       schedules.some((schedule) => schedule.status === ScheduleStatus.SWAPPED);
     const hasDeclined = schedules.some(
       (schedule) => schedule.responseStatus === ScheduleResponseStatus.DECLINED,
@@ -3244,7 +3632,8 @@ export class SchedulesService {
     const updated = await this.prisma.scheduleSlot.update({
       where: { id: slotId },
       data: {
-        status: forceFill ? ScheduleSlotStatus.PENDING_CONFIRMATION : ScheduleSlotStatus.SWAPPED,
+        status: forceFill ? ScheduleSlotStatus.SUBSTITUTE_PENDING : ScheduleSlotStatus.REPLACED,
+        confirmationStatus: ScheduleSlotConfirmationStatus.PENDING,
       },
     });
 

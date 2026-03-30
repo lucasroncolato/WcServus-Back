@@ -15,6 +15,8 @@ export class TimelineEventsSubscriber implements OnModuleInit {
       SERVANT_CREATED: TimelineEntryType.CHURCH_MILESTONE,
       SLOT_ASSIGNED: TimelineEntryType.SCHEDULE_PUBLISHED,
       SLOT_CONFIRMED: TimelineEntryType.SERVICE_COMPLETED,
+      SLOT_DECLINED: TimelineEntryType.GENERIC_EVENT,
+      SCHEDULE_GENERATED: TimelineEntryType.SCHEDULE_PUBLISHED,
       ATTENDANCE_REGISTERED: TimelineEntryType.SERVICE_COMPLETED,
       MINISTRY_TASK_COMPLETED: TimelineEntryType.TASK_COMPLETED,
       MINISTRY_TASK_OVERDUE: TimelineEntryType.TASK_OVERDUE,

@@ -10,12 +10,13 @@ import { PastoralRule } from './eligibility/rules/pastoral.rule';
 import { TalentRule } from './eligibility/rules/talent.rule';
 import { TrainingRule } from './eligibility/rules/training.rule';
 import { EligibilityScoreService } from './eligibility/eligibility-score.service';
+import { ScheduleSlotsController } from './schedule-slots.controller';
 import { SchedulesController } from './schedules.controller';
 import { SchedulesService } from './schedules.service';
 
 @Module({
   imports: [AuditModule, NotificationsModule, MinistryTasksModule],
-  controllers: [SchedulesController],
+  controllers: [SchedulesController, ScheduleSlotsController],
   providers: [
     SchedulesService,
     EligibilityEngine,

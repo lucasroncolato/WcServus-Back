@@ -8,6 +8,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SchedulesService } from '../schedules/schedules.service';
+import { ListScheduleWorkspaceQueryDto } from '../schedules/dto/list-schedule-workspace-query.dto';
 import { CreateWorshipServiceDto } from './dto/create-worship-service.dto';
 import { ListWorshipServicesQueryDto } from './dto/list-worship-services-query.dto';
 import { UpdateWorshipServiceDto } from './dto/update-worship-service.dto';
@@ -19,6 +21,7 @@ export class WorshipServicesService {
     private readonly tenantIntegrity: TenantIntegrityService,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly schedulesService: SchedulesService,
   ) {}
 
   private isFullVisibilityRole(role: Role) {
@@ -144,6 +147,17 @@ export class WorshipServicesService {
 
   async create(dto: CreateWorshipServiceDto, actor: JwtPayload) {
     const churchId = this.tenantIntegrity.assertActorChurch(actor);
+    if (dto.templateId) {
+      const template = await this.prisma.serviceTemplate.findUnique({
+        where: { id: dto.templateId },
+        select: { churchId: true },
+      });
+      if (!template) {
+        throw new NotFoundException('Service template not found');
+      }
+      this.tenantIntegrity.assertSameChurch(churchId, template.churchId, 'Service template');
+    }
+
     const service = await this.prisma.worshipService.create({
       data: {
         ...dto,
@@ -166,6 +180,16 @@ export class WorshipServicesService {
 
   async update(id: string, dto: UpdateWorshipServiceDto, actor: JwtPayload) {
     await this.ensureExists(id, actor);
+    if (dto.templateId) {
+      const template = await this.prisma.serviceTemplate.findUnique({
+        where: { id: dto.templateId },
+        select: { churchId: true },
+      });
+      if (!template) {
+        throw new NotFoundException('Service template not found');
+      }
+      this.tenantIntegrity.assertSameChurch(this.tenantIntegrity.assertActorChurch(actor), template.churchId, 'Service template');
+    }
 
     const service = await this.prisma.worshipService.update({
       where: { id },
@@ -186,6 +210,16 @@ export class WorshipServicesService {
     await this.notifyServiceReminder(service.id, service.title, 'Atualizacao de culto. Verifique horarios e detalhes.');
 
     return service;
+  }
+
+  async generateSchedule(id: string, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
+    return this.schedulesService.autoGenerateSchedule(id, actor);
+  }
+
+  async board(id: string, query: ListScheduleWorkspaceQueryDto, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
+    return this.schedulesService.serviceBoard(id, query, actor);
   }
 
   private async ensureExists(id: string, actor: JwtPayload) {

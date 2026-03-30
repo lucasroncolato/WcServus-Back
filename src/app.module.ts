@@ -40,6 +40,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { TimelineModule } from './modules/timeline/timeline.module';
 import { ChurchAdminModule } from './modules/church-admin/church-admin.module';
 import { PublicOnboardingModule } from './modules/public-onboarding/public-onboarding.module';
+import { IntegrityModule } from './modules/integrity/integrity.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 import { PermissionPolicyService } from './common/auth/permission-policy.service';
@@ -88,6 +89,7 @@ import { PermissionPolicyService } from './common/auth/permission-policy.service
     TimelineModule,
     ChurchAdminModule,
     PublicOnboardingModule,
+    IntegrityModule,
   ],
   controllers: [HealthController],
   providers: [

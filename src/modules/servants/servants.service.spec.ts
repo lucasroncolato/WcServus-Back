@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Role, ServantStatus, TrainingStatus, UserStatus } from '@prisma/client';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -569,6 +569,55 @@ describe('ServantsService - createWithUser canonical flow', () => {
 
     expect(auditService.log).not.toHaveBeenCalled();
     expect(eventBus.emit).not.toHaveBeenCalled();
+  });
+
+  it('blocks duplicated email before transaction start', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({ id: 'existing-user' });
+
+    await expect(
+      service.createWithUser(
+        {
+          name: 'Duplicado',
+          ministryIds: ['ministry-1'],
+          user: {
+            email: 'duplicado@servus.app',
+            name: 'Duplicado',
+            role: Role.SERVO,
+          },
+        },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('blocks creation when ministry belongs to another tenant', async () => {
+    prisma.ministry.findMany.mockResolvedValueOnce([{ id: 'ministry-1', churchId: 'church-b' }]);
+    tenantIntegrity.assertSameChurch.mockImplementation(
+      (actorChurchId: string, entityChurchId: string) => {
+        if (actorChurchId !== entityChurchId) {
+          throw new ForbiddenException('Ministry belongs to another church');
+        }
+      },
+    );
+
+    await expect(
+      service.createWithUser(
+        {
+          name: 'Outro Tenant',
+          ministryIds: ['ministry-1'],
+          user: {
+            email: 'tenant@servus.app',
+            name: 'Outro Tenant',
+            role: Role.SERVO,
+          },
+        },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
 

@@ -12,6 +12,7 @@ const byRole: Record<Role, Capability[]> = {
     capabilities.pastoralReadMinistry,
     capabilities.reportsReadMinistry,
     capabilities.usersManageChurch,
+    capabilities.integrityReadChurch,
     capabilities.automationManageChurch,
     capabilities.analyticsReadChurch,
     capabilities.timelineReadChurch,

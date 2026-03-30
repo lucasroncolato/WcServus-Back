@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role, UserStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
@@ -13,10 +14,12 @@ import { CreateServantDto } from './create-servant.dto';
 export class CreateServantUserDto {
   @ApiPropertyOptional({ description: 'Se omitido, usa o nome do servo.' })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   name?: string;
 
   @ApiProperty()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
   email: string;
 
@@ -27,6 +30,7 @@ export class CreateServantUserDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.replace(/\D/g, '') : value))
   @IsString()
   phone?: string;
 

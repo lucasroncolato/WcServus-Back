@@ -324,68 +324,84 @@ export class ServantsService {
     );
     const passwordHash = await bcrypt.hash(initialPassword, 10);
 
-    const servant = await this.prisma.$transaction(async (tx) => {
-      const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
-      const createdServant = await tx.servant.create({
-        data: {
-          churchId: actorChurchId,
-          name: dto.name,
-          phone: dto.phone,
-          gender: dto.gender,
-          birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-          status: isCoordinatorRequest
-            ? ServantStatus.RECRUTAMENTO
-            : this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
-          trainingStatus: TrainingStatus.PENDING,
-          approvalStatus: isCoordinatorRequest
-            ? ServantApprovalStatus.PENDING
-            : ServantApprovalStatus.APPROVED,
-          approvalRequestedByUserId: isCoordinatorRequest ? actor.sub : null,
-          approvedByUserId: isCoordinatorRequest ? null : actor.sub,
-          approvalUpdatedAt: new Date(),
-          approvalNotes: isCoordinatorRequest
-            ? 'Solicitacao criada por coordenador. Pendente de aprovacao administrativa.'
-            : 'Aprovado na criacao por perfil administrativo.',
-          aptitude: dto.aptitude,
-          teamId,
-          mainMinistryId: ministryIds[0],
-          notes: dto.notes,
-          joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : undefined,
-        },
-      });
+    let servant: ServantWithRelations;
+    try {
+      servant = await this.prisma.$transaction(async (tx) => {
+        const actorChurchId = this.tenantIntegrity.assertActorChurch(actor);
+        const createdServant = await tx.servant.create({
+          data: {
+            churchId: actorChurchId,
+            name: dto.name,
+            phone: dto.phone,
+            gender: dto.gender,
+            birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
+            status: isCoordinatorRequest
+              ? ServantStatus.RECRUTAMENTO
+              : this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
+            trainingStatus: TrainingStatus.PENDING,
+            approvalStatus: isCoordinatorRequest
+              ? ServantApprovalStatus.PENDING
+              : ServantApprovalStatus.APPROVED,
+            approvalRequestedByUserId: isCoordinatorRequest ? actor.sub : null,
+            approvedByUserId: isCoordinatorRequest ? null : actor.sub,
+            approvalUpdatedAt: new Date(),
+            approvalNotes: isCoordinatorRequest
+              ? 'Solicitacao criada por coordenador. Pendente de aprovacao administrativa.'
+              : 'Aprovado na criacao por perfil administrativo.',
+            aptitude: dto.aptitude,
+            teamId,
+            mainMinistryId: ministryIds[0],
+            notes: dto.notes,
+            joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : undefined,
+          },
+        });
 
-      await tx.servantMinistry.createMany({
-        data: ministryIds.map((ministryId) => ({ servantId: createdServant.id, ministryId })),
-      });
+        await tx.servantMinistry.createMany({
+          data: ministryIds.map((ministryId) => ({ servantId: createdServant.id, ministryId })),
+        });
 
-      await tx.servantStatusHistory.create({
-        data: {
-          servantId: createdServant.id,
-          toStatus: createdServant.status,
-          reason: 'Initial status on creation',
-        },
-      });
+        await tx.servantStatusHistory.create({
+          data: {
+            servantId: createdServant.id,
+            toStatus: createdServant.status,
+            reason: 'Initial status on creation',
+          },
+        });
 
-      await tx.user.create({
-        data: {
-          name: dto.user.name ?? createdServant.name,
-          email,
-          passwordHash,
-          role: targetRole,
-          scope: UserScope.SELF,
-          status: isCoordinatorRequest ? UserStatus.INACTIVE : dto.user.status ?? UserStatus.ACTIVE,
-          phone: dto.user.phone ?? createdServant.phone ?? null,
-          servantId: createdServant.id,
-          churchId: actorChurchId,
-          mustChangePassword: true,
-        },
-      });
+        await tx.user.create({
+          data: {
+            name: dto.user.name ?? createdServant.name,
+            email,
+            passwordHash,
+            role: targetRole,
+            scope: UserScope.SELF,
+            status: isCoordinatorRequest ? UserStatus.INACTIVE : dto.user.status ?? UserStatus.ACTIVE,
+            phone: dto.user.phone ?? createdServant.phone ?? null,
+            servantId: createdServant.id,
+            churchId: actorChurchId,
+            mustChangePassword: true,
+          },
+        });
 
-      return tx.servant.findUniqueOrThrow({
-        where: { id: createdServant.id },
-        include: this.servantInclude,
+        return tx.servant.findUniqueOrThrow({
+          where: { id: createdServant.id },
+          include: this.servantInclude,
+        });
       });
-    });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = Array.isArray(error.meta?.target)
+          ? error.meta.target.join(',')
+          : String(error.meta?.target ?? '');
+        if (target.includes('email')) {
+          throw new ConflictException('Email already in use');
+        }
+        if (target.includes('servantId')) {
+          throw new ConflictException('Servant is already linked to another user');
+        }
+      }
+      throw error;
+    }
 
     await this.auditService.log({
       action: AuditAction.CREATE_SERVANT,
@@ -412,7 +428,10 @@ export class ServantsService {
       },
     });
 
-    return this.toApiServant(servant);
+    return {
+      message: 'Servant and user created successfully',
+      data: this.toApiServant(servant),
+    };
   }
 
   async linkUser(servantId: string, dto: LinkServantUserDto, actor: JwtPayload) {

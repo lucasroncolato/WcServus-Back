@@ -537,7 +537,7 @@ export class UsersService {
 
     const targetUser = await this.prisma.user.findUnique({
       where: { id },
-      select: { id: true, role: true },
+      select: { id: true, role: true, servantId: true },
     });
     if (!targetUser) {
       throw new NotFoundException('User not found');
@@ -545,9 +545,16 @@ export class UsersService {
 
     this.assertCanManageRoleChange(actor.role, targetUser.role, dto.role);
 
+    if (dto.role === Role.SERVO && !targetUser.servantId) {
+      throw new BadRequestException('SERVO user must be linked to a servant');
+    }
+
     const user = await this.prisma.user.update({
       where: { id },
-      data: { role: dto.role },
+      data: {
+        role: dto.role,
+        scope: dto.role === Role.SERVO ? UserScope.SELF : undefined,
+      },
       select: USER_SELECT,
     });
 
@@ -630,6 +637,10 @@ export class UsersService {
   async setServantLink(id: string, dto: LinkUserServantDto, actorUserId?: string) {
     await this.assertCanAccessTargetUserByActorId(actorUserId, id);
 
+    if (dto.servantId === undefined) {
+      throw new BadRequestException('servantId must be provided (or null to unlink)');
+    }
+
     const currentUser = await this.prisma.user.findUnique({
       where: { id },
       select: { id: true, role: true, servantId: true },
@@ -639,9 +650,9 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    if (dto.servantId === null && currentUser.role === Role.SERVO && currentUser.servantId) {
+    if ((dto.servantId === null || dto.servantId === undefined) && currentUser.role === Role.SERVO) {
       throw new BadRequestException(
-        'SERVO user cannot be unlinked from servant. Link another SERVO user first.',
+        'SERVO user must stay linked to a servant.',
       );
     }
 

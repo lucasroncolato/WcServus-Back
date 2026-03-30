@@ -1,6 +1,7 @@
-﻿export const capabilities = {
+export const capabilities = {
   ministriesRead: 'ministries.read',
   ministriesUpdateOwn: 'ministries.update.own',
+  servantsCreateWithUser: 'servants.create-with-user',
   schedulesAssignOwnMinistry: 'schedules.assign.own-ministry',
   tasksReassignOwnMinistry: 'tasks.reassign.own-ministry',
   pastoralReadMinistry: 'pastoral.read.ministry',
@@ -17,3 +18,4 @@
 } as const;
 
 export type Capability = (typeof capabilities)[keyof typeof capabilities];
+

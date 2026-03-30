@@ -110,6 +110,15 @@ describe('UsersService - updateRole', () => {
       NotFoundException,
     );
   });
+
+  it('bloqueia promover para SERVO quando usuario nao possui servantId', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-4', role: Role.ADMIN, servantId: null });
+
+    await expect(
+      service.updateRole('user-4', { role: Role.SERVO }, superAdminActor),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('UsersService - compatibility safeguards', () => {

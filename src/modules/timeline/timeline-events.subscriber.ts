@@ -12,6 +12,7 @@ export class TimelineEventsSubscriber implements OnModuleInit {
 
   onModuleInit() {
     const map: Record<string, TimelineEntryType> = {
+      SERVANT_CREATED: TimelineEntryType.CHURCH_MILESTONE,
       SLOT_ASSIGNED: TimelineEntryType.SCHEDULE_PUBLISHED,
       SLOT_CONFIRMED: TimelineEntryType.SERVICE_COMPLETED,
       ATTENDANCE_REGISTERED: TimelineEntryType.SERVICE_COMPLETED,

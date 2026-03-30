@@ -1,4 +1,4 @@
-﻿import { Role } from '@prisma/client';
+import { Role } from '@prisma/client';
 import { Capability, capabilities } from './capabilities';
 
 const byRole: Record<Role, Capability[]> = {
@@ -6,6 +6,7 @@ const byRole: Record<Role, Capability[]> = {
   [Role.ADMIN]: [
     capabilities.ministriesRead,
     capabilities.ministriesUpdateOwn,
+    capabilities.servantsCreateWithUser,
     capabilities.schedulesAssignOwnMinistry,
     capabilities.tasksReassignOwnMinistry,
     capabilities.pastoralReadMinistry,
@@ -26,6 +27,7 @@ const byRole: Record<Role, Capability[]> = {
   ],
   [Role.COORDENADOR]: [
     capabilities.ministriesRead,
+    capabilities.servantsCreateWithUser,
     capabilities.schedulesAssignOwnMinistry,
     capabilities.tasksReassignOwnMinistry,
     capabilities.pastoralReadMinistry,
@@ -42,3 +44,4 @@ const byRole: Record<Role, Capability[]> = {
 export function capabilitiesForRole(role: Role) {
   return byRole[role] ?? [];
 }
+

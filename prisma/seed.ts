@@ -75,6 +75,20 @@ type MinistrySeed = {
   servants: ServantSeed[];
 };
 
+type CreatedService = {
+  id: string;
+  title: string;
+  churchId: string;
+  type: WorshipServiceType;
+  serviceDate: Date;
+  startTime: string;
+  status: WorshipServiceStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+};
+
 function normalizeEmail(name: string) {
   return (
     name
@@ -115,31 +129,45 @@ async function upsertUser(params: {
   phone?: string | null;
   servantId?: string | null;
 }) {
-  return prisma.user.upsert({
-    where: { email: params.email },
-    update: {
-      name: params.name,
-      passwordHash: params.passwordHash,
-      role: params.role,
-      churchId: params.churchId,
-      scope: params.scope ?? UserScope.GLOBAL,
-      status: params.status ?? UserStatus.ACTIVE,
-      phone: params.phone ?? null,
-      servantId: params.servantId ?? null,
-      deletedAt: null,
-      deletedBy: null,
-    },
-    create: {
-      name: params.name,
-      email: params.email,
-      passwordHash: params.passwordHash,
-      role: params.role,
-      churchId: params.churchId,
-      scope: params.scope ?? UserScope.GLOBAL,
-      status: params.status ?? UserStatus.ACTIVE,
-      phone: params.phone ?? null,
-      servantId: params.servantId ?? null,
-    },
+  return prisma.$transaction(async (tx) => {
+    if (params.servantId) {
+      await tx.user.updateMany({
+        where: {
+          servantId: params.servantId,
+          email: { not: params.email },
+        },
+        data: {
+          servantId: null,
+        },
+      });
+    }
+
+    return tx.user.upsert({
+      where: { email: params.email },
+      update: {
+        name: params.name,
+        passwordHash: params.passwordHash,
+        role: params.role,
+        churchId: params.churchId,
+        scope: params.scope ?? UserScope.GLOBAL,
+        status: params.status ?? UserStatus.ACTIVE,
+        phone: params.phone ?? null,
+        servantId: params.servantId ?? null,
+        deletedAt: null,
+        deletedBy: null,
+      },
+      create: {
+        name: params.name,
+        email: params.email,
+        passwordHash: params.passwordHash,
+        role: params.role,
+        churchId: params.churchId,
+        scope: params.scope ?? UserScope.GLOBAL,
+        status: params.status ?? UserStatus.ACTIVE,
+        phone: params.phone ?? null,
+        servantId: params.servantId ?? null,
+      },
+    });
   });
 }
 
@@ -863,28 +891,23 @@ async function main() {
       responsibilities.push(responsibility);
     }
 
-    await prisma.user.update({
-      where: { id: coordinatorUser.id },
-      data: {
-        servantId: servants[0]?.id ?? null,
-      },
-    });
-
-    await prisma.userMinistryBinding.upsert({
+    const existingBinding = await prisma.userMinistryBinding.findFirst({
       where: {
-        userId_ministryId_teamId: {
-          userId: coordinatorUser.id,
-          ministryId: ministry.id,
-          teamId: null,
-        },
-      },
-      update: {},
-      create: {
         userId: coordinatorUser.id,
         ministryId: ministry.id,
         teamId: null,
       },
+      select: { id: true },
     });
+
+    if (!existingBinding) {
+      await prisma.userMinistryBinding.create({
+        data: {
+          userId: coordinatorUser.id,
+          ministryId: ministry.id,
+        },
+      });
+    }
 
     await prisma.servantStatusHistory.createMany({
       data: servants.map((servant) => ({
@@ -946,7 +969,7 @@ async function main() {
     },
   ];
 
-  const createdServices = [];
+  const createdServices: CreatedService[] = [];
   for (const item of servicesData) {
     const service = await prisma.worshipService.upsert({
       where: {
@@ -972,7 +995,7 @@ async function main() {
         status: item.status,
       },
     });
-    createdServices.push(service);
+    createdServices.push(service as CreatedService);
   }
 
   for (const service of createdServices) {
@@ -1163,10 +1186,18 @@ async function main() {
     }
   }
 
+  const cultoDomingoNoite1 = createdServices.find(
+    (svc) => svc.title === 'Culto Domingo Noite 1',
+  );
+
+  const recepcaoMinistry = createdMinistries.find(
+    (m) => m.ministry.name === 'Recepção',
+  );
+
   const receptionSchedule = createdSchedules.find(
     (s) =>
-      s.serviceId === createdServices.find((svc) => svc.title === 'Culto Domingo Noite 1')?.id &&
-      s.ministryId === createdMinistries.find((m) => m.ministry.name === 'Recepção')?.ministry.id,
+      s.serviceId === cultoDomingoNoite1?.id &&
+      s.ministryId === recepcaoMinistry?.ministry.id,
   );
 
   const mediaMinistry = createdMinistries.find((m) => m.ministry.name === 'Mídia')!;

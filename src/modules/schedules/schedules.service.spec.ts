@@ -878,6 +878,503 @@ describe('SchedulesService - assignment flow with ministry training', () => {
   });
 });
 
+describe('SchedulesService - slot operations pending gaps', () => {
+  const prisma = {
+    scheduleSlot: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+    },
+    schedule: {
+      deleteMany: jest.fn(),
+    },
+    scheduleSlotChange: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+    },
+    auditLog: {
+      findMany: jest.fn(),
+    },
+    timelineEntry: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+    },
+    notification: {
+      findMany: jest.fn(),
+    },
+    scheduleResponseHistory: {
+      findMany: jest.fn(),
+    },
+    $transaction: jest.fn(),
+  } as any;
+
+  const auditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+
+  const notificationsService = {
+    notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
+
+  const actor: JwtPayload = {
+    sub: 'admin-1',
+    email: 'admin@wcservus.com',
+    role: Role.ADMIN,
+    servantId: null,
+    churchId: 'church-1',
+  };
+
+  let service: SchedulesService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.scheduleSlot.findUnique.mockReset();
+    prisma.scheduleSlot.update.mockReset();
+    prisma.scheduleSlot.count.mockReset();
+    prisma.schedule.deleteMany.mockReset();
+    prisma.scheduleSlotChange.create.mockReset();
+    prisma.scheduleSlotChange.findMany.mockReset();
+    prisma.auditLog.findMany.mockReset();
+    prisma.timelineEntry.create.mockReset();
+    prisma.timelineEntry.findMany.mockReset();
+    prisma.notification.findMany.mockReset();
+    prisma.scheduleResponseHistory.findMany.mockReset();
+    prisma.$transaction.mockReset();
+    (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset();
+    (auditService.log as jest.Mock).mockReset();
+    (auditService.log as jest.Mock).mockResolvedValue(undefined);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
+  });
+
+  it('unassigns slot with success', async () => {
+    prisma.scheduleSlot.findUnique.mockResolvedValue({
+      id: 'slot-1',
+      ministryId: 'ministry-1',
+      churchId: 'church-1',
+      serviceId: 'svc-1',
+      assignedServantId: 'servant-1',
+      status: 'FILLED',
+    });
+
+    prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback({
+        scheduleSlot: {
+          update: jest.fn().mockResolvedValue({
+            id: 'slot-1',
+            assignedServantId: null,
+            status: 'EMPTY',
+            confirmationStatus: 'PENDING',
+          }),
+          count: jest.fn().mockResolvedValue(0),
+        },
+        schedule: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        scheduleSlotChange: {
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      }),
+    );
+
+    const result = await service.unassignSlot('slot-1', actor);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        slot: expect.objectContaining({
+          id: 'slot-1',
+          servantId: null,
+          slotStatus: 'EMPTY',
+          confirmationStatus: 'PENDING',
+        }),
+      }),
+    );
+    expect(auditService.log).toHaveBeenCalled();
+  });
+
+  it('blocks unassign when coordinator has no scope', async () => {
+    const coordinator: JwtPayload = {
+      ...actor,
+      role: Role.COORDENADOR,
+    };
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue([]);
+    prisma.scheduleSlot.findUnique.mockResolvedValue({
+      id: 'slot-1',
+      ministryId: 'ministry-1',
+      churchId: 'church-1',
+      serviceId: 'svc-1',
+      assignedServantId: 'servant-1',
+      status: 'FILLED',
+    });
+
+    await expect(service.unassignSlot('slot-1', coordinator)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('locks and unlocks slot with success', async () => {
+    prisma.scheduleSlot.findUnique
+      .mockResolvedValueOnce({
+        id: 'slot-1',
+        ministryId: 'ministry-1',
+        churchId: 'church-1',
+        serviceId: 'svc-1',
+        assignedServantId: 'servant-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'slot-1',
+        ministryId: 'ministry-1',
+        churchId: 'church-1',
+        serviceId: 'svc-1',
+        assignedServantId: 'servant-1',
+      });
+
+    prisma.scheduleSlot.update
+      .mockResolvedValueOnce({
+        id: 'slot-1',
+        status: 'LOCKED',
+      })
+      .mockResolvedValueOnce({
+        id: 'slot-1',
+        status: 'FILLED',
+      });
+
+    const lockResult = await service.lockSlot('slot-1', actor);
+    const unlockResult = await service.unlockSlot('slot-1', actor);
+
+    expect(lockResult.slot.slotStatus).toBe('LOCKED');
+    expect(unlockResult.slot.slotStatus).toBe('FILLED');
+  });
+
+  it('blocks assign and swap when slot is locked', async () => {
+    prisma.scheduleSlot.findUnique.mockResolvedValue({
+      id: 'slot-1',
+      serviceId: 'svc-1',
+      ministryId: 'ministry-1',
+      churchId: 'church-1',
+      functionName: 'Recepcao',
+      requiredTraining: true,
+      blocked: true,
+      blockedReason: 'LOCKED_BY_COORDINATOR',
+      assignedServantId: 'servant-1',
+      status: 'LOCKED',
+      service: { id: 'svc-1' },
+    });
+
+    await expect(service.assignSlot('slot-1', { servantId: 'servant-2' }, actor)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(
+      service.contextualSwapSlot(
+        'slot-1',
+        { substituteServantId: 'servant-2', context: ScheduleSlotSwapContextDto.REPLACEMENT },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('fails resend notification for empty slot', async () => {
+    prisma.scheduleSlot.findUnique.mockResolvedValue({
+      id: 'slot-1',
+      churchId: 'church-1',
+      serviceId: 'svc-1',
+      ministryId: 'ministry-1',
+      assignedServantId: null,
+      service: { title: 'Culto Domingo' },
+    });
+
+    await expect(service.resendSlotNotification('slot-1', actor)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('enforces tenant on slot history', async () => {
+    prisma.scheduleSlot.findUnique.mockResolvedValue({
+      id: 'slot-1',
+      churchId: 'church-2',
+      ministryId: 'ministry-1',
+    });
+    const tenantIntegrity = {
+      getActorChurchId: jest.fn(() => 'church-1'),
+      assertSameChurch: jest.fn(() => {
+        throw new ForbiddenException('cross-tenant');
+      }),
+      assertLinkIntegrity: jest.fn(),
+      assertActorChurch: jest.fn(() => 'church-1'),
+    } as any;
+
+    service = new SchedulesService(
+      prisma,
+      auditService,
+      notificationsService,
+      eligibilityEngine,
+      undefined as any,
+      undefined as any,
+      undefined as any,
+      tenantIntegrity,
+    );
+
+    await expect(service.slotHistory('slot-1', actor)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('enforces scope permission on slot history', async () => {
+    const coordinator: JwtPayload = {
+      ...actor,
+      role: Role.COORDENADOR,
+    };
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue([]);
+    prisma.scheduleSlot.findUnique.mockResolvedValue({
+      id: 'slot-1',
+      churchId: 'church-1',
+      ministryId: 'ministry-1',
+    });
+
+    await expect(service.slotHistory('slot-1', coordinator)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('SchedulesService - bulk toolbar actions', () => {
+  const prisma = {
+    worshipService: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    scheduleSlot: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    timelineEntry: {
+      create: jest.fn(),
+    },
+  } as any;
+
+  const auditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+
+  const notificationsService = {
+    notifyServantLinkedUser: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
+
+  const actor: JwtPayload = {
+    sub: 'admin-1',
+    email: 'admin@wcservus.com',
+    role: Role.ADMIN,
+    servantId: null,
+    churchId: 'church-1',
+  };
+
+  let service: SchedulesService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.worshipService.findUnique.mockReset();
+    prisma.worshipService.update.mockReset();
+    prisma.scheduleSlot.findMany.mockReset();
+    prisma.scheduleSlot.count.mockReset();
+    prisma.timelineEntry.create.mockReset();
+    (notificationsService.notifyServantLinkedUser as jest.Mock).mockReset();
+    (auditService.log as jest.Mock).mockReset();
+    (auditService.log as jest.Mock).mockResolvedValue(undefined);
+    service = new SchedulesService(prisma, auditService, notificationsService, eligibilityEngine);
+  });
+
+  it('notify pending success', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany
+      .mockResolvedValueOnce([{ ministryId: 'ministry-1' }])
+      .mockResolvedValueOnce([
+        { id: 'slot-1', assignedServantId: 'servant-1' },
+        { id: 'slot-2', assignedServantId: 'servant-2' },
+      ]);
+
+    const result = await service.notifyPendingSlotsForService('service-1', actor);
+    expect(result.summary.totalPending).toBe(2);
+    expect(result.summary.sent).toBe(2);
+    expect(result.summary.failed).toBe(0);
+  });
+
+  it('notify pending partial failure', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany
+      .mockResolvedValueOnce([{ ministryId: 'ministry-1' }])
+      .mockResolvedValueOnce([
+        { id: 'slot-1', assignedServantId: 'servant-1' },
+        { id: 'slot-2', assignedServantId: 'servant-2' },
+      ]);
+    (notificationsService.notifyServantLinkedUser as jest.Mock)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('provider failed'));
+
+    const result = await service.notifyPendingSlotsForService('service-1', actor);
+    expect(result.summary.sent).toBe(1);
+    expect(result.summary.failed).toBe(1);
+  });
+
+  it('fill empty slots success respecting eligibility', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany
+      .mockResolvedValueOnce([{ ministryId: 'ministry-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'slot-1',
+          serviceId: 'service-1',
+          churchId: 'church-1',
+          ministryId: 'ministry-1',
+          status: 'EMPTY',
+          blocked: false,
+          assignedServantId: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    jest.spyOn(service as any, 'listSlotEligibility').mockResolvedValue([
+      { servantId: 'servant-1', eligible: true, score: 99, reasons: [] },
+    ]);
+    jest.spyOn(service, 'assignSlot').mockResolvedValue({ id: 'slot-1' } as any);
+
+    const result = await service.fillEmptySlotsForService('service-1', actor);
+    expect(result.summary.filled).toBe(1);
+    expect(result.details[0]).toEqual(expect.objectContaining({ slotId: 'slot-1', status: 'FILLED' }));
+  });
+
+  it('fill empty slots ignores locked slots', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany
+      .mockResolvedValueOnce([{ ministryId: 'ministry-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'slot-locked',
+          serviceId: 'service-1',
+          churchId: 'church-1',
+          ministryId: 'ministry-1',
+          status: 'LOCKED',
+          blocked: true,
+          assignedServantId: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.fillEmptySlotsForService('service-1', actor);
+    expect(result.summary.filled).toBe(0);
+    expect(result.summary.unfilled).toBe(1);
+  });
+
+  it('regenerate suggestions success', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany
+      .mockResolvedValueOnce([{ ministryId: 'ministry-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'slot-1',
+          serviceId: 'service-1',
+          churchId: 'church-1',
+          ministryId: 'ministry-1',
+          status: 'EMPTY',
+          blocked: false,
+          assignedServantId: null,
+        },
+      ]);
+    jest.spyOn(service as any, 'listSlotEligibility').mockResolvedValue([
+      { servantId: 'servant-1', eligible: true, score: 88, reasons: [] },
+    ]);
+
+    const result = await service.regenerateSuggestionsForService('service-1', actor);
+    expect(result.summary.slotsEvaluated).toBe(1);
+    expect(result.summary.withSuggestions).toBe(1);
+  });
+
+  it('close schedule success with warnings', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany.mockResolvedValue([{ ministryId: 'ministry-1' }]);
+    prisma.scheduleSlot.count
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(3);
+    prisma.worshipService.update.mockResolvedValue({ id: 'service-1' });
+
+    const result = await service.closeScheduleForService('service-1', actor);
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('CLOSED');
+    expect(result.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('blocks bulk action by tenant', async () => {
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-2',
+      locked: false,
+    });
+    const tenantIntegrity = {
+      getActorChurchId: jest.fn(() => 'church-1'),
+      assertSameChurch: jest.fn(() => {
+        throw new ForbiddenException('cross-tenant');
+      }),
+      assertLinkIntegrity: jest.fn(),
+      assertActorChurch: jest.fn(() => 'church-1'),
+    } as any;
+    service = new SchedulesService(
+      prisma,
+      auditService,
+      notificationsService,
+      eligibilityEngine,
+      undefined as any,
+      undefined as any,
+      undefined as any,
+      tenantIntegrity,
+    );
+
+    await expect(service.notifyPendingSlotsForService('service-1', actor)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('blocks close schedule for coordinator without full service scope', async () => {
+    const coordinator: JwtPayload = {
+      ...actor,
+      role: Role.COORDENADOR,
+    };
+    (resolveScopedMinistryIds as jest.Mock).mockResolvedValue(['ministry-1']);
+    prisma.worshipService.findUnique.mockResolvedValue({
+      id: 'service-1',
+      title: 'Culto Domingo',
+      churchId: 'church-1',
+      locked: false,
+    });
+    prisma.scheduleSlot.findMany.mockResolvedValue([
+      { ministryId: 'ministry-1' },
+      { ministryId: 'ministry-2' },
+    ]);
+
+    await expect(service.closeScheduleForService('service-1', coordinator)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
 
 
 

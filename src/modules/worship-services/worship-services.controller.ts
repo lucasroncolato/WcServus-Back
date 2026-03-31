@@ -57,4 +57,28 @@ export class WorshipServicesController {
   ) {
     return this.worshipServicesService.board(id, query, user);
   }
+
+  @Post(':id/notify-pending-slots')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  notifyPendingSlots(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.worshipServicesService.notifyPendingSlots(id, user);
+  }
+
+  @Post(':id/fill-empty-slots')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  fillEmptySlots(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.worshipServicesService.fillEmptySlots(id, user);
+  }
+
+  @Post(':id/regenerate-suggestions')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  regenerateSuggestions(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.worshipServicesService.regenerateSuggestions(id, user);
+  }
+
+  @Patch(':id/close-schedule')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  closeSchedule(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.worshipServicesService.closeSchedule(id, user);
+  }
 }

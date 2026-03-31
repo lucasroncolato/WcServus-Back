@@ -1,51 +1,67 @@
-﻿import { Injectable, OnModuleInit } from '@nestjs/common';
-import { Prisma, TimelineEntryType, TimelineScope } from '@prisma/client';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { EventBusService } from 'src/common/events/event-bus.service';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { TimelineEventType } from 'src/common/timeline/timeline-policy';
+import { TimelinePublisherService } from './timeline-publisher.service';
 
 @Injectable()
 export class TimelineEventsSubscriber implements OnModuleInit {
   constructor(
     private readonly eventBus: EventBusService,
-    private readonly prisma: PrismaService,
+    private readonly publisher: TimelinePublisherService,
   ) {}
 
   onModuleInit() {
-    const map: Record<string, TimelineEntryType> = {
-      SERVANT_CREATED: TimelineEntryType.CHURCH_MILESTONE,
-      SLOT_ASSIGNED: TimelineEntryType.SCHEDULE_PUBLISHED,
-      SLOT_CONFIRMED: TimelineEntryType.SERVICE_COMPLETED,
-      SLOT_DECLINED: TimelineEntryType.GENERIC_EVENT,
-      SCHEDULE_GENERATED: TimelineEntryType.SCHEDULE_PUBLISHED,
-      ATTENDANCE_REGISTERED: TimelineEntryType.SERVICE_COMPLETED,
-      MINISTRY_TASK_COMPLETED: TimelineEntryType.TASK_COMPLETED,
-      MINISTRY_TASK_OVERDUE: TimelineEntryType.TASK_OVERDUE,
-      TRAINING_COMPLETED: TimelineEntryType.TRAINING_COMPLETED,
-      MINISTRY_TASK_DUE_SOON: TimelineEntryType.GENERIC_EVENT,
+    const map: Record<string, TimelineEventType> = {
+      SLOT_ASSIGNED: 'TIMELINE_SCHEDULE_ASSIGNED',
+      SLOT_CONFIRMED: 'TIMELINE_SCHEDULE_CONFIRMED',
+      SLOT_DECLINED: 'TIMELINE_SCHEDULE_DECLINED',
+      SCHEDULE_GENERATED: 'TIMELINE_SCHEDULE_AUTO_FILLED',
+      ATTENDANCE_REGISTERED: 'TIMELINE_ATTENDANCE_RECORDED',
+      TRAINING_COMPLETED: 'TIMELINE_TRAINING_COMPLETED',
+      MINISTRY_TASK_COMPLETED: 'TIMELINE_TASK_COMPLETED',
+      JOURNEY_RETURN_AFTER_GAP: 'TIMELINE_JOURNEY_RETURN_AFTER_GAP',
+      JOURNEY_NEW_MINISTRY_SERVICE: 'TIMELINE_JOURNEY_NEW_MINISTRY_SERVICE',
+      PASTORAL_ALERT_CREATED: 'TIMELINE_PASTORAL_ALERT_CREATED',
+      PASTORAL_CASE_OPENED: 'TIMELINE_PASTORAL_CASE_OPENED',
+      PASTORAL_FOLLOWUP_CREATED: 'TIMELINE_PASTORAL_FOLLOWUP_CREATED',
+      PASTORAL_ALERT_RESOLVED: 'TIMELINE_PASTORAL_ALERT_RESOLVED',
+      AUTOMATION_RULE_EXECUTED: 'TIMELINE_AUTOMATION_RULE_EXECUTED',
+      AUTOMATION_RULE_SKIPPED: 'TIMELINE_AUTOMATION_RULE_SKIPPED',
     };
 
-    for (const [eventName, type] of Object.entries(map)) {
+    for (const [eventName, eventType] of Object.entries(map)) {
       this.eventBus.on(eventName as any, async (event) => {
         if (!event.churchId) {
           return;
         }
+        const payload = (event.payload ?? {}) as Record<string, unknown>;
+        const subjectId = this.asString(payload.subjectId);
 
-        await this.prisma.timelineEntry.create({
-          data: {
-            churchId: event.churchId,
-            actorUserId: event.actorUserId ?? null,
-            scope: TimelineScope.CHURCH,
-            type,
-            title: event.name,
-            description: `Evento ${event.name} registrado automaticamente.`,
-            metadata: {
-              origin: 'event-bus',
-              payload: JSON.parse(JSON.stringify(event.payload)),
-            } as Prisma.InputJsonValue,
-            occurredAt: event.occurredAt,
+        await this.publisher.publish({
+          churchId: event.churchId,
+          eventType,
+          actorUserId: event.actorUserId ?? null,
+          ministryId: this.asString(payload.ministryId),
+          servantId: this.asString(payload.servantId),
+          subjectType: this.asString(payload.subjectType),
+          subjectId,
+          relatedEntityType: this.asString(payload.relatedEntityType),
+          relatedEntityId: this.asString(payload.relatedEntityId),
+          dedupeKey: `${eventType}:${event.churchId}:${subjectId ?? 'none'}`,
+          metadata: {
+            origin: 'event-bus',
+            eventName,
+            ...payload,
           },
+          occurredAt: event.occurredAt,
         });
       });
     }
+  }
+
+  private asString(value: unknown) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
   }
 }

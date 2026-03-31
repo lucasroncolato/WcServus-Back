@@ -222,6 +222,26 @@ export class WorshipServicesService {
     return this.schedulesService.serviceBoard(id, query, actor);
   }
 
+  async notifyPendingSlots(id: string, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
+    return this.schedulesService.notifyPendingSlotsForService(id, actor);
+  }
+
+  async fillEmptySlots(id: string, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
+    return this.schedulesService.fillEmptySlotsForService(id, actor);
+  }
+
+  async regenerateSuggestions(id: string, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
+    return this.schedulesService.regenerateSuggestionsForService(id, actor);
+  }
+
+  async closeSchedule(id: string, actor: JwtPayload) {
+    await this.ensureExists(id, actor);
+    return this.schedulesService.closeScheduleForService(id, actor);
+  }
+
   private async ensureExists(id: string, actor: JwtPayload) {
     const found = await this.prisma.worshipService.findUnique({
       where: { id },

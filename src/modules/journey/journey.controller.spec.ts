@@ -10,6 +10,8 @@ describe('JourneyController', () => {
     getMilestones: jest.fn().mockResolvedValue([]),
     getLogs: jest.fn().mockResolvedValue([]),
     getIndicators: jest.fn().mockResolvedValue([]),
+    getNextSteps: jest.fn().mockResolvedValue([]),
+    dismissNextStep: jest.fn().mockResolvedValue({ success: true }),
   } as any;
 
   const controller = new JourneyController(journeyService);
@@ -44,5 +46,13 @@ describe('JourneyController', () => {
     };
 
     await expect(controller.summary(orphanServo)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('routes next steps endpoints using authenticated servant', async () => {
+    await controller.nextSteps(servoUser);
+    await controller.dismissNextStep(servoUser, 'step-1', {});
+
+    expect(journeyService.getNextSteps).toHaveBeenCalledWith('servant-1', 'church-1');
+    expect(journeyService.dismissNextStep).toHaveBeenCalledWith('servant-1', 'church-1', 'step-1');
   });
 });

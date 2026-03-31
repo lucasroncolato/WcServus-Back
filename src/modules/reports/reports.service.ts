@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { AttendanceStatus, PastoralVisitStatus, Prisma } from '@prisma/client';
 import { getServantAccessWhere } from 'src/common/auth/access-scope';
+import {
+  attendanceAbsenceStatuses,
+  isAbsenceAttendanceStatus,
+  isPositiveAttendanceStatus,
+} from 'src/common/attendance/attendance-status.utils';
 import { AppCacheService } from 'src/common/cache/cache.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -54,9 +59,9 @@ export class ReportsService {
       const attendanceMap = new Map<string, { presences: number; absences: number }>();
       for (const item of attendanceGrouped) {
         const current = attendanceMap.get(item.servantId) ?? { presences: 0, absences: 0 };
-        if (item.status === AttendanceStatus.PRESENTE) {
+        if (isPositiveAttendanceStatus(item.status)) {
           current.presences += item._count._all;
-        } else {
+        } else if (isAbsenceAttendanceStatus(item.status)) {
           current.absences += item._count._all;
         }
         attendanceMap.set(item.servantId, current);
@@ -115,9 +120,9 @@ export class ReportsService {
       const groupedByService = new Map<string, { presentes: number; faltas: number; total: number }>();
       for (const item of attendanceGrouped) {
         const current = groupedByService.get(item.serviceId) ?? { presentes: 0, faltas: 0, total: 0 };
-        if (item.status === AttendanceStatus.PRESENTE) {
+        if (isPositiveAttendanceStatus(item.status)) {
           current.presentes += item._count._all;
-        } else {
+        } else if (isAbsenceAttendanceStatus(item.status)) {
           current.faltas += item._count._all;
         }
         current.total += item._count._all;
@@ -145,7 +150,7 @@ export class ReportsService {
 
     const absences = await this.prisma.attendance.findMany({
       where: {
-        status: { in: [AttendanceStatus.FALTA, AttendanceStatus.FALTA_JUSTIFICADA] },
+        status: { in: attendanceAbsenceStatuses() },
         service: { serviceDate: period },
         servant: servantWhere ?? undefined,
       },

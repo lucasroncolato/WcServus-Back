@@ -18,6 +18,10 @@ import {
   getMinistryAccessWhere,
   getServantAccessWhere,
 } from 'src/common/auth/access-scope';
+import {
+  attendanceAbsenceStatuses,
+  attendancePositiveStatuses,
+} from 'src/common/attendance/attendance-status.utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 
@@ -59,7 +63,7 @@ export class DashboardService {
         }),
         this.prisma.attendance.count({
           where: {
-            status: { in: [AttendanceStatus.FALTA, AttendanceStatus.FALTA_JUSTIFICADA] },
+            status: { in: attendanceAbsenceStatuses() },
             service: {
               serviceDate: { gte: monthStart, lte: monthEnd },
             },
@@ -82,7 +86,7 @@ export class DashboardService {
         }),
         this.prisma.attendance.count({
           where: {
-            status: AttendanceStatus.PRESENTE,
+            status: { in: attendancePositiveStatuses() },
             service: {
               serviceDate: { gte: monthStart, lte: monthEnd },
             },

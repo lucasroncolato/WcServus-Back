@@ -5,13 +5,12 @@ import {
   AutomationRule,
   AutomationTriggerType,
   Prisma,
-  TimelineEntryType,
-  TimelineScope,
 } from '@prisma/client';
 import { LogService } from 'src/common/log/log.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MinistryTasksService } from '../ministry-tasks/ministry-tasks.service';
+import { TimelinePublisherService } from '../timeline/timeline-publisher.service';
 
 @Injectable()
 export class AutomationEngineService {
@@ -20,6 +19,7 @@ export class AutomationEngineService {
     private readonly ministryTasksService: MinistryTasksService,
     private readonly auditService: AuditService,
     private readonly logService: LogService,
+    private readonly timelinePublisher: TimelinePublisherService,
   ) {}
 
   async runTimeAndConditionRules() {
@@ -64,16 +64,25 @@ export class AutomationEngineService {
             metadata: result.metadata as Prisma.InputJsonValue | undefined,
           },
         });
-        await this.prisma.timelineEntry.create({
-          data: {
-            churchId: rule.churchId,
-            scope: TimelineScope.CHURCH,
-            type: TimelineEntryType.AUTOMATION_TRIGGERED,
-            title: `Automacao executada: ${rule.name}`,
-            description: result.message,
-            metadata: { ruleId: rule.id, actionType: rule.actionType, dedupeKey } as Prisma.InputJsonValue,
-            occurredAt: new Date(),
+        await this.timelinePublisher.publish({
+          churchId: rule.churchId,
+          eventType: 'TIMELINE_AUTOMATION_RULE_EXECUTED',
+          actorType: 'AUTOMATION',
+          title: `Automacao executada: ${rule.name}`,
+          message: result.message,
+          subjectType: 'AUTOMATION_RULE',
+          subjectId: rule.id,
+          relatedEntityType: 'AUTOMATION_EXECUTION',
+          relatedEntityId: rule.id,
+          dedupeKey,
+          metadata: {
+            sourceModule: 'automation-engine',
+            ruleId: rule.id,
+            ruleName: rule.name,
+            actionType: rule.actionType,
+            processed: result.processed,
           },
+          occurredAt: new Date(),
         });
         await this.prisma.automationRule.update({ where: { id: rule.id }, data: { lastRunAt: new Date() } });
         await this.auditService.log({

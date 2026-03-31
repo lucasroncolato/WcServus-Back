@@ -152,12 +152,62 @@ enum AttendanceStatus {
   PRESENTE
   FALTA
   FALTA_JUSTIFICADA
+  LATE
+  LEFT_EARLY
+  EXCUSED_ABSENCE
+  SUBSTITUTED
+  EXTRA_SERVICE
+  NO_SHOW
+  CANCELLED_SERVICE
+  UNKNOWN
 }
 
 enum PastoralVisitStatus {
   ABERTA
   EM_ANDAMENTO
   RESOLVIDA
+}
+
+enum PastoralPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum PastoralReasonType {
+  ABSENCE
+  NO_SHOW
+  INACTIVITY
+  PERSONAL
+  TRAINING
+  JOURNEY_SIGNAL
+  SCHEDULE_SIGNAL
+  REQUEST_HELP
+  OTHER
+}
+
+enum PastoralAlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum PastoralAlertSource {
+  ATTENDANCE
+  SCHEDULE
+  JOURNEY
+  MANUAL
+  AUTOMATION
+}
+
+enum PastoralNoteVisibility {
+  LEADERS_ONLY
+}
+
+enum PastoralFollowUpStatus {
+  OPEN
+  DONE
+  CANCELLED
 }
 
 enum DevotionalStatus {
@@ -367,10 +417,73 @@ enum JourneyLogType {
   MILESTONE
 }
 
+enum JourneyNextStepPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum JourneyNextStepStatus {
+  OPEN
+  DONE
+  DISMISSED
+}
+
+enum JourneyProjectionCheckpointStatus {
+  OK
+  WARNING
+  ERROR
+}
+
 enum AutomationTriggerType {
   TIME
   EVENT
   CONDITION
+  THRESHOLD
+}
+
+enum AutomationRuleSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AutomationDedupeStrategy {
+  BY_EVENT
+  BY_ENTITY_WINDOW
+  CUSTOM
+}
+
+enum AutomationExecutionStatus {
+  SUCCESS
+  SKIPPED
+  FAILED
+  PARTIAL_SUCCESS
+}
+
+enum AutomationExecutionSkipReason {
+  DEDUPE
+  COOLDOWN
+  RULE_DISABLED
+  CONDITION_FALSE
+  OUT_OF_SCOPE
+  MODULE_DISABLED
+}
+
+enum AutomationSourceModule {
+  ATTENDANCE
+  SCHEDULE
+  JOURNEY
+  PASTORAL
+  TASK
+  ANALYTICS
+  SYSTEM
+}
+
+enum AutomationCheckpointStatus {
+  OK
+  WARNING
+  ERROR
 }
 
 enum AutomationActionType {
@@ -416,6 +529,30 @@ enum TimelineScope {
   SERVANT
 }
 
+enum TimelineCategory {
+  SCHEDULE
+  ATTENDANCE
+  JOURNEY
+  PASTORAL
+  AUTOMATION
+  TRAINING
+  TASK
+  SYSTEM
+}
+
+enum TimelineSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  CRITICAL
+}
+
+enum TimelineActorType {
+  USER
+  SYSTEM
+  AUTOMATION
+}
+
 enum TimelineEntryType {
   SERVICE_COMPLETED
   TASK_COMPLETED
@@ -449,6 +586,8 @@ model Church {
   attendances             Attendance[]
   pastoralVisits          PastoralVisit[]
   pastoralAlerts          PastoralAlert[]
+  pastoralNotes           PastoralNote[]
+  pastoralFollowUps       PastoralFollowUp[]
   pastoralWeeklyFollowUps PastoralWeeklyFollowUp[]
   notifications           Notification[]
   scheduleVersions        ScheduleVersion[]
@@ -458,6 +597,13 @@ model Church {
   journeyMilestones       JourneyMilestone[]
   servantMilestones       ServantMilestone[]
   journeyLogs             JourneyLog[]
+  journeyIndicatorSnapshots JourneyIndicatorSnapshot[]
+  journeyNextSteps        JourneyNextStep[]
+  journeyProjectionCheckpoints JourneyProjectionCheckpoint[]
+  churchAnalyticsSnapshots ChurchAnalyticsSnapshot[]
+  ministryAnalyticsSnapshots MinistryAnalyticsSnapshot[]
+  teamAnalyticsSnapshots   TeamAnalyticsSnapshot[]
+  servantOperationalSnapshots ServantOperationalSnapshot[]
   growthTracks            GrowthTrack[]
   timelineEntries         TimelineEntry[]
   servantGrowthProgress   ServantGrowthProgress[]
@@ -468,6 +614,7 @@ model Church {
   branding                ChurchBranding?
   modules                 ChurchModule[]
   automationPreferences   ChurchAutomationPreference?
+  automationCheckpoints   AutomationCheckpoint[]
   plans                   ChurchPlan[]
   subscriptions           Subscription[]
   automationExecutionLogs AutomationExecutionLog[]
@@ -507,7 +654,11 @@ model User {
   scheduleSwapHistory               ScheduleSwapHistory[]                     @relation("SwappedByUser")
   registeredAttendances             Attendance[]                              @relation("RegisteredAttendances")
   createdPastoralVisits             PastoralVisit[]                           @relation("CreatedPastoralVisits")
+  assignedPastoralVisits            PastoralVisit[]                           @relation("AssignedPastoralVisits")
   resolvedPastoralVisits            PastoralVisit[]                           @relation("ResolvedPastoralVisits")
+  pastoralNotes                     PastoralNote[]                            @relation("PastoralNoteAuthor")
+  createdPastoralFollowUps          PastoralFollowUp[]                        @relation("PastoralFollowUpCreatedBy")
+  completedPastoralFollowUps        PastoralFollowUp[]                        @relation("PastoralFollowUpCompletedBy")
   createdAlerts                     PastoralAlert[]                           @relation("AlertCreatedBy")
   resolvedAlerts                    PastoralAlert[]                           @relation("AlertResolvedBy")
   requestedServantApprovals         Servant[]                                 @relation("ServantApprovalRequestedBy")
@@ -538,6 +689,7 @@ model User {
   createdGrowthTrackSteps           GrowthTrackStep[]                         @relation("GrowthTrackStepCreatedBy")
   verifiedGrowthProgress            ServantGrowthProgress[]                   @relation("GrowthProgressVerifiedBy")
   createdAutomationRules            AutomationRule[]                          @relation("AutomationRuleCreatedBy")
+  updatedAutomationRules            AutomationRule[]                          @relation("AutomationRuleUpdatedBy")
   timelineEntries                   TimelineEntry[]                           @relation("TimelineEntryActor")
   createdPlans                      Plan[]                                    @relation("PlanCreatedBy")
   subscriptions                     Subscription[]                            @relation("SubscriptionCreatedBy")
@@ -604,6 +756,7 @@ model Ministry {
   serviceTemplateSlots    ServiceTemplateSlot[]
   ministryTaskTemplates   MinistryTaskTemplate[]
   ministryTaskOccurrences MinistryTaskOccurrence[]
+  analyticsSnapshots      MinistryAnalyticsSnapshot[]
   growthTracks            GrowthTrack[]
   servantMonthlyStats     ServantMonthlyStats[]
   TimelineEntry           TimelineEntry[]
@@ -633,6 +786,7 @@ model Team {
   scheduleSlots     ScheduleSlot[]
   serviceTemplateSlots ServiceTemplateSlot[]
   userScopeBindings UserMinistryBinding[]
+  analyticsSnapshots TeamAnalyticsSnapshot[]
 
   @@unique([ministryId, name])
   @@index([ministryId])
@@ -698,6 +852,10 @@ model Servant {
   journey                           ServantJourney?
   journeyMilestones                 ServantMilestone[]
   journeyLogs                       JourneyLog[]
+  journeyIndicatorSnapshots         JourneyIndicatorSnapshot[]
+  journeyNextSteps                  JourneyNextStep[]
+  journeyProjectionCheckpoints      JourneyProjectionCheckpoint[]
+  operationalAnalyticsSnapshots     ServantOperationalSnapshot[]
   timelineEntries                   TimelineEntry[]
   growthProgress                    ServantGrowthProgress[]
   monthlyStats                      ServantMonthlyStats[]
@@ -1034,9 +1192,14 @@ model PastoralVisit {
   id               String              @id @default(cuid())
   servantId        String
   churchId         String
+  title            String?
   reason           String
+  reasonType       PastoralReasonType  @default(OTHER)
+  priority         PastoralPriority    @default(MEDIUM)
+  assignedToUserId String?
   status           PastoralVisitStatus @default(ABERTA)
   openedAt         DateTime            @default(now())
+  nextFollowUpAt   DateTime?
   resolvedAt       DateTime?
   notes            String?
   createdByUserId  String
@@ -1048,12 +1211,67 @@ model PastoralVisit {
   church           Church              @relation(fields: [churchId], references: [id], onDelete: Restrict)
   servant          Servant             @relation(fields: [servantId], references: [id], onDelete: Cascade)
   createdBy        User                @relation("CreatedPastoralVisits", fields: [createdByUserId], references: [id])
+  assignedTo       User?               @relation("AssignedPastoralVisits", fields: [assignedToUserId], references: [id])
   resolvedBy       User?               @relation("ResolvedPastoralVisits", fields: [resolvedByUserId], references: [id])
+  pastoralNotes    PastoralNote[]
+  pastoralFollowUps PastoralFollowUp[]
 
   @@index([servantId])
   @@index([status])
+  @@index([priority])
+  @@index([reasonType])
+  @@index([assignedToUserId])
   @@index([openedAt])
+  @@index([nextFollowUpAt])
   @@index([churchId])
+  @@index([deletedAt])
+}
+
+model PastoralNote {
+  id              String                @id @default(cuid())
+  pastoralVisitId String
+  churchId        String
+  authorUserId    String
+  visibility      PastoralNoteVisibility @default(LEADERS_ONLY)
+  note            String
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  deletedAt       DateTime?
+  deletedBy       String?
+  church          Church                @relation(fields: [churchId], references: [id], onDelete: Restrict)
+  pastoralVisit   PastoralVisit         @relation(fields: [pastoralVisitId], references: [id], onDelete: Cascade)
+  author          User                  @relation("PastoralNoteAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([pastoralVisitId, createdAt])
+  @@index([churchId])
+  @@index([authorUserId])
+  @@index([deletedAt])
+}
+
+model PastoralFollowUp {
+  id                  String                 @id @default(cuid())
+  pastoralVisitId     String
+  churchId            String
+  scheduledAt         DateTime
+  completedAt         DateTime?
+  status              PastoralFollowUpStatus @default(OPEN)
+  notes               String?
+  createdByUserId     String
+  completedByUserId   String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  deletedAt           DateTime?
+  deletedBy           String?
+  church              Church                 @relation(fields: [churchId], references: [id], onDelete: Restrict)
+  pastoralVisit       PastoralVisit          @relation(fields: [pastoralVisitId], references: [id], onDelete: Cascade)
+  createdBy           User                   @relation("PastoralFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  completedBy         User?                  @relation("PastoralFollowUpCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([pastoralVisitId, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([churchId])
+  @@index([createdByUserId])
+  @@index([completedByUserId])
   @@index([deletedAt])
 }
 
@@ -1128,7 +1346,13 @@ model PastoralAlert {
   id               String      @id @default(cuid())
   servantId        String
   churchId         String
+  alertType        String      @default("GENERIC")
+  severity         PastoralAlertSeverity @default(MEDIUM)
+  source           PastoralAlertSource   @default(MANUAL)
+  sourceRefId      String?
+  dedupeKey        String?
   message          String
+  metadata         Json?
   status           AlertStatus @default(OPEN)
   trigger          String
   createdAt        DateTime    @default(now())
@@ -1143,8 +1367,12 @@ model PastoralAlert {
   resolvedBy       User?       @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id])
 
   @@index([servantId])
+  @@index([severity])
+  @@index([source])
   @@index([status])
+  @@index([createdAt])
   @@index([churchId])
+  @@index([dedupeKey])
   @@index([deletedAt])
 }
 
@@ -1452,6 +1680,142 @@ model JourneyLog {
   @@index([referenceId])
 }
 
+model JourneyIndicatorSnapshot {
+  id                  String   @id @default(cuid())
+  churchId            String
+  servantId           String
+  windowDays          Int
+  constancyScore      Int      @default(0)
+  readinessScore      Int      @default(0)
+  responsivenessScore Int      @default(0)
+  punctualityScore    Int      @default(0)
+  engagementScore     Int      @default(0)
+  continuityScore     Int      @default(0)
+  formationScore      Int      @default(0)
+  generatedAt         DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  church              Church   @relation(fields: [churchId], references: [id], onDelete: Restrict)
+  servant             Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, windowDays])
+  @@index([churchId, generatedAt])
+  @@index([servantId, generatedAt])
+}
+
+model JourneyNextStep {
+  id          String                  @id @default(cuid())
+  churchId    String
+  servantId   String
+  type        String
+  priority    JourneyNextStepPriority @default(MEDIUM)
+  title       String
+  description String?
+  status      JourneyNextStepStatus   @default(OPEN)
+  source      String?
+  metadata    Json?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  resolvedAt  DateTime?
+  church      Church                  @relation(fields: [churchId], references: [id], onDelete: Restrict)
+  servant     Servant                 @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@unique([servantId, type, status])
+  @@index([churchId, status, priority])
+  @@index([servantId, status, priority])
+}
+
+model JourneyProjectionCheckpoint {
+  id                    String                           @id @default(cuid())
+  churchId              String?
+  servantId             String?
+  projectorName         String
+  lastProcessedAt       DateTime?
+  lastProcessedEventKey String?
+  lastReconciledAt      DateTime?
+  status                JourneyProjectionCheckpointStatus @default(OK)
+  details               Json?
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
+  church                Church?                          @relation(fields: [churchId], references: [id], onDelete: SetNull)
+  servant               Servant?                         @relation(fields: [servantId], references: [id], onDelete: SetNull)
+
+  @@index([projectorName, status, updatedAt])
+  @@index([churchId, status])
+  @@index([servantId, status])
+  @@index([lastReconciledAt])
+}
+
+model ChurchAnalyticsSnapshot {
+  id          String   @id @default(cuid())
+  churchId    String
+  windowKey   String
+  periodStart DateTime
+  periodEnd   DateTime
+  summary     Json
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  church      Church   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  @@unique([churchId, windowKey, periodStart, periodEnd])
+  @@index([churchId, windowKey, generatedAt])
+}
+
+model MinistryAnalyticsSnapshot {
+  id          String   @id @default(cuid())
+  churchId    String
+  ministryId  String
+  windowKey   String
+  periodStart DateTime
+  periodEnd   DateTime
+  summary     Json
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  church      Church   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  ministry    Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+
+  @@unique([churchId, ministryId, windowKey, periodStart, periodEnd])
+  @@index([churchId, ministryId, windowKey, generatedAt])
+}
+
+model TeamAnalyticsSnapshot {
+  id          String   @id @default(cuid())
+  churchId    String
+  teamId      String
+  windowKey   String
+  periodStart DateTime
+  periodEnd   DateTime
+  summary     Json
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  church      Church   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([churchId, teamId, windowKey, periodStart, periodEnd])
+  @@index([churchId, teamId, windowKey, generatedAt])
+}
+
+model ServantOperationalSnapshot {
+  id          String   @id @default(cuid())
+  churchId    String
+  servantId   String
+  windowKey   String
+  periodStart DateTime
+  periodEnd   DateTime
+  summary     Json
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  church      Church   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  servant     Servant  @relation(fields: [servantId], references: [id], onDelete: Cascade)
+
+  @@unique([churchId, servantId, windowKey, periodStart, periodEnd])
+  @@index([churchId, servantId, windowKey, generatedAt])
+}
+
 model GrowthTrack {
   id            String                  @id @default(cuid())
   churchId      String
@@ -1558,45 +1922,82 @@ model AuditLog {
 }
 
 model AutomationRule {
-  id            String                   @id @default(cuid())
-  churchId      String
-  name          String
-  description   String?
-  triggerType   AutomationTriggerType
-  triggerConfig Json?
-  actionType    AutomationActionType
-  actionConfig  Json?
-  enabled       Boolean                  @default(true)
-  createdBy     String?
-  lastRunAt     DateTime?
-  createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
-  church        Church                   @relation(fields: [churchId], references: [id], onDelete: Cascade)
-  createdByUser User?                    @relation("AutomationRuleCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  executionLogs AutomationExecutionLog[]
+  id             String                   @id @default(cuid())
+  churchId       String
+  name           String
+  description    String?
+  triggerType    AutomationTriggerType
+  triggerKey     String                   @default("daily")
+  triggerConfig  Json?
+  conditionConfig Json?
+  actionType     AutomationActionType?
+  actionConfig   Json?
+  cooldownMinutes Int                     @default(0)
+  dedupeStrategy AutomationDedupeStrategy @default(BY_EVENT)
+  severity       AutomationRuleSeverity   @default(MEDIUM)
+  enabled        Boolean                  @default(true)
+  createdBy      String?
+  updatedBy      String?
+  lastRunAt      DateTime?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  deletedAt      DateTime?
+  church         Church                   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  createdByUser  User?                    @relation("AutomationRuleCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser  User?                    @relation("AutomationRuleUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  executionLogs  AutomationExecutionLog[]
 
   @@unique([churchId, name])
   @@index([churchId, enabled])
-  @@index([triggerType, enabled])
+  @@index([churchId, triggerType, triggerKey, enabled])
   @@index([actionType, enabled])
+  @@index([churchId, deletedAt])
 }
 
 model AutomationExecutionLog {
-  id        String         @id @default(cuid())
-  churchId  String
-  ruleId    String
-  dedupeKey String
-  status    String
-  message   String?
-  processed Int            @default(0)
-  metadata  Json?
-  createdAt DateTime       @default(now())
-  church    Church         @relation(fields: [churchId], references: [id], onDelete: Cascade)
-  rule      AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  id          String                     @id @default(cuid())
+  churchId    String
+  ruleId      String
+  triggerType AutomationTriggerType?
+  triggerKey  String?
+  sourceModule AutomationSourceModule   @default(SYSTEM)
+  sourceRefId String?
+  dedupeKey   String
+  status      AutomationExecutionStatus
+  skipReason  AutomationExecutionSkipReason?
+  summary     String?
+  details     Json?
+  durationMs  Int?
+  executedAt  DateTime                   @default(now())
+  message     String?
+  processed   Int                        @default(0)
+  metadata    Json?
+  createdAt   DateTime                   @default(now())
+  church      Church                     @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  rule        AutomationRule             @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
   @@unique([churchId, dedupeKey])
   @@index([churchId, createdAt])
+  @@index([churchId, status, executedAt])
+  @@index([churchId, sourceModule, executedAt])
   @@index([ruleId, createdAt])
+}
+
+model AutomationCheckpoint {
+  id                  String                   @id @default(cuid())
+  churchId            String?
+  schedulerName       String
+  lastProcessedAt     DateTime?
+  lastProcessedCursor String?
+  status              AutomationCheckpointStatus @default(OK)
+  details             Json?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  church              Church?                  @relation(fields: [churchId], references: [id], onDelete: SetNull)
+
+  @@unique([churchId, schedulerName])
+  @@index([schedulerName, status, updatedAt])
+  @@index([churchId, status])
 }
 
 model TimelineEntry {
@@ -1605,11 +2006,22 @@ model TimelineEntry {
   ministryId  String?
   servantId   String?
   actorUserId String?
+  actorType   TimelineActorType @default(SYSTEM)
+  actorName   String?
   scope       TimelineScope
   type        TimelineEntryType
+  category    TimelineCategory  @default(SYSTEM)
+  eventType   String            @default("TIMELINE_SYSTEM_EVENT")
+  severity    TimelineSeverity  @default(INFO)
   title       String
+  message     String?
   description String?
   link        String?
+  subjectType String?
+  subjectId   String?
+  relatedEntityType String?
+  relatedEntityId String?
+  dedupeKey   String?
   metadata    Json?
   occurredAt  DateTime          @default(now())
   createdAt   DateTime          @default(now())
@@ -1622,6 +2034,11 @@ model TimelineEntry {
   @@index([scope, occurredAt])
   @@index([ministryId, occurredAt])
   @@index([servantId, occurredAt])
+  @@index([churchId, category, occurredAt])
+  @@index([churchId, severity, occurredAt])
+  @@index([churchId, eventType, occurredAt])
+  @@index([churchId, subjectType, subjectId, occurredAt])
+  @@index([churchId, dedupeKey])
 }
 
 model ChurchSettings {

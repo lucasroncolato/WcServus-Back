@@ -1,4 +1,4 @@
-﻿import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { capabilities } from 'src/common/auth/capabilities';
@@ -12,34 +12,23 @@ import { TimelineService } from './timeline.service';
 @ApiTags('Timeline')
 @ApiBearerAuth()
 @Controller('timeline')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+@RequireCapabilities(capabilities.timelineReadChurch)
 export class TimelineController {
   constructor(private readonly timelineService: TimelineService) {}
 
-  @Get('church')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
-  @RequireCapabilities(capabilities.timelineReadChurch)
-  church(@CurrentUser() actor: JwtPayload, @Query() query: TimelineQueryDto) {
-    return this.timelineService.church(actor, query);
+  @Get()
+  list(@CurrentUser() actor: JwtPayload, @Query() query: TimelineQueryDto) {
+    return this.timelineService.list(actor, query);
   }
 
-  @Get('ministry/:id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
-  @RequireCapabilities(capabilities.timelineReadChurch)
-  ministry(@CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query() query: TimelineQueryDto) {
-    return this.timelineService.ministry(actor, id, query);
+  @Get('summary')
+  summary(@CurrentUser() actor: JwtPayload, @Query() query: TimelineQueryDto) {
+    return this.timelineService.summary(actor, query);
   }
 
-  @Get('servant/:id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
-  @RequireCapabilities(capabilities.timelineReadChurch)
-  servant(@CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query() query: TimelineQueryDto) {
-    return this.timelineService.servant(actor, id, query);
-  }
-
-  @Get('me')
-  @Roles(Role.SERVO)
-  @RequireCapabilities(capabilities.timelineReadOwn)
-  me(@CurrentUser() actor: JwtPayload, @Query() query: TimelineQueryDto) {
-    return this.timelineService.me(actor, query);
+  @Get(':id')
+  detail(@CurrentUser() actor: JwtPayload, @Param('id') id: string) {
+    return this.timelineService.detail(actor, id);
   }
 }

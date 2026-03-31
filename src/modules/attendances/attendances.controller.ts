@@ -6,8 +6,10 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AttendancesService } from './attendances.service';
 import { BatchAttendanceDto } from './dto/batch-attendance.dto';
+import { BulkMarkServiceAttendanceDto } from './dto/bulk-mark-service-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { ListAttendancesQueryDto } from './dto/list-attendances-query.dto';
+import { MarkServiceAttendanceDto } from './dto/mark-service-attendance.dto';
 import { UpdateAttendanceDto } from './dto/update-attendance.dto';
 
 @ApiTags('Attendances')
@@ -20,6 +22,32 @@ export class AttendancesController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   findAll(@Query() query: ListAttendancesQueryDto, @CurrentUser() user: JwtPayload) {
     return this.attendancesService.findAll(query, user);
+  }
+
+  @Get('service/:id/workspace')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  serviceWorkspace(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.attendancesService.serviceWorkspace(id, user);
+  }
+
+  @Post('service/:id/mark')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  markServiceAttendance(
+    @Param('id') id: string,
+    @Body() dto: MarkServiceAttendanceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.attendancesService.markServiceAttendance(id, dto, user);
+  }
+
+  @Post('service/:id/bulk-mark')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  bulkMarkServiceAttendance(
+    @Param('id') id: string,
+    @Body() dto: BulkMarkServiceAttendanceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.attendancesService.bulkMarkServiceAttendance(id, dto, user);
   }
 
   @Post('check-in')

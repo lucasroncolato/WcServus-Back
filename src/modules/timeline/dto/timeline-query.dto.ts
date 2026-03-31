@@ -1,30 +1,63 @@
-﻿import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
-import { TimelineEntryType, TimelineScope } from '@prisma/client';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsDateString, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class TimelineQueryDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Cursor pagination token' })
   @IsOptional()
-  @IsDateString()
-  startDate?: string;
+  @IsString()
+  cursor?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ default: 30, minimum: 1, maximum: 100 })
   @IsOptional()
-  @IsDateString()
-  endDate?: string;
-
-  @ApiPropertyOptional({ enum: TimelineScope })
-  @IsOptional()
-  @IsEnum(TimelineScope)
-  scope?: TimelineScope;
-
-  @ApiPropertyOptional({ enum: TimelineEntryType })
-  @IsOptional()
-  @IsEnum(TimelineEntryType)
-  type?: TimelineEntryType;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  origin?: string;
+  category?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  severity?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  eventType?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  actorType?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  subjectType?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  ministryId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  servantId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 }

@@ -36,7 +36,6 @@ import { MinistriesModule } from './modules/ministries/ministries.module';
 import { MinistryTasksModule } from './modules/ministry-tasks/ministry-tasks.module';
 import { JourneyModule } from './modules/journey/journey.module';
 import { AutomationRulesModule } from './modules/automation-rules/automation-rules.module';
-import { AutomationEngineModule } from './modules/automation-engine/automation-engine.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { TimelineModule } from './modules/timeline/timeline.module';
 import { ChurchAdminModule } from './modules/church-admin/church-admin.module';
@@ -86,7 +85,6 @@ import { PermissionPolicyService } from './common/auth/permission-policy.service
     MinistryTasksModule,
     JourneyModule,
     AutomationRulesModule,
-    AutomationEngineModule,
     AnalyticsModule,
     TimelineModule,
     ChurchAdminModule,

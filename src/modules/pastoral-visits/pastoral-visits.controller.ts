@@ -7,6 +7,7 @@ import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreatePastoralVisitDto } from './dto/create-pastoral-visit.dto';
 import { ListPastoralVisitsQueryDto } from './dto/list-pastoral-visits-query.dto';
 import { ResolvePastoralVisitDto } from './dto/resolve-pastoral-visit.dto';
+import { UpdatePastoralVisitDto } from './dto/update-pastoral-visit.dto';
 import { PastoralVisitsService } from './pastoral-visits.service';
 
 @ApiTags('Pastoral Visits')
@@ -28,13 +29,23 @@ export class PastoralVisitsController {
   }
 
   @Patch(':id/resolve')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   resolve(
     @Param('id') id: string,
     @Body() dto: ResolvePastoralVisitDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.pastoralVisitsService.resolve(id, dto, user);
+  }
+
+  @Patch(':id')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePastoralVisitDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.pastoralVisitsService.updateRecord(id, dto, user);
   }
 
   @Get('servant/:servantId/history')

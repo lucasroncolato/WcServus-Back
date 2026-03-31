@@ -9,6 +9,7 @@ import { MeService } from './me.service';
 import { MySchedulesQueryDto } from './dto/my-schedules-query.dto';
 import { PutMyAvailabilityDto } from './dto/put-my-availability.dto';
 import { RespondMyScheduleDto } from './dto/respond-my-schedule.dto';
+import { RespondMyScheduleSlotDto } from './dto/respond-my-schedule-slot.dto';
 import { UpdateMyServantDto } from './dto/update-my-servant.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { ChangePasswordDto } from '../auth/dto/change-password.dto';
@@ -87,5 +88,11 @@ export class MeController {
     @Body() dto: RespondMyScheduleDto,
   ) {
     return this.meService.respondMySchedule(user, id, dto);
+  }
+
+  @Patch('schedules/respond')
+  @Roles(Role.SERVO)
+  respondMyScheduleSlot(@CurrentUser() user: JwtPayload, @Body() dto: RespondMyScheduleSlotDto) {
+    return this.meService.respondMyScheduleSlot(user, dto);
   }
 }

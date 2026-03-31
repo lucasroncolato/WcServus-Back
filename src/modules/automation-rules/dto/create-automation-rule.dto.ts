@@ -1,6 +1,6 @@
-﻿import { AutomationActionType, AutomationTriggerType } from '@prisma/client';
+import { AutomationActionType, AutomationDedupeStrategy, AutomationRuleSeverity, AutomationTriggerType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class CreateAutomationRuleDto {
   @ApiProperty({ maxLength: 120 })
@@ -19,19 +19,54 @@ export class CreateAutomationRuleDto {
   @IsEnum(AutomationTriggerType)
   triggerType!: AutomationTriggerType;
 
+  @ApiProperty({ example: 'daily' })
+  @IsString()
+  @IsNotEmpty()
+  triggerKey!: string;
+
   @ApiPropertyOptional({ type: Object })
   @IsOptional()
   @IsObject()
   triggerConfig?: Record<string, unknown>;
 
-  @ApiProperty({ enum: AutomationActionType })
-  @IsEnum(AutomationActionType)
-  actionType!: AutomationActionType;
-
   @ApiPropertyOptional({ type: Object })
   @IsOptional()
   @IsObject()
-  actionConfig?: Record<string, unknown>;
+  conditionConfig?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ enum: AutomationActionType, description: 'Campo legado para compatibilidade' })
+  @IsOptional()
+  @IsEnum(AutomationActionType)
+  actionType?: AutomationActionType;
+
+  @ApiProperty({
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        action: { type: 'string' },
+        config: { type: 'object' },
+      },
+    },
+  })
+  @IsArray()
+  actionConfig!: Array<{ action: string; config?: Record<string, unknown> }>;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  cooldownMinutes?: number;
+
+  @ApiPropertyOptional({ enum: AutomationDedupeStrategy, default: AutomationDedupeStrategy.BY_EVENT })
+  @IsOptional()
+  @IsEnum(AutomationDedupeStrategy)
+  dedupeStrategy?: AutomationDedupeStrategy;
+
+  @ApiPropertyOptional({ enum: AutomationRuleSeverity, default: AutomationRuleSeverity.MEDIUM })
+  @IsOptional()
+  @IsEnum(AutomationRuleSeverity)
+  severity?: AutomationRuleSeverity;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()

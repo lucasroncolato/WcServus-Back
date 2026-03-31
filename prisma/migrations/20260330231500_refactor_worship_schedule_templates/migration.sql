@@ -56,19 +56,9 @@ ALTER TABLE "ScheduleSlot"
   ADD COLUMN "templateSlotId" TEXT,
   ADD COLUMN "confirmationStatus" "ScheduleSlotConfirmationStatus" NOT NULL DEFAULT 'PENDING';
 
--- Backfill status and confirmation
-UPDATE "ScheduleSlot"
-SET "status" = 'EMPTY'
-WHERE "status" = 'OPEN';
-
-UPDATE "ScheduleSlot"
-SET "status" = 'FILLED'
-WHERE "status" IN ('ASSIGNED', 'PENDING_CONFIRMATION');
-
-UPDATE "ScheduleSlot"
-SET "status" = 'REPLACED'
-WHERE "status" = 'SWAPPED';
-
+-- Backfill confirmation (status backfill moved to a subsequent migration
+-- because PostgreSQL does not allow using newly added enum labels in the
+-- same transaction where they are introduced).
 UPDATE "ScheduleSlot"
 SET "confirmationStatus" = 'CONFIRMED'
 WHERE "status" = 'CONFIRMED';

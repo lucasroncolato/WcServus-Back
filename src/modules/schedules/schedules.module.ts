@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { MinistryTasksModule } from '../ministry-tasks/ministry-tasks.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TimelineModule } from '../timeline/timeline.module';
 import { EligibilityEngine } from './eligibility/eligibility.engine';
 import { ActiveRule } from './eligibility/rules/active.rule';
 import { AvailabilityRule } from './eligibility/rules/availability.rule';
@@ -15,7 +16,7 @@ import { SchedulesController } from './schedules.controller';
 import { SchedulesService } from './schedules.service';
 
 @Module({
-  imports: [AuditModule, NotificationsModule, MinistryTasksModule],
+  imports: [AuditModule, NotificationsModule, MinistryTasksModule, TimelineModule],
   controllers: [SchedulesController, ScheduleSlotsController],
   providers: [
     SchedulesService,

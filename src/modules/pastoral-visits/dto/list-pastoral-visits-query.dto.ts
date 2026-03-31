@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { PastoralVisitStatus } from '@prisma/client';
+import { PastoralPriority, PastoralReasonType, PastoralVisitStatus } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class ListPastoralVisitsQueryDto {
@@ -12,4 +12,14 @@ export class ListPastoralVisitsQueryDto {
   @IsOptional()
   @IsString()
   servantId?: string;
+
+  @ApiPropertyOptional({ enum: PastoralPriority })
+  @IsOptional()
+  @IsEnum(PastoralPriority)
+  priority?: PastoralPriority;
+
+  @ApiPropertyOptional({ enum: PastoralReasonType })
+  @IsOptional()
+  @IsEnum(PastoralReasonType)
+  reasonType?: PastoralReasonType;
 }

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, MinLength } from 'class-validator';
+import { PastoralPriority, PastoralReasonType } from '@prisma/client';
+import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreatePastoralVisitDto {
   @ApiProperty({ example: 'clx_servant_1' })
@@ -11,7 +12,32 @@ export class CreatePastoralVisitDto {
   @MinLength(3)
   reason: string;
 
-  @ApiPropertyOptional({ example: 'Agendar conversa com líder antes da visita.' })
+  @ApiPropertyOptional({ example: 'Acompanhamento de constancia ministerial' })
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @ApiPropertyOptional({ enum: PastoralPriority })
+  @IsOptional()
+  @IsEnum(PastoralPriority)
+  priority?: PastoralPriority;
+
+  @ApiPropertyOptional({ enum: PastoralReasonType })
+  @IsOptional()
+  @IsEnum(PastoralReasonType)
+  reasonType?: PastoralReasonType;
+
+  @ApiPropertyOptional({ example: 'clx_user_1' })
+  @IsOptional()
+  @IsString()
+  assignedToUserId?: string;
+
+  @ApiPropertyOptional({ example: '2026-04-05T18:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  nextFollowUpAt?: string;
+
+  @ApiPropertyOptional({ example: 'Agendar conversa com lider antes da visita.' })
   @IsOptional()
   @IsString()
   notes?: string;

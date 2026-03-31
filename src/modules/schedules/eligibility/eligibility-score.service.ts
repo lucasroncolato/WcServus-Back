@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { AttendanceStatus } from '@prisma/client';
+import {
+  getEligibilityImpact,
+} from 'src/common/attendance/attendance-status.utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { EligibilityContext } from './eligibility.types';
 
@@ -29,15 +31,10 @@ export class EligibilityScoreService {
       }),
     ]);
 
-    const absences = attendanceAgg
-      .filter(
-        (item) =>
-          item.status === AttendanceStatus.FALTA || item.status === AttendanceStatus.FALTA_JUSTIFICADA,
-      )
-      .reduce((acc, item) => acc + item._count.status, 0);
-    const presents = attendanceAgg
-      .filter((item) => item.status === AttendanceStatus.PRESENTE)
-      .reduce((acc, item) => acc + item._count.status, 0);
+    const attendanceImpact = attendanceAgg.reduce(
+      (acc, item) => acc + getEligibilityImpact(item.status) * item._count.status,
+      0,
+    );
 
     const daysSinceLastScale = lastSchedule?.service?.serviceDate
       ? Math.max(
@@ -48,8 +45,7 @@ export class EligibilityScoreService {
 
     let total = 0;
     total += Math.min(30, daysSinceLastScale * 0.8);
-    total += Math.max(0, 20 - absences * 5);
-    total += Math.min(20, presents * 1.2);
+    total += Math.max(0, Math.min(40, 20 + attendanceImpact * 3));
     total += context.slot?.requiredTraining === false || context.servant.trainingStatus === 'COMPLETED' ? 10 : 0;
     total += context.unavailableAtServiceTime ? 0 : 10;
     total += !context.requiredAptitude || context.requiredAptitude === context.servant.aptitude ? 10 : 0;

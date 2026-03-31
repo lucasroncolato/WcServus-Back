@@ -32,6 +32,9 @@ CREATE TYPE "Aptitude" AS ENUM ('SOCIAL', 'OPERACIONAL', 'TECNICO', 'APOIO', 'LI
 CREATE TYPE "WorshipServiceType" AS ENUM ('DOMINGO', 'QUINTA', 'ESPECIAL', 'CEIA', 'VIGILIA', 'CONGRESSO');
 
 -- CreateEnum
+CREATE TYPE "ServiceTemplateRecurrenceType" AS ENUM ('NONE', 'WEEKLY', 'MONTHLY');
+
+-- CreateEnum
 CREATE TYPE "WorshipServiceStatus" AS ENUM ('PLANEJADO', 'CONFIRMADO', 'FINALIZADO', 'CANCELADO');
 
 -- CreateEnum
@@ -41,7 +44,10 @@ CREATE TYPE "ScheduleStatus" AS ENUM ('ASSIGNED', 'CONFIRMED', 'SWAPPED', 'CANCE
 CREATE TYPE "ScheduleResponseStatus" AS ENUM ('PENDING', 'CONFIRMED', 'DECLINED');
 
 -- CreateEnum
-CREATE TYPE "ScheduleSlotStatus" AS ENUM ('OPEN', 'ASSIGNED', 'PENDING_CONFIRMATION', 'CONFIRMED', 'DECLINED', 'NO_SHOW', 'COMPLETED', 'SWAPPED');
+CREATE TYPE "ScheduleSlotStatus" AS ENUM ('OPEN', 'ASSIGNED', 'PENDING_CONFIRMATION', 'CONFIRMED', 'DECLINED', 'NO_SHOW', 'COMPLETED', 'SWAPPED', 'EMPTY', 'FILLED', 'SUBSTITUTE_PENDING', 'REPLACED', 'LOCKED');
+
+-- CreateEnum
+CREATE TYPE "ScheduleSlotConfirmationStatus" AS ENUM ('PENDING', 'CONFIRMED', 'DECLINED');
 
 -- CreateEnum
 CREATE TYPE "ScheduleVersionStatus" AS ENUM ('DRAFT', 'PUBLISHED', 'ARCHIVED');
@@ -304,13 +310,34 @@ CREATE TABLE "ServantStatusHistory" (
 );
 
 -- CreateTable
+CREATE TABLE "ServiceTemplate" (
+    "id" TEXT NOT NULL,
+    "churchId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "type" "WorshipServiceType" NOT NULL,
+    "recurrenceType" "ServiceTemplateRecurrenceType" NOT NULL DEFAULT 'WEEKLY',
+    "weekday" INTEGER NOT NULL,
+    "startTime" TEXT NOT NULL,
+    "duration" INTEGER NOT NULL,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "generateAheadDays" INTEGER NOT NULL DEFAULT 30,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ServiceTemplate_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "WorshipService" (
     "id" TEXT NOT NULL,
     "churchId" TEXT NOT NULL,
+    "templateId" TEXT,
     "type" "WorshipServiceType" NOT NULL,
     "title" TEXT NOT NULL,
     "serviceDate" TIMESTAMP(3) NOT NULL,
     "startTime" TEXT NOT NULL,
+    "locked" BOOLEAN NOT NULL DEFAULT false,
+    "canceled" BOOLEAN NOT NULL DEFAULT false,
     "notes" TEXT,
     "status" "WorshipServiceStatus" NOT NULL DEFAULT 'PLANEJADO',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -319,6 +346,21 @@ CREATE TABLE "WorshipService" (
     "deletedBy" TEXT,
 
     CONSTRAINT "WorshipService_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ServiceTemplateSlot" (
+    "id" TEXT NOT NULL,
+    "templateId" TEXT NOT NULL,
+    "ministryId" TEXT NOT NULL,
+    "teamId" TEXT,
+    "responsibilityId" TEXT,
+    "quantity" INTEGER NOT NULL DEFAULT 1,
+    "requiredTalentId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ServiceTemplateSlot_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -373,8 +415,10 @@ CREATE TABLE "ScheduleSlot" (
     "id" TEXT NOT NULL,
     "serviceId" TEXT NOT NULL,
     "ministryId" TEXT NOT NULL,
+    "teamId" TEXT,
     "churchId" TEXT NOT NULL,
     "scheduleId" TEXT,
+    "templateSlotId" TEXT,
     "responsibilityId" TEXT,
     "functionName" TEXT NOT NULL,
     "slotLabel" TEXT,
@@ -384,6 +428,7 @@ CREATE TABLE "ScheduleSlot" (
     "blocked" BOOLEAN NOT NULL DEFAULT false,
     "blockedReason" TEXT,
     "status" "ScheduleSlotStatus" NOT NULL DEFAULT 'OPEN',
+    "confirmationStatus" "ScheduleSlotConfirmationStatus" NOT NULL DEFAULT 'PENDING',
     "assignedServantId" TEXT,
     "assignedByUserId" TEXT,
     "notes" TEXT,
@@ -1282,6 +1327,12 @@ CREATE UNIQUE INDEX "ServantMinistry_servantId_ministryId_key" ON "ServantMinist
 CREATE INDEX "ServantStatusHistory_servantId_createdAt_idx" ON "ServantStatusHistory"("servantId", "createdAt");
 
 -- CreateIndex
+CREATE INDEX "ServiceTemplate_churchId_active_idx" ON "ServiceTemplate"("churchId", "active");
+
+-- CreateIndex
+CREATE INDEX "ServiceTemplate_churchId_recurrenceType_idx" ON "ServiceTemplate"("churchId", "recurrenceType");
+
+-- CreateIndex
 CREATE INDEX "WorshipService_serviceDate_idx" ON "WorshipService"("serviceDate");
 
 -- CreateIndex
@@ -1291,10 +1342,25 @@ CREATE INDEX "WorshipService_type_idx" ON "WorshipService"("type");
 CREATE INDEX "WorshipService_churchId_idx" ON "WorshipService"("churchId");
 
 -- CreateIndex
+CREATE INDEX "WorshipService_templateId_idx" ON "WorshipService"("templateId");
+
+-- CreateIndex
 CREATE INDEX "WorshipService_deletedAt_idx" ON "WorshipService"("deletedAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "WorshipService_serviceDate_startTime_title_key" ON "WorshipService"("serviceDate", "startTime", "title");
+
+-- CreateIndex
+CREATE INDEX "ServiceTemplateSlot_templateId_idx" ON "ServiceTemplateSlot"("templateId");
+
+-- CreateIndex
+CREATE INDEX "ServiceTemplateSlot_ministryId_idx" ON "ServiceTemplateSlot"("ministryId");
+
+-- CreateIndex
+CREATE INDEX "ServiceTemplateSlot_teamId_idx" ON "ServiceTemplateSlot"("teamId");
+
+-- CreateIndex
+CREATE INDEX "ServiceTemplateSlot_responsibilityId_idx" ON "ServiceTemplateSlot"("responsibilityId");
 
 -- CreateIndex
 CREATE INDEX "ScheduleVersion_worshipServiceId_status_idx" ON "ScheduleVersion"("worshipServiceId", "status");
@@ -1345,6 +1411,9 @@ CREATE UNIQUE INDEX "Schedule_serviceId_servantId_ministryId_key" ON "Schedule"(
 CREATE INDEX "ScheduleSlot_serviceId_ministryId_idx" ON "ScheduleSlot"("serviceId", "ministryId");
 
 -- CreateIndex
+CREATE INDEX "ScheduleSlot_teamId_idx" ON "ScheduleSlot"("teamId");
+
+-- CreateIndex
 CREATE INDEX "ScheduleSlot_status_idx" ON "ScheduleSlot"("status");
 
 -- CreateIndex
@@ -1355,6 +1424,9 @@ CREATE INDEX "ScheduleSlot_responsibilityId_idx" ON "ScheduleSlot"("responsibili
 
 -- CreateIndex
 CREATE INDEX "ScheduleSlot_scheduleId_idx" ON "ScheduleSlot"("scheduleId");
+
+-- CreateIndex
+CREATE INDEX "ScheduleSlot_templateSlotId_idx" ON "ScheduleSlot"("templateSlotId");
 
 -- CreateIndex
 CREATE INDEX "ScheduleSlot_churchId_idx" ON "ScheduleSlot"("churchId");
@@ -1879,7 +1951,25 @@ ALTER TABLE "ServantMinistry" ADD CONSTRAINT "ServantMinistry_trainingReviewedBy
 ALTER TABLE "ServantStatusHistory" ADD CONSTRAINT "ServantStatusHistory_servantId_fkey" FOREIGN KEY ("servantId") REFERENCES "Servant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ServiceTemplate" ADD CONSTRAINT "ServiceTemplate_churchId_fkey" FOREIGN KEY ("churchId") REFERENCES "Church"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "WorshipService" ADD CONSTRAINT "WorshipService_churchId_fkey" FOREIGN KEY ("churchId") REFERENCES "Church"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "WorshipService" ADD CONSTRAINT "WorshipService_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "ServiceTemplate"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceTemplateSlot" ADD CONSTRAINT "ServiceTemplateSlot_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "ServiceTemplate"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceTemplateSlot" ADD CONSTRAINT "ServiceTemplateSlot_ministryId_fkey" FOREIGN KEY ("ministryId") REFERENCES "Ministry"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceTemplateSlot" ADD CONSTRAINT "ServiceTemplateSlot_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceTemplateSlot" ADD CONSTRAINT "ServiceTemplateSlot_responsibilityId_fkey" FOREIGN KEY ("responsibilityId") REFERENCES "MinistryResponsibility"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ScheduleVersion" ADD CONSTRAINT "ScheduleVersion_worshipServiceId_fkey" FOREIGN KEY ("worshipServiceId") REFERENCES "WorshipService"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1927,7 +2017,13 @@ ALTER TABLE "ScheduleSlot" ADD CONSTRAINT "ScheduleSlot_serviceId_fkey" FOREIGN 
 ALTER TABLE "ScheduleSlot" ADD CONSTRAINT "ScheduleSlot_ministryId_fkey" FOREIGN KEY ("ministryId") REFERENCES "Ministry"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ScheduleSlot" ADD CONSTRAINT "ScheduleSlot_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ScheduleSlot" ADD CONSTRAINT "ScheduleSlot_scheduleId_fkey" FOREIGN KEY ("scheduleId") REFERENCES "Schedule"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ScheduleSlot" ADD CONSTRAINT "ScheduleSlot_templateSlotId_fkey" FOREIGN KEY ("templateSlotId") REFERENCES "ServiceTemplateSlot"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ScheduleSlot" ADD CONSTRAINT "ScheduleSlot_responsibilityId_fkey" FOREIGN KEY ("responsibilityId") REFERENCES "MinistryResponsibility"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -2279,3 +2375,4 @@ ALTER TABLE "NotificationLog" ADD CONSTRAINT "NotificationLog_userId_fkey" FOREI
 
 -- AddForeignKey
 ALTER TABLE "NotificationLog" ADD CONSTRAINT "NotificationLog_servantId_fkey" FOREIGN KEY ("servantId") REFERENCES "Servant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+

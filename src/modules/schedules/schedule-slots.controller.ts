@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
@@ -55,5 +55,41 @@ export class ScheduleSlotsController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
   eligibleServants(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.schedulesService.listEligibleServantsForSlot(id, user);
+  }
+
+  @Get(':id/suggest-substitute')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  suggestSubstitute(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.suggestSubstitute(id, user);
+  }
+
+  @Patch(':id/unassign')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  unassign(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.unassignSlot(id, user);
+  }
+
+  @Patch(':id/lock')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  lock(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.lockSlot(id, user);
+  }
+
+  @Patch(':id/unlock')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  unlock(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.unlockSlot(id, user);
+  }
+
+  @Post(':id/resend-notification')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.COORDENADOR)
+  resendNotification(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.resendSlotNotification(id, user);
+  }
+
+  @Get(':id/history')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
+  history(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.schedulesService.slotHistory(id, user);
   }
 }

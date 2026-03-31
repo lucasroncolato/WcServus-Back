@@ -40,8 +40,10 @@ import {
   getScheduleAccessWhere,
   resolveScopedMinistryIds,
 } from 'src/common/auth/access-scope';
+import { TimelineEventType } from 'src/common/timeline/timeline-policy';
 import { EventBusService } from 'src/common/events/event-bus.service';
 import { AppCacheService } from 'src/common/cache/cache.service';
+import { attendanceAbsenceStatuses } from 'src/common/attendance/attendance-status.utils';
 import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -69,6 +71,7 @@ import { SwapScheduleDto } from './dto/swap-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { ScheduleGenerationWeightsDto } from './dto/schedule-generation-weights.dto';
 import { MinistryTasksService } from '../ministry-tasks/ministry-tasks.service';
+import { TimelinePublisherService } from '../timeline/timeline-publisher.service';
 
 type GenerationWeights = {
   monthlyLoad: number;
@@ -167,6 +170,9 @@ export class SchedulesService {
       assertLinkIntegrity: () => undefined,
       assertActorChurch: () => '',
     } as unknown as TenantIntegrityService,
+    private readonly timelinePublisher: TimelinePublisherService = {
+      publish: async () => ({ published: false }),
+    } as unknown as TimelinePublisherService,
   ) {}
 
   async findAll(query: ListSchedulesQueryDto, actor: JwtPayload) {
@@ -828,6 +834,12 @@ export class SchedulesService {
     }
 
     await this.assertCanManageMinistry(actor, slot.ministryId);
+    if (slot.service?.locked) {
+      throw new BadRequestException('Worship service schedule is closed');
+    }
+    if (slot.status === ScheduleSlotStatus.LOCKED || slot.blocked) {
+      throw new BadRequestException('Slot is locked and cannot be assigned');
+    }
     const eligibility = await this.evaluateServantEligibilityForSlot(
       slot.serviceId,
       slot.ministryId,
@@ -1229,6 +1241,647 @@ export class SchedulesService {
     }
     await this.assertCanManageMinistry(actor, slot.ministryId);
     return this.listSlotEligibility(slot.serviceId, slot.ministryId, slot);
+  }
+
+  async unassignSlot(slotId: string, actor: JwtPayload) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      include: {
+        service: { select: { locked: true } },
+      },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      slot.churchId,
+      'ScheduleSlot',
+    );
+    await this.assertCanManageMinistry(actor, slot.ministryId);
+    if (slot.service?.locked) {
+      throw new BadRequestException('Worship service schedule is closed');
+    }
+
+    const previousServantId = slot.assignedServantId;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.scheduleSlot.update({
+        where: { id: slotId },
+        data: {
+          assignedServantId: null,
+          assignedByUserId: actor.sub,
+          scheduleId: null,
+          status: slot.status === ScheduleSlotStatus.LOCKED ? ScheduleSlotStatus.LOCKED : ScheduleSlotStatus.EMPTY,
+          confirmationStatus: ScheduleSlotConfirmationStatus.PENDING,
+        },
+        include: {
+          assignedServant: { select: { id: true, name: true } },
+        },
+      });
+
+      if (previousServantId) {
+        const stillAssigned = await tx.scheduleSlot.count({
+          where: {
+            serviceId: slot.serviceId,
+            ministryId: slot.ministryId,
+            assignedServantId: previousServantId,
+          },
+        });
+        if (stillAssigned === 0) {
+          await tx.schedule.deleteMany({
+            where: {
+              serviceId: slot.serviceId,
+              ministryId: slot.ministryId,
+              servantId: previousServantId,
+            },
+          });
+        }
+      }
+
+      await tx.scheduleSlotChange.create({
+        data: {
+          slotId,
+          changeType: ScheduleSlotChangeType.STATUS_UPDATE,
+          fromServantId: previousServantId,
+          toServantId: null,
+          reason: 'UNASSIGN_SLOT',
+          performedByUserId: actor.sub,
+          metadata: {
+            action: 'UNASSIGN_SLOT',
+          },
+        },
+      });
+
+      return next;
+    });
+
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'ScheduleSlot',
+      entityId: slotId,
+      userId: actor.sub,
+      metadata: {
+        action: 'UNASSIGN_SLOT',
+        previousServantId,
+      },
+    });
+
+    await this.createSlotTimelineEntry(slot, actor, 'SLOT_UNASSIGNED', 'Servo removido do slot');
+
+    if (previousServantId) {
+      await this.notifyScheduleEvent(
+        previousServantId,
+        'SCHEDULE_UNASSIGNED',
+        'Voce foi removido da escala',
+        'Seu vinculo com este slot foi removido por um coordenador.',
+        { slotId },
+      );
+    }
+
+    this.invalidateSchedulingCaches(slot.serviceId, slot.ministryId);
+    return {
+      success: true,
+      slot: {
+        id: updated.id,
+        servantId: updated.assignedServantId,
+        slotStatus: updated.status,
+        confirmationStatus: updated.confirmationStatus,
+      },
+    };
+  }
+
+  async lockSlot(slotId: string, actor: JwtPayload) {
+    return this.setSlotLock(slotId, actor, true);
+  }
+
+  async unlockSlot(slotId: string, actor: JwtPayload) {
+    return this.setSlotLock(slotId, actor, false);
+  }
+
+  async resendSlotNotification(slotId: string, actor: JwtPayload) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      select: {
+        id: true,
+        churchId: true,
+        serviceId: true,
+        ministryId: true,
+        assignedServantId: true,
+        service: { select: { title: true } },
+      },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      slot.churchId,
+      'ScheduleSlot',
+    );
+    await this.assertCanManageMinistry(actor, slot.ministryId);
+    if (!slot.assignedServantId) {
+      throw new BadRequestException('Cannot resend notification for empty slot');
+    }
+
+    await this.notifyScheduleEvent(
+      slot.assignedServantId,
+      'SCHEDULE_REMINDER',
+      `Lembrete de escala: ${slot.service.title}`,
+      'Voce possui uma escala pendente de atencao para este culto.',
+      { slotId },
+    );
+
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'ScheduleSlot',
+      entityId: slotId,
+      userId: actor.sub,
+      metadata: {
+        action: 'RESEND_SLOT_NOTIFICATION',
+      },
+    });
+
+    await this.createSlotTimelineEntry(slot, actor, 'SLOT_NOTIFICATION_RESENT', 'Notificacao reenviada para o servo');
+
+    return {
+      success: true,
+      message: 'Notificacao reenviada com sucesso.',
+    };
+  }
+
+  async slotHistory(slotId: string, actor: JwtPayload) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      include: {
+        assignedServant: { select: { id: true, name: true } },
+        responsibility: { select: { id: true, title: true, functionName: true } },
+        service: { select: { id: true, title: true } },
+      },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      slot.churchId,
+      'ScheduleSlot',
+    );
+    await this.assertCanManageMinistry(actor, slot.ministryId);
+
+    const [changes, audit, timeline, notifications, responseHistory] = await Promise.all([
+      this.prisma.scheduleSlotChange.findMany({
+        where: { slotId },
+        include: {
+          performedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.auditLog.findMany({
+        where: {
+          OR: [
+            { entity: 'ScheduleSlot', entityId: slotId },
+            ...(slot.scheduleId ? [{ entity: 'Schedule', entityId: slot.scheduleId }] : []),
+          ],
+        },
+        include: {
+          user: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.timelineEntry.findMany({
+        where: {
+          churchId: slot.churchId,
+          OR: [
+            { metadata: { path: ['slotId'], equals: slotId } },
+            { metadata: { path: ['payload', 'slotId'], equals: slotId } },
+          ],
+        },
+        include: {
+          actorUser: { select: { id: true, name: true } },
+        },
+        orderBy: { occurredAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.notification.findMany({
+        where: {
+          churchId: slot.churchId,
+          OR: [
+            { metadata: { path: ['slotId'], equals: slotId } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      slot.scheduleId
+        ? this.prisma.scheduleResponseHistory.findMany({
+            where: { scheduleId: slot.scheduleId },
+            include: { respondedBy: { select: { id: true, name: true } } },
+            orderBy: { respondedAt: 'desc' },
+            take: 50,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      slot: {
+        id: slot.id,
+        responsibilityName: slot.responsibility?.title ?? slot.functionName,
+        servantName: slot.assignedServant?.name ?? null,
+        slotStatus: slot.status,
+        confirmationStatus: slot.confirmationStatus,
+      },
+      changes: changes.map((item) => ({
+        id: item.id,
+        type: item.changeType,
+        fromServantId: item.fromServantId,
+        toServantId: item.toServantId,
+        reason: item.reason,
+        at: item.createdAt,
+        actorName: item.performedBy?.name ?? null,
+      })),
+      responses: responseHistory.map((item) => ({
+        id: item.id,
+        status: item.responseStatus,
+        declineReason: item.declineReason,
+        at: item.respondedAt,
+        actorName: item.respondedBy?.name ?? null,
+      })),
+      timeline: timeline.map((item) => ({
+        id: item.id,
+        type: item.type,
+        at: item.occurredAt,
+        actorName: item.actorUser?.name ?? null,
+        message: item.description ?? item.title,
+      })),
+      audit: audit.map((item) => ({
+        id: item.id,
+        action: item.action,
+        at: item.createdAt,
+        actorName: item.user?.name ?? null,
+      })),
+      notifications: notifications.map((item) => ({
+        id: item.id,
+        type: item.type,
+        status: item.readAt ? 'READ' : 'SENT',
+        sentAt: item.createdAt,
+      })),
+    };
+  }
+
+  async notifyPendingSlotsForService(serviceId: string, actor: JwtPayload) {
+    const service = await this.getServiceForBulkOperation(serviceId, actor);
+    const allowedMinistryIds = await this.resolveBulkAllowedMinistryIds(serviceId, actor);
+    const targetSlots = await this.prisma.scheduleSlot.findMany({
+      where: {
+        serviceId,
+        churchId: service.churchId,
+        ministryId: { in: allowedMinistryIds },
+        assignedServantId: { not: null },
+        confirmationStatus: ScheduleSlotConfirmationStatus.PENDING,
+      },
+      select: {
+        id: true,
+        assignedServantId: true,
+      },
+    });
+
+    let sent = 0;
+    let failed = 0;
+    const failedSlotIds: string[] = [];
+    for (const slot of targetSlots) {
+      try {
+        await this.notifyScheduleEvent(
+          slot.assignedServantId!,
+          'SCHEDULE_PENDING_CONFIRMATION_REMINDER',
+          `Lembrete de confirmacao: ${service.title}`,
+          'Sua confirmacao de escala para este culto ainda esta pendente.',
+          { slotId: slot.id, serviceId },
+        );
+        sent += 1;
+      } catch {
+        failed += 1;
+        failedSlotIds.push(slot.id);
+      }
+    }
+
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'WorshipService',
+      entityId: serviceId,
+      userId: actor.sub,
+      metadata: {
+        action: 'NOTIFY_PENDING_SLOTS_BULK',
+        totalPending: targetSlots.length,
+        sent,
+        failed,
+        failedSlotIds,
+      },
+    });
+
+    await this.createServiceTimelineEntry(
+      service,
+      actor,
+      'SCHEDULE_PENDING_NOTIFICATIONS_SENT',
+      `Notificacao em lote executada para pendencias: ${sent} enviadas, ${failed} falhas.`,
+      { sent, failed },
+    );
+
+    return {
+      success: true,
+      summary: {
+        totalPending: targetSlots.length,
+        sent,
+        failed,
+        affectedSlotIds: targetSlots.map((slot) => slot.id),
+        failedSlotIds,
+      },
+    };
+  }
+
+  async fillEmptySlotsForService(serviceId: string, actor: JwtPayload) {
+    const service = await this.getServiceForBulkOperation(serviceId, actor);
+    const allowedMinistryIds = await this.resolveBulkAllowedMinistryIds(serviceId, actor);
+    const slots = await this.prisma.scheduleSlot.findMany({
+      where: {
+        serviceId,
+        churchId: service.churchId,
+        ministryId: { in: allowedMinistryIds },
+        status: { in: [ScheduleSlotStatus.EMPTY, ScheduleSlotStatus.OPEN] },
+      },
+      orderBy: [{ ministryId: 'asc' }, { position: 'asc' }],
+    });
+
+    const assignedInService = await this.prisma.scheduleSlot.findMany({
+      where: {
+        serviceId,
+        churchId: service.churchId,
+        assignedServantId: { not: null },
+      },
+      select: { assignedServantId: true },
+    });
+    const assignedServants = new Set<string>(assignedInService.map((item) => item.assignedServantId!).filter(Boolean));
+
+    const details: Array<{
+      slotId: string;
+      status: 'FILLED' | 'UNFILLED';
+      servantId?: string;
+      reason?: string;
+    }> = [];
+    let filled = 0;
+    let unfilled = 0;
+
+    for (const slot of slots) {
+      if (slot.status === ScheduleSlotStatus.LOCKED || slot.blocked) {
+        unfilled += 1;
+        details.push({ slotId: slot.id, status: 'UNFILLED', reason: 'Slot bloqueado' });
+        continue;
+      }
+
+      try {
+        const candidates = await this.listSlotEligibility(slot.serviceId, slot.ministryId, slot);
+        const candidate = candidates
+          .filter((item) => item.eligible && !assignedServants.has(item.servantId))
+          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+
+        if (!candidate) {
+          unfilled += 1;
+          details.push({
+            slotId: slot.id,
+            status: 'UNFILLED',
+            reason: 'Nenhum servo elegivel disponivel',
+          });
+          continue;
+        }
+
+        await this.assignSlot(
+          slot.id,
+          { servantId: candidate.servantId, reason: 'FILL_EMPTY_SLOTS_BULK' },
+          actor,
+          {
+            auditAction: AuditAction.FILL,
+            auditMetadata: { source: 'fill-empty-slots-bulk', serviceId },
+          },
+        );
+        assignedServants.add(candidate.servantId);
+        filled += 1;
+        details.push({
+          slotId: slot.id,
+          status: 'FILLED',
+          servantId: candidate.servantId,
+        });
+      } catch (error) {
+        unfilled += 1;
+        details.push({
+          slotId: slot.id,
+          status: 'UNFILLED',
+          reason:
+            error instanceof Error
+              ? error.message
+              : 'Falha inesperada ao preencher vaga',
+        });
+      }
+    }
+
+    await this.auditService.log({
+      action: AuditAction.FILL,
+      entity: 'WorshipService',
+      entityId: serviceId,
+      userId: actor.sub,
+      metadata: {
+        action: 'FILL_EMPTY_SLOTS_BULK',
+        emptySlots: slots.length,
+        filled,
+        unfilled,
+      },
+    });
+
+    await this.createServiceTimelineEntry(
+      service,
+      actor,
+      'SCHEDULE_EMPTY_SLOTS_FILLED',
+      `Preenchimento em lote de vagas: ${filled} preenchidas, ${unfilled} nao preenchidas.`,
+      { filled, unfilled },
+    );
+
+    return {
+      success: true,
+      summary: {
+        emptySlots: slots.length,
+        filled,
+        unfilled,
+      },
+      details,
+    };
+  }
+
+  async regenerateSuggestionsForService(serviceId: string, actor: JwtPayload) {
+    const service = await this.getServiceForBulkOperation(serviceId, actor);
+    const allowedMinistryIds = await this.resolveBulkAllowedMinistryIds(serviceId, actor);
+    const slots = await this.prisma.scheduleSlot.findMany({
+      where: {
+        serviceId,
+        churchId: service.churchId,
+        ministryId: { in: allowedMinistryIds },
+        status: {
+          in: [
+            ScheduleSlotStatus.EMPTY,
+            ScheduleSlotStatus.OPEN,
+            ScheduleSlotStatus.SUBSTITUTE_PENDING,
+            ScheduleSlotStatus.DECLINED,
+          ],
+        },
+      },
+      orderBy: [{ ministryId: 'asc' }, { position: 'asc' }],
+    });
+
+    const details: Array<{
+      slotId: string;
+      suggestions: Array<{ servantId: string; score: number; reasons: string[] }>;
+      skipped?: string;
+    }> = [];
+
+    for (const slot of slots) {
+      if (slot.status === ScheduleSlotStatus.LOCKED || slot.blocked) {
+        details.push({
+          slotId: slot.id,
+          suggestions: [],
+          skipped: 'Slot bloqueado',
+        });
+        continue;
+      }
+
+      const suggestions = (await this.listSlotEligibility(slot.serviceId, slot.ministryId, slot))
+        .filter((candidate) => candidate.eligible && candidate.servantId !== slot.assignedServantId)
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, 5)
+        .map((candidate) => ({
+          servantId: candidate.servantId,
+          score: candidate.score ?? 0,
+          reasons: candidate.reasons,
+        }));
+
+      details.push({
+        slotId: slot.id,
+        suggestions,
+      });
+    }
+
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'WorshipService',
+      entityId: serviceId,
+      userId: actor.sub,
+      metadata: {
+        action: 'REGENERATE_SUGGESTIONS_BULK',
+        slotsEvaluated: slots.length,
+      },
+    });
+
+    await this.createServiceTimelineEntry(
+      service,
+      actor,
+      'SCHEDULE_SUGGESTIONS_REGENERATED',
+      `Sugestoes recalculadas para ${slots.length} slots criticos.`,
+      { slotsEvaluated: slots.length },
+    );
+
+    return {
+      success: true,
+      summary: {
+        slotsEvaluated: slots.length,
+        withSuggestions: details.filter((item) => item.suggestions.length > 0).length,
+      },
+      details,
+    };
+  }
+
+  async closeScheduleForService(serviceId: string, actor: JwtPayload) {
+    const service = await this.getServiceForBulkOperation(serviceId, actor);
+    await this.resolveBulkAllowedMinistryIds(serviceId, actor, true);
+
+    const [criticalEmpty, substitutePending, pendingConfirmations] = await Promise.all([
+      this.prisma.scheduleSlot.count({
+        where: {
+          serviceId,
+          churchId: service.churchId,
+          required: true,
+          status: { in: [ScheduleSlotStatus.EMPTY, ScheduleSlotStatus.OPEN] },
+        },
+      }),
+      this.prisma.scheduleSlot.count({
+        where: {
+          serviceId,
+          churchId: service.churchId,
+          status: ScheduleSlotStatus.SUBSTITUTE_PENDING,
+        },
+      }),
+      this.prisma.scheduleSlot.count({
+        where: {
+          serviceId,
+          churchId: service.churchId,
+          assignedServantId: { not: null },
+          confirmationStatus: ScheduleSlotConfirmationStatus.PENDING,
+        },
+      }),
+    ]);
+
+    const warnings: string[] = [];
+    if (criticalEmpty > 0) {
+      warnings.push(`Ainda existem ${criticalEmpty} slots criticos vazios.`);
+    }
+    if (substitutePending > 0) {
+      warnings.push(`Ainda existem ${substitutePending} substituicoes pendentes.`);
+    }
+    if (pendingConfirmations > 0) {
+      warnings.push(`Ainda existem ${pendingConfirmations} confirmacoes pendentes.`);
+    }
+
+    await this.prisma.worshipService.update({
+      where: { id: serviceId },
+      data: {
+        status: WorshipServiceStatus.CONFIRMADO,
+        locked: true,
+      },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.STATUS_CHANGE,
+      entity: 'WorshipService',
+      entityId: serviceId,
+      userId: actor.sub,
+      metadata: {
+        action: 'CLOSE_SCHEDULE',
+        warnings,
+        criticalEmpty,
+        substitutePending,
+        pendingConfirmations,
+      },
+    });
+
+    await this.createServiceTimelineEntry(
+      service,
+      actor,
+      'SCHEDULE_CLOSED',
+      warnings.length
+        ? `Escala fechada com alertas: ${warnings.join(' ')}`
+        : 'Escala fechada sem pendencias criticas.',
+      {
+        warnings,
+      },
+    );
+
+    return {
+      success: true,
+      status: 'CLOSED',
+      warnings,
+      pending: {
+        criticalEmpty,
+        substitutePending,
+        pendingConfirmations,
+      },
+    };
   }
 
   async autoGenerateExplained(dto: AutoGenerateScheduleSlotsDto, actor: JwtPayload) {
@@ -2652,7 +3305,7 @@ export class SchedulesService {
 
     const records = await this.prisma.attendance.findMany({
       where: {
-        status: { in: [AttendanceStatus.FALTA, AttendanceStatus.FALTA_JUSTIFICADA] },
+        status: { in: attendanceAbsenceStatuses() },
         service: {
           serviceDate: { gte: absencesStart, lte: end },
         },
@@ -3183,6 +3836,13 @@ export class SchedulesService {
         schedule: {
           select: { id: true, servantId: true },
         },
+        service: {
+          select: {
+            status: true,
+            locked: true,
+            canceled: true,
+          },
+        },
       },
     });
     if (!slot) {
@@ -3190,6 +3850,17 @@ export class SchedulesService {
     }
     if (!slot.scheduleId || !slot.schedule) {
       throw new BadRequestException('Slot is not linked to a schedule assignment');
+    }
+    if (!slot.assignedServantId || slot.assignedServantId !== slot.schedule.servantId) {
+      throw new BadRequestException('Slot assignment is no longer valid for response');
+    }
+    if (
+      slot.service.locked ||
+      slot.service.canceled ||
+      slot.service.status === WorshipServiceStatus.CANCELADO ||
+      slot.service.status === WorshipServiceStatus.FINALIZADO
+    ) {
+      throw new ForbiddenException('Cannot respond slot on closed/cancelled/finished worship service');
     }
 
     if (responseStatus === ScheduleResponseStatus.DECLINED && !declineReason?.trim()) {
@@ -3225,7 +3896,7 @@ export class SchedulesService {
           status:
             responseStatus === ScheduleResponseStatus.CONFIRMED
               ? ScheduleSlotStatus.CONFIRMED
-              : ScheduleSlotStatus.DECLINED,
+              : ScheduleSlotStatus.SUBSTITUTE_PENDING,
           confirmationStatus:
             responseStatus === ScheduleResponseStatus.CONFIRMED
               ? ScheduleSlotConfirmationStatus.CONFIRMED
@@ -3586,7 +4257,7 @@ export class SchedulesService {
     const slot = await this.prisma.scheduleSlot.findUnique({
       where: { id: slotId },
       include: {
-        service: { select: { id: true } },
+        service: { select: { id: true, locked: true } },
       },
     });
     if (!slot) {
@@ -3594,6 +4265,12 @@ export class SchedulesService {
     }
 
     await this.assertCanManageMinistry(actor, slot.ministryId);
+    if (slot.service?.locked) {
+      throw new BadRequestException('Worship service schedule is closed');
+    }
+    if (slot.status === ScheduleSlotStatus.LOCKED || slot.blocked) {
+      throw new BadRequestException('Slot is locked and cannot be changed');
+    }
     if (!forceFill && !slot.assignedServantId) {
       throw new BadRequestException('Slot is not currently assigned. Use fill endpoint instead.');
     }
@@ -3899,11 +4576,207 @@ export class SchedulesService {
     this.cacheService.del(`eligible:${serviceId}:${ministryId}`);
   }
 
+  private async getServiceForBulkOperation(serviceId: string, actor: JwtPayload) {
+    const service = await this.prisma.worshipService.findUnique({
+      where: { id: serviceId },
+      select: {
+        id: true,
+        title: true,
+        churchId: true,
+        locked: true,
+      },
+    });
+    if (!service) {
+      throw new NotFoundException('Worship service not found');
+    }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      service.churchId,
+      'WorshipService',
+    );
+    return service;
+  }
+
+  private async resolveBulkAllowedMinistryIds(
+    serviceId: string,
+    actor: JwtPayload,
+    requireFullScope = false,
+  ) {
+    const ministriesInService = [
+      ...new Set(
+        (
+          await this.prisma.scheduleSlot.findMany({
+            where: { serviceId },
+            select: { ministryId: true },
+          })
+        ).map((slot) => slot.ministryId),
+      ),
+    ];
+
+    if (actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN) {
+      return ministriesInService;
+    }
+
+    if (actor.role !== Role.COORDENADOR) {
+      throw new ForbiddenException('You do not have permission to execute bulk scheduling actions');
+    }
+
+    const scopedMinistryIds = await resolveScopedMinistryIds(this.prisma, actor);
+    if (!scopedMinistryIds.length) {
+      throw new ForbiddenException('Coordinator has no ministry scope configured');
+    }
+
+    const allowed = ministriesInService.filter((id) => scopedMinistryIds.includes(id));
+    if (requireFullScope) {
+      const outOfScope = ministriesInService.filter((id) => !scopedMinistryIds.includes(id));
+      if (outOfScope.length) {
+        throw new ForbiddenException({
+          message: 'Coordinator must have full ministry scope for this bulk action',
+          outOfScopeMinistryIds: outOfScope,
+        });
+      }
+    }
+
+    if (ministriesInService.length > 0 && !allowed.length) {
+      throw new ForbiddenException('Coordinator has no allowed ministries in this worship service');
+    }
+
+    return allowed;
+  }
+
   private requireActorChurch(actor: JwtPayload) {
     if (!actor.churchId) {
       throw new ForbiddenException('Actor must be bound to a church context');
     }
     return actor.churchId;
+  }
+
+  private async setSlotLock(slotId: string, actor: JwtPayload, locked: boolean) {
+    const slot = await this.prisma.scheduleSlot.findUnique({
+      where: { id: slotId },
+      include: {
+        service: { select: { locked: true } },
+      },
+    });
+    if (!slot) {
+      throw new NotFoundException('Schedule slot not found');
+    }
+    this.tenantIntegrity.assertSameChurch(
+      this.tenantIntegrity.assertActorChurch(actor),
+      slot.churchId,
+      'ScheduleSlot',
+    );
+    await this.assertCanManageMinistry(actor, slot.ministryId);
+    if (slot.service?.locked) {
+      throw new BadRequestException('Worship service schedule is closed');
+    }
+
+    const next = await this.prisma.scheduleSlot.update({
+      where: { id: slotId },
+      data: {
+        blocked: locked,
+        blockedReason: locked ? 'LOCKED_BY_COORDINATOR' : null,
+        status: locked
+          ? ScheduleSlotStatus.LOCKED
+          : slot.assignedServantId
+            ? ScheduleSlotStatus.FILLED
+            : ScheduleSlotStatus.EMPTY,
+      },
+    });
+
+    await this.auditService.log({
+      action: AuditAction.UPDATE,
+      entity: 'ScheduleSlot',
+      entityId: slotId,
+      userId: actor.sub,
+      metadata: {
+        action: locked ? 'LOCK_SLOT' : 'UNLOCK_SLOT',
+      },
+    });
+
+    await this.createSlotTimelineEntry(
+      slot,
+      actor,
+      locked ? 'SLOT_LOCKED' : 'SLOT_UNLOCKED',
+      locked ? 'Slot bloqueado para alteracoes' : 'Slot desbloqueado',
+    );
+
+    this.invalidateSchedulingCaches(slot.serviceId, slot.ministryId);
+
+    return {
+      success: true,
+      slot: {
+        id: next.id,
+        slotStatus: next.status,
+      },
+    };
+  }
+
+  private async createSlotTimelineEntry(
+    slot: { churchId: string; ministryId: string; assignedServantId?: string | null; id: string },
+    actor: JwtPayload,
+    title: string,
+    description: string,
+  ) {
+    await this.timelinePublisher.publish({
+      churchId: slot.churchId,
+      eventType: this.mapScheduleTimelineEventType(title, true),
+      actorUserId: actor.sub,
+      ministryId: slot.ministryId,
+      servantId: slot.assignedServantId ?? null,
+      subjectType: 'SLOT',
+      subjectId: slot.id,
+      relatedEntityType: 'SCHEDULE_SLOT',
+      relatedEntityId: slot.id,
+      dedupeKey: `schedule:${title.toLowerCase()}:${slot.churchId}:${slot.id}`,
+      title,
+      message: description,
+      metadata: {
+        slotId: slot.id,
+      },
+    });
+  }
+
+  private async createServiceTimelineEntry(
+    service: { churchId: string; id: string; title: string },
+    actor: JwtPayload,
+    title: string,
+    description: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    await this.timelinePublisher.publish({
+      churchId: service.churchId,
+      eventType: this.mapScheduleTimelineEventType(title, false),
+      actorUserId: actor.sub,
+      subjectType: 'SERVICE',
+      subjectId: service.id,
+      relatedEntityType: 'WORSHIP_SERVICE',
+      relatedEntityId: service.id,
+      dedupeKey: `service:${title.toLowerCase()}:${service.churchId}:${service.id}`,
+      title,
+      message: description,
+      metadata: {
+        serviceId: service.id,
+        serviceTitle: service.title,
+        ...metadata,
+      },
+    });
+  }
+
+  private mapScheduleTimelineEventType(title: string, slotLevel: boolean): TimelineEventType {
+    const normalized = title.toUpperCase();
+
+    if (normalized.includes('DECLINED')) return 'TIMELINE_SCHEDULE_DECLINED';
+    if (normalized.includes('CONFIRMED')) return 'TIMELINE_SCHEDULE_CONFIRMED';
+    if (normalized.includes('SUBSTITUTE')) {
+      return slotLevel
+        ? 'TIMELINE_SCHEDULE_SUBSTITUTE_REQUESTED'
+        : 'TIMELINE_SCHEDULE_SUBSTITUTED';
+    }
+    if (normalized.includes('CLOSED')) return 'TIMELINE_SCHEDULE_CLOSED';
+    if (normalized.includes('FILLED') || normalized.includes('AUTO')) return 'TIMELINE_SCHEDULE_AUTO_FILLED';
+    if (normalized.includes('ASSIGNED') || normalized.includes('UNASSIGNED')) return 'TIMELINE_SCHEDULE_ASSIGNED';
+    return 'TIMELINE_SCHEDULE_AUTO_FILLED';
   }
 }
 

@@ -22,6 +22,18 @@ export class AnalyticsController {
     return this.analyticsService.church(actor, query);
   }
 
+  @Get('church/trends')
+  @RequireCapabilities(capabilities.analyticsReadChurch)
+  churchTrends(@CurrentUser() actor: JwtPayload, @Query() query: AnalyticsQueryDto) {
+    return this.analyticsService.churchTrends(actor, query);
+  }
+
+  @Get('church/pastoral')
+  @RequireCapabilities(capabilities.analyticsReadChurch)
+  churchPastoral(@CurrentUser() actor: JwtPayload, @Query() query: AnalyticsQueryDto) {
+    return this.analyticsService.churchPastoral(actor, query);
+  }
+
   @Get('ministry/:id')
   @RequireCapabilities(capabilities.analyticsReadChurch)
   ministry(@CurrentUser() actor: JwtPayload, @Param('id') id: string, @Query() query: AnalyticsQueryDto) {

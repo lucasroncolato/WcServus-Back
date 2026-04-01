@@ -15,6 +15,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "e2e:seed": "npm run prisma:seed",
+    "e2e:prepare": "npm run prisma:generate && prisma migrate deploy && npm run e2e:seed",
+    "e2e:reset": "prisma migrate reset --force --skip-generate --skip-seed && npm run e2e:prepare",
     "integrity:servant-user": "ts-node scripts/servant-user-integrity.ts"
   },
   "prisma": {

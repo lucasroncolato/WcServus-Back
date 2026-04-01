@@ -12,6 +12,9 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtPayload } from './types/jwt-payload.type';
 
+const AUTH_LOGIN_THROTTLE_LIMIT = Number(process.env.AUTH_LOGIN_THROTTLE_LIMIT ?? 30);
+const AUTH_LOGIN_THROTTLE_TTL_MS = Number(process.env.AUTH_LOGIN_THROTTLE_TTL_MS ?? 60_000);
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -19,7 +22,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
-  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  @Throttle({ default: { limit: AUTH_LOGIN_THROTTLE_LIMIT, ttl: AUTH_LOGIN_THROTTLE_TTL_MS } })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }

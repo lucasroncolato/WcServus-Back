@@ -1,8 +1,9 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { E2E_DEFAULT_PASSWORD } from './seed/e2e-users';
 
 const prisma = new PrismaClient();
-const DEFAULT_PASSWORD = '123456';
+const DEFAULT_PASSWORD = E2E_DEFAULT_PASSWORD;
 const SEED_VERSION = '2026-03-31-rich';
 
 type Ctx = {
@@ -145,7 +146,7 @@ async function seedChurches() {
 async function seedUsers() {
   const users = [
     { id: 'seed_user_super_admin', churchId: ctx.churches.seed_church_central, name: 'Rafael Mendes', email: 'superadmin@servos.local', role: 'SUPER_ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5562991110001', avatarUrl: 'https://i.pravatar.cc/150?img=1', lastLoginAt: days(-1) },
-    { id: 'seed_user_admin_central', churchId: ctx.churches.seed_church_central, name: 'Juliana Prado', email: 'admin.central@servos.local', role: 'ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: true, phone: '+5562992220002', avatarUrl: 'https://i.pravatar.cc/150?img=2', lastLoginAt: days(-2) },
+    { id: 'seed_user_admin_central', churchId: ctx.churches.seed_church_central, name: 'Juliana Prado', email: 'admin.central@servos.local', role: 'ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5562992220002', avatarUrl: 'https://i.pravatar.cc/150?img=2', lastLoginAt: days(-2) },
     { id: 'seed_user_pastor_central', churchId: ctx.churches.seed_church_central, name: 'Pr. Leonardo Brito', email: 'pastor.central@servos.local', role: 'PASTOR', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5562993330003', avatarUrl: 'https://i.pravatar.cc/150?img=3', lastLoginAt: days(-1) },
     { id: 'seed_user_coord_louvor', churchId: ctx.churches.seed_church_central, name: 'Camila Tavares', email: 'coord.louvor@servos.local', role: 'COORDENADOR', scope: 'MINISTRY', status: 'ACTIVE', mustChangePassword: false, phone: '+5562994440004', avatarUrl: 'https://i.pravatar.cc/150?img=4', lastLoginAt: days(-2) },
     { id: 'seed_user_coord_midia', churchId: ctx.churches.seed_church_central, name: 'Rogério Alves', email: 'coord.midia@servos.local', role: 'COORDENADOR', scope: 'EQUIPE', status: 'ACTIVE', mustChangePassword: false, phone: '+5562995550005', avatarUrl: 'https://i.pravatar.cc/150?img=5', lastLoginAt: days(-3) },
@@ -275,7 +276,7 @@ async function seedServantUsers() {
       name: 'Ana Beatriz Souza',
       email: 'ana.souza@servos.local',
       status: 'ACTIVE',
-      mustChangePassword: true,
+      mustChangePassword: false,
       phone: '+5562996660006',
       avatarUrl: 'https://i.pravatar.cc/150?img=6',
       lastLoginAt: days(-5),
@@ -368,9 +369,13 @@ async function seedCoreModules() {
 
   await prisma.worshipService.upsert({ where: { id: 'seed_service_past' }, update: { id: 'seed_service_past', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_2', type: 'DOMINGO', title: 'Culto Passado', serviceDate: days(-14), startTime: '19:00', locked: true, canceled: false, notes: 'seed', status: 'FINALIZADO', deletedAt: null, deletedBy: null }, create: { id: 'seed_service_past', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_2', type: 'DOMINGO', title: 'Culto Passado', serviceDate: days(-14), startTime: '19:00', locked: true, canceled: false, notes: 'seed', status: 'FINALIZADO' } });
   await prisma.worshipService.upsert({ where: { id: 'seed_service_next' }, update: { id: 'seed_service_next', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Próximo', serviceDate: days(4), startTime: '09:00', locked: false, canceled: false, notes: 'seed', status: 'CONFIRMADO', deletedAt: null, deletedBy: null }, create: { id: 'seed_service_next', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Próximo', serviceDate: days(4), startTime: '09:00', locked: false, canceled: false, notes: 'seed', status: 'CONFIRMADO' } });
+  await prisma.worshipService.upsert({ where: { id: 'seed_service_pending' }, update: { id: 'seed_service_pending', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Pendente E2E', serviceDate: days(7), startTime: '09:00', locked: false, canceled: false, notes: 'seed pending', status: 'CONFIRMADO', deletedAt: null, deletedBy: null }, create: { id: 'seed_service_pending', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Pendente E2E', serviceDate: days(7), startTime: '09:00', locked: false, canceled: false, notes: 'seed pending', status: 'CONFIRMADO' } });
+  await prisma.worshipService.upsert({ where: { id: 'seed_service_pending_2' }, update: { id: 'seed_service_pending_2', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Pendente E2E 2', serviceDate: days(8), startTime: '19:00', locked: false, canceled: false, notes: 'seed pending 2', status: 'CONFIRMADO', deletedAt: null, deletedBy: null }, create: { id: 'seed_service_pending_2', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Pendente E2E 2', serviceDate: days(8), startTime: '19:00', locked: false, canceled: false, notes: 'seed pending 2', status: 'CONFIRMADO' } });
   ctx.services.seed_service_past = 'seed_service_past';
   ctx.services.seed_service_next = 'seed_service_next';
-  add('worshipServices', 2);
+  ctx.services.seed_service_pending = 'seed_service_pending';
+  ctx.services.seed_service_pending_2 = 'seed_service_pending_2';
+  add('worshipServices', 4);
 
   // minimal schedule/version/slots
   await prisma.scheduleVersion.upsert({ where: { id: 'seed_sv_1' }, update: { id: 'seed_sv_1', worshipServiceId: 'seed_service_next', churchId: ctx.churches.seed_church_central, versionNumber: 1, status: 'PUBLISHED', createdBy: ctx.users.seed_user_admin_central }, create: { id: 'seed_sv_1', worshipServiceId: 'seed_service_next', churchId: ctx.churches.seed_church_central, versionNumber: 1, status: 'PUBLISHED', createdBy: ctx.users.seed_user_admin_central } });
@@ -384,6 +389,26 @@ async function seedCoreModules() {
   await prisma.scheduleSlot.upsert({ where: { id: 'seed_slot_1' }, update: { id: 'seed_slot_1', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_1', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'CONFIRMED', confirmationStatus: 'CONFIRMED', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed', deletedAt: null, deletedBy: null }, create: { id: 'seed_slot_1', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_1', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'CONFIRMED', confirmationStatus: 'CONFIRMED', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed' } });
   ctx.scheduleSlots.seed_slot_1 = 'seed_slot_1';
   add('scheduleSlots', 1);
+
+  await prisma.schedule.upsert({ where: { id: 'seed_schedule_2' }, update: { id: 'seed_schedule_2', serviceId: 'seed_service_next', servantId: ctx.servants.seed_servant_felipe, ministryId: ctx.ministries.seed_ministry_louvor_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'PENDING', responseAt: null, declineReason: null, deletedAt: null, deletedBy: null }, create: { id: 'seed_schedule_2', serviceId: 'seed_service_next', servantId: ctx.servants.seed_servant_felipe, ministryId: ctx.ministries.seed_ministry_louvor_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'PENDING', responseAt: null, declineReason: null } });
+  ctx.schedules.seed_schedule_2 = 'seed_schedule_2';
+  await prisma.scheduleSlot.upsert({ where: { id: 'seed_slot_2' }, update: { id: 'seed_slot_2', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_instr, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_2', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_1, functionName: 'VOCAL_PRINCIPAL', slotLabel: 'Vocal', position: 2, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'CONFIRMED', confirmationStatus: 'CONFIRMED', assignedServantId: ctx.servants.seed_servant_felipe, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed confirmed louvor', deletedAt: null, deletedBy: null }, create: { id: 'seed_slot_2', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_instr, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_2', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_1, functionName: 'VOCAL_PRINCIPAL', slotLabel: 'Vocal', position: 2, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'CONFIRMED', confirmationStatus: 'CONFIRMED', assignedServantId: ctx.servants.seed_servant_felipe, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed confirmed louvor' } });
+  ctx.scheduleSlots.seed_slot_2 = 'seed_slot_2';
+  await prisma.scheduleSlot.upsert({ where: { id: 'seed_slot_3' }, update: { id: 'seed_slot_3', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_vocal, churchId: ctx.churches.seed_church_central, scheduleId: null, templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_1, functionName: 'VOCAL_PRINCIPAL', slotLabel: 'Vocal apoio', position: 3, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'EMPTY', confirmationStatus: 'PENDING', assignedServantId: null, assignedByUserId: null, notes: 'seed empty louvor', deletedAt: null, deletedBy: null }, create: { id: 'seed_slot_3', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_vocal, churchId: ctx.churches.seed_church_central, scheduleId: null, templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_1, functionName: 'VOCAL_PRINCIPAL', slotLabel: 'Vocal apoio', position: 3, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'EMPTY', confirmationStatus: 'PENDING', assignedServantId: null, assignedByUserId: null, notes: 'seed empty louvor' } });
+  ctx.scheduleSlots.seed_slot_3 = 'seed_slot_3';
+
+  await prisma.schedule.upsert({ where: { id: 'seed_schedule_3' }, update: { id: 'seed_schedule_3', serviceId: 'seed_service_pending', servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'PENDING', responseAt: null, declineReason: null, deletedAt: null, deletedBy: null }, create: { id: 'seed_schedule_3', serviceId: 'seed_service_pending', servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'PENDING', responseAt: null, declineReason: null } });
+  ctx.schedules.seed_schedule_3 = 'seed_schedule_3';
+  await prisma.scheduleSlot.upsert({ where: { id: 'seed_slot_4' }, update: { id: 'seed_slot_4', serviceId: 'seed_service_pending', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_3', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção pendente', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'FILLED', confirmationStatus: 'PENDING', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed pending servo', deletedAt: null, deletedBy: null }, create: { id: 'seed_slot_4', serviceId: 'seed_service_pending', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_3', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção pendente', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'FILLED', confirmationStatus: 'PENDING', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed pending servo' } });
+  ctx.scheduleSlots.seed_slot_4 = 'seed_slot_4';
+
+  await prisma.schedule.upsert({ where: { id: 'seed_schedule_4' }, update: { id: 'seed_schedule_4', serviceId: 'seed_service_pending_2', servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'PENDING', responseAt: null, declineReason: null, deletedAt: null, deletedBy: null }, create: { id: 'seed_schedule_4', serviceId: 'seed_service_pending_2', servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'PENDING', responseAt: null, declineReason: null } });
+  ctx.schedules.seed_schedule_4 = 'seed_schedule_4';
+  await prisma.scheduleSlot.upsert({ where: { id: 'seed_slot_5' }, update: { id: 'seed_slot_5', serviceId: 'seed_service_pending_2', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_4', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção pendente 2', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'FILLED', confirmationStatus: 'PENDING', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed pending servo 2', deletedAt: null, deletedBy: null }, create: { id: 'seed_slot_5', serviceId: 'seed_service_pending_2', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_4', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção pendente 2', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'FILLED', confirmationStatus: 'PENDING', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed pending servo 2' } });
+  ctx.scheduleSlots.seed_slot_5 = 'seed_slot_5';
+
+  add('schedules', 3);
+  add('scheduleSlots', 4);
 }
 
 async function seedCoverageExtras() {
@@ -594,8 +619,8 @@ async function seedAdvancedModules() {
   const p1 = new Date(Date.UTC(p0.getUTCFullYear(), p0.getUTCMonth() + 1, 0, 23, 59, 59));
   await prisma.churchAnalyticsSnapshot.upsert({
     where: { churchId_windowKey_periodStart_periodEnd: { churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1 } },
-    update: { id: 'seed_cas_2', churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1, summary: { seed: true }, generatedAt: days(-1) },
-    create: { id: 'seed_cas_2', churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1, summary: { seed: true }, generatedAt: days(-1) },
+    update: { churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1, summary: { seed: true }, generatedAt: days(-1) },
+    create: { churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1, summary: { seed: true }, generatedAt: days(-1) },
   });
   await prisma.timelineEntry.upsert({
     where: { id: 'seed_tl_2' },
@@ -606,6 +631,11 @@ async function seedAdvancedModules() {
     where: { id: 'seed_sr_2' },
     update: { id: 'seed_sr_2', type: 'DADOS', subject: 'Seed dashboard', description: 'Inconsistencia seed', reference: 'SR-2', status: 'EM_ANALISE', authorUserId: ctx.users.seed_user_admin_zs, handledByUserId: ctx.users.seed_user_super_admin, handledAt: null },
     create: { id: 'seed_sr_2', type: 'DADOS', subject: 'Seed dashboard', description: 'Inconsistencia seed', reference: 'SR-2', status: 'EM_ANALISE', authorUserId: ctx.users.seed_user_admin_zs, handledByUserId: ctx.users.seed_user_super_admin, handledAt: null },
+  });
+  await prisma.userMinistryBinding.upsert({
+    where: { userId_ministryId_teamId: { userId: ctx.users.seed_user_coord_louvor, ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_instr } },
+    update: { id: 'seed_umb_1', userId: ctx.users.seed_user_coord_louvor, ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_instr },
+    create: { id: 'seed_umb_1', userId: ctx.users.seed_user_coord_louvor, ministryId: ctx.ministries.seed_ministry_louvor_central, teamId: ctx.teams.seed_team_louvor_instr },
   });
   await prisma.userMinistryBinding.upsert({
     where: { userId_ministryId_teamId: { userId: ctx.users.seed_user_coord_midia, ministryId: ctx.ministries.seed_ministry_m_dia_central, teamId: ctx.teams.seed_team_midia_proj } },
@@ -743,7 +773,6 @@ async function seedRemainingCoverage() {
       },
     },
     update: {
-      id: 'seed_mas_1',
       churchId: ctx.churches.seed_church_central,
       ministryId: ctx.ministries.seed_ministry_recep_o_central,
       windowKey: 'MONTH',
@@ -753,7 +782,6 @@ async function seedRemainingCoverage() {
       generatedAt: days(-1),
     },
     create: {
-      id: 'seed_mas_1',
       churchId: ctx.churches.seed_church_central,
       ministryId: ctx.ministries.seed_ministry_recep_o_central,
       windowKey: 'MONTH',
@@ -775,7 +803,6 @@ async function seedRemainingCoverage() {
       },
     },
     update: {
-      id: 'seed_tas_1',
       churchId: ctx.churches.seed_church_central,
       teamId: ctx.teams.seed_team_recep_entrada,
       windowKey: 'MONTH',
@@ -785,7 +812,6 @@ async function seedRemainingCoverage() {
       generatedAt: days(-1),
     },
     create: {
-      id: 'seed_tas_1',
       churchId: ctx.churches.seed_church_central,
       teamId: ctx.teams.seed_team_recep_entrada,
       windowKey: 'MONTH',
@@ -807,7 +833,6 @@ async function seedRemainingCoverage() {
       },
     },
     update: {
-      id: 'seed_sos_1',
       churchId: ctx.churches.seed_church_central,
       servantId: ctx.servants.seed_servant_ana,
       windowKey: 'MONTH',
@@ -817,7 +842,6 @@ async function seedRemainingCoverage() {
       generatedAt: days(-1),
     },
     create: {
-      id: 'seed_sos_1',
       churchId: ctx.churches.seed_church_central,
       servantId: ctx.servants.seed_servant_ana,
       windowKey: 'MONTH',

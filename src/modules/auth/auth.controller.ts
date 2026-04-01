@@ -60,6 +60,13 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
+  @Get('capabilities')
+  @AllowWhenPasswordChangeRequired()
+  capabilities(@CurrentUser() user: JwtPayload) {
+    return this.authService.capabilities(user.sub);
+  }
+
+  @ApiBearerAuth()
   @Post('change-password')
   @AllowWhenPasswordChangeRequired()
   changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {

@@ -36,12 +36,16 @@ const DEFAULT_MOTIVATIONAL_MESSAGES = [
   'Voce tem sido fiel.',
   'Continue no caminho.',
 ];
+const JOURNEY_PROJECTION_FRESHNESS_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class JourneyService {
+  private milestonesSynced = false;
+
   constructor(private readonly prisma: PrismaService) {}
 
   async getMyJourney(servantId: string, churchId: string | null) {
+    await this.ensureProjectionFresh(servantId, churchId);
     const [summary, milestones, logs, indicators, nextSteps] = await Promise.all([
       this.getSummary(servantId, churchId),
       this.getMilestones(servantId, churchId),
@@ -64,8 +68,7 @@ export class JourneyService {
 
   async getSummary(servantId: string, churchId: string | null) {
     await this.ensureJourney(servantId, churchId);
-    await this.syncDefaultMilestones();
-    await this.evaluateMilestones(servantId, churchId);
+    await this.refreshJourney(servantId, churchId);
 
     const journey = await this.prisma.servantJourney.findUniqueOrThrow({
       where: { servantId },
@@ -155,7 +158,7 @@ export class JourneyService {
 
   async getIndicators(servantId: string, churchId: string | null, query?: ListJourneyIndicatorsQueryDto) {
     await this.ensureJourney(servantId, churchId);
-    await this.refreshJourneyProjection(servantId, churchId);
+    await this.ensureProjectionFresh(servantId, churchId);
 
     const windowDays = query?.windowDays ?? 30;
     const snapshot = await this.prisma.journeyIndicatorSnapshot.findUnique({
@@ -191,7 +194,7 @@ export class JourneyService {
 
   async getNextSteps(servantId: string, churchId: string | null) {
     await this.ensureJourney(servantId, churchId);
-    await this.refreshJourneyProjection(servantId, churchId);
+    await this.ensureProjectionFresh(servantId, churchId);
     const records = await this.prisma.journeyNextStep.findMany({
       where: {
         servantId,
@@ -265,6 +268,37 @@ export class JourneyService {
     await this.evaluateMilestones(servantId, churchId);
     await this.rebuildIndicatorSnapshots(servantId, churchId);
     await this.rebuildNextSteps(servantId, churchId);
+  }
+
+  private async ensureProjectionFresh(servantId: string, churchId: string | null) {
+    const freshnessCutoff = new Date(Date.now() - JOURNEY_PROJECTION_FRESHNESS_MS);
+    const [snapshot30d, journey, openNextStep] = await Promise.all([
+      this.prisma.journeyIndicatorSnapshot.findUnique({
+        where: { servantId_windowDays: { servantId, windowDays: 30 } },
+        select: { generatedAt: true },
+      }),
+      this.prisma.servantJourney.findUnique({
+        where: { servantId },
+        select: { updatedAt: true },
+      }),
+      this.prisma.journeyNextStep.findFirst({
+        where: { servantId, status: JourneyNextStepStatus.OPEN },
+        select: { updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ]);
+
+    const snapshotFresh = Boolean(snapshot30d?.generatedAt && snapshot30d.generatedAt >= freshnessCutoff);
+    const journeyFresh = Boolean(journey?.updatedAt && journey.updatedAt >= freshnessCutoff);
+    const nextStepFresh = Boolean(
+      openNextStep?.updatedAt && openNextStep.updatedAt >= freshnessCutoff,
+    );
+
+    if (snapshotFresh && journeyFresh && nextStepFresh) {
+      return;
+    }
+
+    await this.refreshJourneyProjection(servantId, churchId);
   }
 
   private async ensureJourney(servantId: string, churchId: string | null) {
@@ -347,6 +381,10 @@ export class JourneyService {
   }
 
   private async syncDefaultMilestones() {
+    if (this.milestonesSynced) {
+      return;
+    }
+
     for (const item of JOURNEY_MILESTONE_CATALOG) {
       const exists = await this.prisma.journeyMilestone.findUnique({
         where: { code: item.code },
@@ -369,6 +407,8 @@ export class JourneyService {
         },
       });
     }
+
+    this.milestonesSynced = true;
   }
 
   private async evaluateMilestones(servantId: string, churchId: string | null) {
@@ -481,9 +521,15 @@ export class JourneyService {
 
   private async rebuildNextSteps(servantId: string, churchId: string | null) {
     const resolvedChurchId = await this.ensureChurchForServant(servantId, churchId);
-    const [summary, indicators, recentLogs] = await Promise.all([
-      this.getSummary(servantId, resolvedChurchId),
-      this.getIndicators(servantId, resolvedChurchId, { windowDays: 30 }),
+    const [journey, snapshot30d, recentLogs] = await Promise.all([
+      this.prisma.servantJourney.findUnique({
+        where: { servantId },
+        select: { totalTrainingsCompleted: true },
+      }),
+      this.prisma.journeyIndicatorSnapshot.findUnique({
+        where: { servantId_windowDays: { servantId, windowDays: 30 } },
+        select: { constancyScore: true, responsivenessScore: true, punctualityScore: true },
+      }),
       this.prisma.journeyLog.findMany({
         where: { servantId },
         orderBy: [{ occurredAt: 'desc' }],
@@ -492,11 +538,11 @@ export class JourneyService {
     ]);
 
     const activeTypes = new Set<string>();
-    const commitment = indicators.find((item) => item.key === 'constancy')?.progressPercent ?? 0;
-    const punctuality = indicators.find((item) => item.key === 'punctuality')?.progressPercent ?? 100;
-    const responsiveness = indicators.find((item) => item.key === 'responsiveness')?.progressPercent ?? 100;
+    const commitment = snapshot30d?.constancyScore ?? 0;
+    const punctuality = snapshot30d?.punctualityScore ?? 100;
+    const responsiveness = snapshot30d?.responsivenessScore ?? 100;
 
-    if (summary.totalTrainingsCompleted < 1) activeTypes.add('COMPLETE_TRAINING');
+    if ((journey?.totalTrainingsCompleted ?? 0) < 1) activeTypes.add('COMPLETE_TRAINING');
     if (responsiveness < 60) activeTypes.add('IMPROVE_RESPONSE');
     if (commitment < 55) activeTypes.add('RETAKE_CONSTANCY');
     if (punctuality < 60) activeTypes.add('IMPROVE_PUNCTUALITY');

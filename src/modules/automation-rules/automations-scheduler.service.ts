@@ -3,6 +3,7 @@ import { AutomationRule, AutomationTriggerType } from '@prisma/client';
 import { attendanceAbsenceStatuses } from 'src/common/attendance/attendance-status.utils';
 import { LogService } from 'src/common/log/log.service';
 import { AppMetricsService } from 'src/common/observability/app-metrics.service';
+import { SchedulerLockService } from 'src/common/scheduler-lock/scheduler-lock.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AutomationsEngineService } from './automations-engine.service';
 import { AutomationCheckpointService } from './automation-checkpoint.service';
@@ -19,11 +20,40 @@ export class AutomationsSchedulerService {
     private readonly checkpoint: AutomationCheckpointService,
     private readonly metrics: AppMetricsService,
     private readonly logService: LogService,
+    private readonly schedulerLock: SchedulerLockService,
   ) {}
 
   async runOnce(input?: { churchId?: string; triggerKey?: string }) {
+    this.metrics.incrementCounter('scheduler_run_total', 1);
+    this.metrics.incrementCounter('scheduler_run_total.automations_scheduler', 1);
+    const lock = await this.schedulerLock.withLock(
+      'automations_scheduler',
+      () => this.runOnceWithInProcessGuard(input),
+      { scope: input?.churchId ?? 'global' },
+    );
+
+    if (!lock.acquired) {
+      this.metrics.incrementCounter('scheduler_lock_failed_total', 1);
+      this.metrics.incrementCounter('scheduler_lock_failed_total.automations_scheduler', 1);
+      return {
+        overlapSkipped: true,
+        reason: 'distributed_lock',
+      };
+    }
+
+    return lock.result ?? { overlapSkipped: true, reason: 'distributed_lock' };
+  }
+
+  private async runOnceWithInProcessGuard(input?: { churchId?: string; triggerKey?: string }) {
     if (this.running) {
       this.metrics.incrementCounter('automation_scheduler_overlap_skipped_total', 1);
+      this.logService.event({
+        level: 'warn',
+        module: 'automations',
+        action: 'scheduler.skipped_overlap',
+        status: 'skip',
+        message: 'Automation scheduler cycle skipped due to overlap',
+      });
       return {
         overlapSkipped: true,
         reason: 'overlap',
@@ -70,8 +100,8 @@ export class AutomationsSchedulerService {
         try {
           const results =
             rule.triggerType === AutomationTriggerType.TIME
-              ? await this.handleTimeRule(rule)
-              : await this.handleThresholdRule(rule);
+              ? await this.withTimeout(this.handleTimeRule(rule), this.resolveTimeoutMs(), `rule:${rule.id}`)
+              : await this.withTimeout(this.handleThresholdRule(rule), this.resolveTimeoutMs(), `rule:${rule.id}`);
 
           summary.triggerBreakdown[rule.triggerKey] =
             (summary.triggerBreakdown[rule.triggerKey] ?? 0) + results.executed;
@@ -107,12 +137,16 @@ export class AutomationsSchedulerService {
       this.metrics.recordJob('automations_scheduler_run', durationMs, true, {
         processedItems: summary.executed,
       });
+      this.metrics.incrementCounter('scheduler_duration_ms', Math.round(durationMs));
+      this.metrics.incrementCounter('scheduler_duration_ms.automations_scheduler', Math.round(durationMs));
       this.metrics.incrementCounter('automation_scheduler_executed_total', summary.executed);
+      this.metrics.setGauge(`scheduler_last_run_timestamp.${schedulerName}`, Date.now());
 
       this.logService.event({
         level: 'info',
         module: 'automations',
         action: 'scheduler.completed',
+        status: 'success',
         message: 'Automation scheduler cycle completed',
         durationMs,
         metadata: summary,
@@ -137,6 +171,8 @@ export class AutomationsSchedulerService {
         processedItems: summary.executed,
       });
       this.metrics.incrementCounter('automation_scheduler_failed_total', 1);
+      this.metrics.incrementCounter('scheduler_run_failed_total', 1);
+      this.metrics.incrementCounter('scheduler_run_failed_total.automations_scheduler', 1);
 
       throw error;
     } finally {
@@ -162,6 +198,31 @@ export class AutomationsSchedulerService {
       return DEFAULT_INTERVAL_MS;
     }
     return raw;
+  }
+
+  private resolveTimeoutMs() {
+    const raw = Number(process.env.AUTOMATION_SCHEDULER_TIMEOUT_MS ?? 10 * 60 * 1000);
+    if (!Number.isFinite(raw) || raw < 60_000) {
+      return 10 * 60 * 1000;
+    }
+    return raw;
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    let timeout: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+          timeout.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
   }
 
   private async handleTimeRule(rule: AutomationRule) {

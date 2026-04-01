@@ -7,6 +7,8 @@ import { JourneyCheckpointService } from './journey-checkpoint.service';
 import { JourneyService } from './journey.service';
 
 const PROJECTOR_NAME = 'journey_projector_v1';
+const DEFAULT_RECONCILE_LIMIT = 50;
+const DEFAULT_RECONCILE_CHUNK = 10;
 
 @Injectable()
 export class JourneyReconcileService {
@@ -18,7 +20,7 @@ export class JourneyReconcileService {
     private readonly logService: LogService,
   ) {}
 
-  async reconcileDaily(limit = 200) {
+  async reconcileDaily(limit = this.resolveLimit()) {
     const startedAt = performance.now();
     const staleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const staleServants = await this.prisma.servant.findMany({
@@ -38,33 +40,48 @@ export class JourneyReconcileService {
 
     let success = 0;
     let failed = 0;
-    for (const servant of staleServants) {
-      try {
-        await this.journeyService.refreshJourneyProjection(servant.id, servant.churchId);
-        await this.checkpointService.markReconciled({
-          projectorName: PROJECTOR_NAME,
-          churchId: servant.churchId,
-          servantId: servant.id,
-          status: JourneyProjectionCheckpointStatus.OK,
-          details: { source: 'daily_reconcile' },
-        });
-        success += 1;
-      } catch (error) {
-        failed += 1;
-        await this.checkpointService.markReconciled({
-          projectorName: PROJECTOR_NAME,
-          churchId: servant.churchId,
-          servantId: servant.id,
-          status: JourneyProjectionCheckpointStatus.ERROR,
-          details: { source: 'daily_reconcile', error: String(error) },
-        });
-        this.logService.error(
-          'Journey reconcile failed for servant',
-          String(error),
-          JourneyReconcileService.name,
-          { servantId: servant.id, churchId: servant.churchId },
-        );
+    const chunkSize = this.resolveChunkSize();
+    for (let index = 0; index < staleServants.length; index += chunkSize) {
+      const chunk = staleServants.slice(index, index + chunkSize);
+      const results = await Promise.all(
+        chunk.map(async (servant) => {
+          try {
+            await this.journeyService.refreshJourneyProjection(servant.id, servant.churchId);
+            await this.checkpointService.markReconciled({
+              projectorName: PROJECTOR_NAME,
+              churchId: servant.churchId,
+              servantId: servant.id,
+              status: JourneyProjectionCheckpointStatus.OK,
+              details: { source: 'daily_reconcile' },
+            });
+            return { ok: true as const };
+          } catch (error) {
+            await this.checkpointService.markReconciled({
+              projectorName: PROJECTOR_NAME,
+              churchId: servant.churchId,
+              servantId: servant.id,
+              status: JourneyProjectionCheckpointStatus.ERROR,
+              details: { source: 'daily_reconcile', error: String(error) },
+            });
+            this.logService.error(
+              'Journey reconcile failed for servant',
+              String(error),
+              JourneyReconcileService.name,
+              { servantId: servant.id, churchId: servant.churchId },
+            );
+            return { ok: false as const };
+          }
+        }),
+      );
+
+      for (const item of results) {
+        if (item.ok) success += 1;
+        else failed += 1;
       }
+
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
     }
 
     const durationMs = performance.now() - startedAt;
@@ -155,5 +172,21 @@ export class JourneyReconcileService {
 
   async getCheckpointStatus() {
     return this.checkpointService.statusSummary(PROJECTOR_NAME);
+  }
+
+  private resolveLimit() {
+    const parsed = Number(process.env.JOURNEY_RECONCILE_MAX_SERVANTS_PER_RUN ?? DEFAULT_RECONCILE_LIMIT);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return DEFAULT_RECONCILE_LIMIT;
+    }
+    return Math.floor(parsed);
+  }
+
+  private resolveChunkSize() {
+    const parsed = Number(process.env.JOURNEY_RECONCILE_CHUNK_SIZE ?? DEFAULT_RECONCILE_CHUNK);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return DEFAULT_RECONCILE_CHUNK;
+    }
+    return Math.floor(parsed);
   }
 }

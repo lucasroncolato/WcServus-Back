@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SchedulerLockModule } from 'src/common/scheduler-lock/scheduler-lock.module';
 import { AuditModule } from '../audit/audit.module';
 import { TimelineModule } from '../timeline/timeline.module';
 import { AutomationRulesController } from './automation-rules.controller';
@@ -10,7 +11,7 @@ import { AutomationsSchedulerRunner } from './automations-scheduler.runner';
 import { AutomationCheckpointService } from './automation-checkpoint.service';
 
 @Module({
-  imports: [AuditModule, TimelineModule],
+  imports: [AuditModule, TimelineModule, SchedulerLockModule],
   controllers: [AutomationRulesController],
   providers: [
     AutomationRulesService,

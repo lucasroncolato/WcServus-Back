@@ -389,24 +389,29 @@ export class AnalyticsSnapshotService {
       this.metrics.incrementCounter('analytics_snapshot_refresh_total', 1);
       this.metrics.incrementCounter(`analytics_snapshot_refresh_total.${context.scope}`, 1);
       this.metrics.incrementCounter('analytics_snapshot_refresh_duration_ms', Math.max(1, Math.round(durationMs)));
+      this.metrics.incrementCounter('analytics_snapshot_duration_ms', Math.max(1, Math.round(durationMs)));
       this.logService.event({
         level: 'info',
         module: 'analytics',
         action: 'snapshot.refresh.success',
         message: 'Analytics snapshot refreshed',
         churchId: (context.churchId as string | undefined) ?? null,
+        status: 'success',
         durationMs,
         metadata: context,
       });
     } catch (error) {
       summary.failed += 1;
       this.metrics.incrementCounter('analytics_snapshot_refresh_failed_total', 1);
+      this.metrics.incrementCounter('analytics_snapshot_failed_total', 1);
       this.logService.event({
         level: 'error',
         module: 'analytics',
         action: 'snapshot.refresh.failure',
         message: 'Analytics snapshot refresh failed',
         churchId: (context.churchId as string | undefined) ?? null,
+        status: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
         metadata: {
           ...context,
           error: String(error),

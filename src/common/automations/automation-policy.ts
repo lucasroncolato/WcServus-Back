@@ -1,4 +1,9 @@
-import { AutomationDedupeStrategy, AutomationExecutionStatus, AutomationSourceModule } from '@prisma/client';
+import {
+  AutomationActionType,
+  AutomationDedupeStrategy,
+  AutomationExecutionStatus,
+  AutomationSourceModule,
+} from '@prisma/client';
 import { AUTOMATION_ACTION_CATALOG, type AutomationActionKey } from './automation-action-catalog';
 import { AUTOMATION_CONDITION_CATALOG, type AutomationConditionKey } from './automation-condition-catalog';
 import { AUTOMATION_TRIGGER_CATALOG, type AutomationTriggerKey, isAutomationTriggerKey } from './automation-trigger-catalog';
@@ -7,6 +12,7 @@ export type AutomationRuleShape = {
   triggerKey: string;
   conditionConfig?: unknown;
   actionConfig?: unknown;
+  actionType?: AutomationActionType | null;
   cooldownMinutes?: number;
   dedupeStrategy?: AutomationDedupeStrategy;
 };
@@ -29,7 +35,7 @@ export function validateAutomationRuleShape(input: AutomationRuleShape) {
     throw new Error('Invalid cooldownMinutes');
   }
 
-  const actionConfig = (input.actionConfig ?? []) as Array<{ action?: string }>;
+  const actionConfig = normalizeAutomationActionConfig(input.actionConfig, input.actionType);
   if (!Array.isArray(actionConfig) || actionConfig.length === 0) {
     throw new Error('At least one action is required');
   }
@@ -41,6 +47,80 @@ export function validateAutomationRuleShape(input: AutomationRuleShape) {
   }
 
   return true;
+}
+
+export function normalizeAutomationActionConfig(
+  actionConfig: unknown,
+  actionType?: AutomationActionType | null,
+): Array<{ action: string; config?: Record<string, unknown> }> {
+  if (Array.isArray(actionConfig)) {
+    return actionConfig
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item) => ({
+        action: String(item.action ?? '').trim(),
+        config:
+          item.config && typeof item.config === 'object' && !Array.isArray(item.config)
+            ? (item.config as Record<string, unknown>)
+            : undefined,
+      }))
+      .filter((item) => item.action.length > 0);
+  }
+
+  if (actionConfig && typeof actionConfig === 'object') {
+    const raw = actionConfig as Record<string, unknown>;
+    if (Array.isArray(raw.actions)) {
+      return normalizeAutomationActionConfig(raw.actions, actionType);
+    }
+
+    if (typeof raw.action === 'string' && raw.action.trim().length > 0) {
+      return [
+        {
+          action: raw.action.trim(),
+          config:
+            raw.config && typeof raw.config === 'object' && !Array.isArray(raw.config)
+              ? (raw.config as Record<string, unknown>)
+              : undefined,
+        },
+      ];
+    }
+  }
+
+  if (typeof actionConfig === 'string' && actionConfig.trim().length > 0) {
+    return [{ action: actionConfig.trim() }];
+  }
+
+  if (actionType) {
+    const legacyAction = mapLegacyActionTypeToAction(actionType);
+    if (legacyAction) {
+      return [{ action: legacyAction }];
+    }
+  }
+
+  return [];
+}
+
+function mapLegacyActionTypeToAction(actionType: AutomationActionType): AutomationActionKey | null {
+  switch (actionType) {
+    case AutomationActionType.SCHEDULE_ALERT_UNCONFIRMED:
+      return 'resend_schedule_notification';
+    case AutomationActionType.SCHEDULE_ALERT_INCOMPLETE:
+      return 'flag_slot_attention';
+    case AutomationActionType.SCHEDULE_FOLLOWUP_DECLINED:
+      return 'suggest_substitute';
+    case AutomationActionType.TASK_NOTIFY_COORDINATOR_OVERDUE:
+      return 'assign_task_to_leader';
+    case AutomationActionType.TASK_MARK_OVERDUE:
+    case AutomationActionType.TASK_NOTIFY_DUE_SOON:
+    case AutomationActionType.TASK_ALERT_UNASSIGNED:
+      return 'create_task';
+    case AutomationActionType.JOURNEY_REGISTER_EVENT:
+    case AutomationActionType.TRACK_ALERT_STALLED:
+    case AutomationActionType.TRACK_MARK_STAGNATED:
+    case AutomationActionType.TRAINING_ALERT_PENDING:
+      return 'write_timeline_entry';
+    default:
+      return null;
+  }
 }
 
 export function buildAutomationDedupeKey(input: {

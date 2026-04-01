@@ -19,7 +19,13 @@ export class ChurchScopeGuard implements CanActivate {
 
     const request = context
       .switchToHttp()
-      .getRequest<{ user?: JwtPayload; headers?: Record<string, string | string[] | undefined> }>();
+      .getRequest<{
+        user?: JwtPayload;
+        headers?: Record<string, string | string[] | undefined>;
+        body?: unknown;
+        query?: unknown;
+        params?: unknown;
+      }>();
 
     const userChurchId = request.user?.churchId ?? null;
     if (!userChurchId) {
@@ -33,7 +39,41 @@ export class ChurchScopeGuard implements CanActivate {
       throw new ForbiddenException('Church scope mismatch');
     }
 
+    this.assertRequestChurchScope(request, userChurchId);
+
     return true;
   }
-}
 
+  private assertRequestChurchScope(
+    request: {
+      body?: unknown;
+      query?: unknown;
+      params?: unknown;
+    },
+    userChurchId: string,
+  ) {
+    const targets = [request.body, request.query, request.params];
+    for (const target of targets) {
+      this.scanPayload(target, userChurchId);
+    }
+  }
+
+  private scanPayload(value: unknown, userChurchId: string) {
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => this.scanPayload(item, userChurchId));
+      return;
+    }
+
+    const objectValue = value as Record<string, unknown>;
+    const scopedChurch = objectValue.churchId ?? objectValue.church_id;
+    if (typeof scopedChurch === 'string' && scopedChurch && scopedChurch !== userChurchId) {
+      throw new ForbiddenException('Church scope mismatch');
+    }
+
+    Object.values(objectValue).forEach((nested) => this.scanPayload(nested, userChurchId));
+  }
+}

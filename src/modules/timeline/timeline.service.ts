@@ -18,6 +18,86 @@ export class TimelineService {
     const cursor = this.parseCursor(query.cursor);
 
     const entries = await this.prisma.timelineEntry.findMany({
+      where: cursor
+        ? {
+            AND: [
+              where,
+              {
+                OR: [
+                  { occurredAt: { lt: cursor.occurredAt } },
+                  {
+                    occurredAt: cursor.occurredAt,
+                    id: { lt: cursor.id },
+                  },
+                ],
+              },
+            ],
+          }
+        : where,
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      include: {
+        actorUser: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const hasMore = entries.length > limit;
+    const sliced = hasMore ? entries.slice(0, limit) : entries;
+    const last = sliced[sliced.length - 1];
+
+    const data = sliced.map((entry) => this.serializeEntry(entry));
+
+    return {
+      data,
+      pageInfo: {
+        hasMore,
+        nextCursor: hasMore && last ? this.encodeCursor(last.occurredAt, last.id) : null,
+      },
+      meta: {
+        limit,
+      },
+      dataQualityWarnings: this.buildWarnings(data),
+    };
+  }
+
+  async listOwn(actor: JwtPayload, query: TimelineQueryDto) {
+    if (actor.role !== Role.SERVO) {
+      throw new ForbiddenException('Only servants can access personal timeline');
+    }
+    if (!actor.servantId) {
+      throw new ForbiddenException('User is not linked to a servant');
+    }
+
+    const churchId = this.requireChurch(actor);
+    const limit = Math.min(Math.max(query.limit ?? 30, 1), 100);
+    const cursor = this.parseCursor(query.cursor);
+
+    const where: Prisma.TimelineEntryWhereInput = {
+      churchId,
+      ...(query.category ? { category: query.category as any } : {}),
+      ...(query.severity ? { severity: query.severity as any } : {}),
+      ...(query.eventType ? { eventType: query.eventType } : {}),
+      ...(query.from || query.to
+        ? {
+            occurredAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+      OR: [
+        { servantId: actor.servantId },
+        { subjectType: 'SERVANT', subjectId: actor.servantId },
+        { relatedEntityType: 'SERVANT', relatedEntityId: actor.servantId },
+      ],
+    };
+
+    const entries = await this.prisma.timelineEntry.findMany({
       where: {
         ...where,
         ...(cursor
@@ -47,7 +127,6 @@ export class TimelineService {
     const hasMore = entries.length > limit;
     const sliced = hasMore ? entries.slice(0, limit) : entries;
     const last = sliced[sliced.length - 1];
-
     const data = sliced.map((entry) => this.serializeEntry(entry));
 
     return {
@@ -58,6 +137,7 @@ export class TimelineService {
       },
       meta: {
         limit,
+        personalTimeline: true,
       },
       dataQualityWarnings: this.buildWarnings(data),
     };

@@ -54,16 +54,19 @@ export class MeController {
   }
 
   @Get('attendance')
+  @Roles(Role.SERVO)
   listMyAttendance(@CurrentUser() user: JwtPayload, @Query() query: MySchedulesQueryDto) {
     return this.meService.listMyAttendance(user, query);
   }
 
   @Get('notifications')
+  @Roles(Role.SERVO)
   listMyNotifications(@CurrentUser() user: JwtPayload, @Query() query: ListNotificationsQueryDto) {
     return this.meService.listMyNotifications(user, query);
   }
 
   @Patch('notifications/:id/read')
+  @Roles(Role.SERVO)
   readMyNotification(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.meService.readMyNotification(user, id);
   }

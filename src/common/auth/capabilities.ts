@@ -9,6 +9,7 @@ export const capabilities = {
   journeyReadSelf: 'journey.read.self',
   usersManageChurch: 'users.manage.church',
   integrityReadChurch: 'integrity.read.church',
+  automationReadChurch: 'automation.read.church',
   automationManageChurch: 'automation.manage.church',
   analyticsReadChurch: 'analytics.read.church',
   timelineReadChurch: 'timeline.read.church',

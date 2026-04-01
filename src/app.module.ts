@@ -43,6 +43,7 @@ import { PublicOnboardingModule } from './modules/public-onboarding/public-onboa
 import { IntegrityModule } from './modules/integrity/integrity.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
+import { InternalController } from './internal.controller';
 import { PermissionPolicyService } from './common/auth/permission-policy.service';
 
 @Module({
@@ -91,7 +92,7 @@ import { PermissionPolicyService } from './common/auth/permission-policy.service
     PublicOnboardingModule,
     IntegrityModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, InternalController],
   providers: [
     PermissionPolicyService,
     {

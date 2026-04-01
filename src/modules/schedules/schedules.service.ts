@@ -248,6 +248,7 @@ export class SchedulesService {
   }
 
   async listEligibleServants(query: ListEligibleScheduleServantsQueryDto, actor: JwtPayload) {
+    const actorChurchId = this.requireActorChurch(actor);
     const ministryId = query.ministryId;
     if (!ministryId) {
       throw new BadRequestException('ministryId is required');
@@ -274,18 +275,20 @@ export class SchedulesService {
 
     const service = await this.prisma.worshipService.findUnique({
       where: { id: query.serviceId },
-      select: { id: true, serviceDate: true, startTime: true },
+      select: { id: true, churchId: true, serviceDate: true, startTime: true },
     });
 
     if (!service) {
       throw new NotFoundException('Worship service not found');
     }
+    this.tenantIntegrity.assertSameChurch(actorChurchId, service.churchId, 'Worship service');
 
     const weekday = getSaoPauloWeekday(service.serviceDate);
     const shift = this.resolveShiftFromStartTime(service.startTime);
 
     const servants = await this.prisma.servant.findMany({
       where: {
+        churchId: actorChurchId,
         OR: [{ mainMinistryId: ministryId }, { servantMinistries: { some: { ministryId } } }],
       },
       select: {
@@ -321,6 +324,7 @@ export class SchedulesService {
     const [conflicts, servantsWithPastoralPending] = await Promise.all([
       this.prisma.schedule.findMany({
         where: {
+          churchId: actorChurchId,
           serviceId: service.id,
           servantId: { in: servantIds },
         },
@@ -381,6 +385,7 @@ export class SchedulesService {
   }
 
   async mobileContext(query: ListScheduleMobileContextQueryDto, actor: JwtPayload) {
+    const actorChurchId = this.requireActorChurch(actor);
     const daysAhead = query.daysAhead ?? 30;
     const ministryId = query.ministryId;
 
@@ -391,17 +396,18 @@ export class SchedulesService {
 
     const [ministries, teams, services] = await Promise.all([
       this.prisma.ministry.findMany({
-        where: { id: { in: allowedSectorIds } },
+        where: { churchId: actorChurchId, id: { in: allowedSectorIds } },
         select: { id: true, name: true },
         orderBy: [{ name: 'asc' }],
       }),
       this.prisma.team.findMany({
-        where: { ministryId: { in: allowedSectorIds }, status: TeamStatus.ACTIVE },
+        where: { churchId: actorChurchId, ministryId: { in: allowedSectorIds }, status: TeamStatus.ACTIVE },
         select: { id: true, name: true, ministryId: true },
         orderBy: [{ name: 'asc' }],
       }),
       this.prisma.worshipService.findMany({
         where: {
+          churchId: actorChurchId,
           serviceDate: {
             gte: new Date(),
             lte: new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000),

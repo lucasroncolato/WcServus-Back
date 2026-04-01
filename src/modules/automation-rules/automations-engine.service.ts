@@ -11,6 +11,7 @@ import { resolveScopedMinistryIds } from 'src/common/auth/access-scope';
 import {
   buildAutomationDedupeKey,
   mapExecutionStatus,
+  normalizeAutomationActionConfig,
   resolveSourceModule,
   shouldSkipByCooldown,
 } from 'src/common/automations/automation-policy';
@@ -101,7 +102,7 @@ export class AutomationsEngineService {
 
   async executeRule(rule: AutomationRule, input: AutomationExecutionRequest) {
     const startedAt = Date.now();
-    const actionConfig = (rule.actionConfig as Array<{ action: string; config?: Record<string, unknown> }> | null) ?? [];
+    const actionConfig = normalizeAutomationActionConfig(rule.actionConfig, rule.actionType);
 
     if (!rule.enabled || rule.deletedAt) {
       const details = {
@@ -183,6 +184,20 @@ export class AutomationsEngineService {
     let processed = 0;
     let failed = 0;
     const results: Array<Record<string, unknown>> = [];
+
+    if (actionConfig.length === 0) {
+      const details = {
+        status: AutomationExecutionStatus.SKIPPED,
+        skipReason: AutomationExecutionSkipReason.CONDITION_FALSE,
+        durationMs: Date.now() - startedAt,
+        processed: 0,
+        summary: 'No valid actionConfig found for this rule',
+      };
+      if (!input.dryRun) {
+        await this.persistExecutionLog(rule, input, details);
+      }
+      return { ...details, dryRun: Boolean(input.dryRun) };
+    }
 
     for (const action of actionConfig) {
       const actionInput: AutomationActionInput = {
@@ -447,18 +462,39 @@ export class AutomationsEngineService {
     await this.prisma.automationExecutionLog.create({ data: payload });
 
     this.metrics.incrementCounter(`automation_execution_total.${details.status.toLowerCase()}`, 1);
+    this.metrics.incrementCounter('automation_executions_total', 1);
+    if (details.status === AutomationExecutionStatus.FAILED) {
+      this.metrics.incrementCounter('automation_failed_total', 1);
+    }
+    if (details.status === AutomationExecutionStatus.SKIPPED) {
+      this.metrics.incrementCounter('automation_skipped_total', 1);
+      if (details.skipReason === AutomationExecutionSkipReason.DEDUPE) {
+        this.metrics.incrementCounter('automation_dedupe_total', 1);
+      }
+    }
     this.metrics.incrementCounter(
       'automation_execution_duration_ms_total',
       Math.max(0, Math.round(details.durationMs)),
     );
+    this.metrics.incrementCounter('automation_duration_ms', Math.max(0, Math.round(details.durationMs)));
 
     this.logService.event({
       level: details.status === AutomationExecutionStatus.FAILED ? 'error' : 'info',
       module: 'automations',
       action: 'rule.execution',
       message: details.summary,
+      status:
+        details.status === AutomationExecutionStatus.FAILED
+          ? 'error'
+          : details.status === AutomationExecutionStatus.SKIPPED
+            ? 'skip'
+            : 'success',
       churchId: rule.churchId,
+      userId: input.actorUserId ?? null,
       durationMs: details.durationMs,
+      entityId: rule.id,
+      errorMessage:
+        details.status === AutomationExecutionStatus.FAILED ? details.summary : undefined,
       metadata: {
         ruleId: rule.id,
         triggerKey: rule.triggerKey,

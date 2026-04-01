@@ -8,10 +8,15 @@ type StructuredLogEntry = {
   module: string;
   action: string;
   message: string;
+  status?: 'success' | 'error' | 'skip';
   requestId?: string;
   churchId?: string | null;
   userId?: string | null;
+  role?: string | null;
+  entityId?: string | null;
   durationMs?: number;
+  errorCode?: string;
+  errorMessage?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -75,10 +80,15 @@ export class LogService implements LoggerService {
     module: string;
     action: string;
     message: string;
+    status?: StructuredLogEntry['status'];
     requestId?: string;
     churchId?: string | null;
     userId?: string | null;
+    role?: string | null;
+    entityId?: string | null;
     durationMs?: number;
+    errorCode?: string;
+    errorMessage?: string;
     metadata?: Record<string, unknown>;
   }) {
     const payload: StructuredLogEntry = {
@@ -87,10 +97,15 @@ export class LogService implements LoggerService {
       module: input.module,
       action: input.action,
       message: input.message,
+      ...(input.status ? { status: input.status } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(input.churchId !== undefined ? { churchId: input.churchId } : {}),
       ...(input.userId !== undefined ? { userId: input.userId } : {}),
+      ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.entityId !== undefined ? { entityId: input.entityId } : {}),
       ...(input.durationMs !== undefined ? { durationMs: Number(input.durationMs.toFixed(2)) } : {}),
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
       ...(input.metadata ? { metadata: input.metadata } : {}),
     };
 

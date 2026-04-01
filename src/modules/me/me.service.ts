@@ -385,6 +385,7 @@ export class MeService {
       this.prisma.attendance.findMany({
         where: {
           servantId,
+          churchId: actor.churchId ?? undefined,
           service: {
             ...(query.startDate ? { serviceDate: { gte: new Date(query.startDate) } } : {}),
             ...(query.endDate
@@ -576,6 +577,7 @@ export class MeService {
       where: {
         id: scheduleId,
         servantId,
+        churchId: actor.churchId ?? undefined,
       },
       select: {
         id: true,

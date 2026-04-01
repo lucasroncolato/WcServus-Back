@@ -54,16 +54,30 @@ describe('E2E automation rules RBAC', () => {
       .send({
         name: 'Marcar atrasadas',
         triggerType: AutomationTriggerType.TIME,
+        triggerKey: 'daily',
+        actionConfig: [{ action: 'write_audit_log', config: { message: 'teste' } }],
         actionType: AutomationActionType.TASK_MARK_OVERDUE,
       })
       .expect(201);
   });
 
-  it('blocks PASTOR and SERVO', async () => {
+  it('allows PASTOR read/write and blocks SERVO write', async () => {
     await request(app.getHttpServer())
       .get('/automation-rules')
       .set('x-test-role', Role.PASTOR)
-      .expect(403);
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/automation-rules')
+      .set('x-test-role', Role.PASTOR)
+      .send({
+        name: 'Teste pastoral',
+        triggerType: AutomationTriggerType.TIME,
+        triggerKey: 'daily',
+        actionConfig: [{ action: 'write_audit_log', config: { message: 'teste' } }],
+        actionType: AutomationActionType.TASK_MARK_OVERDUE,
+      })
+      .expect(201);
 
     await request(app.getHttpServer())
       .post('/automation-rules')

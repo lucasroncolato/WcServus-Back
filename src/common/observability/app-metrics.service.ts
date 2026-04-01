@@ -59,6 +59,7 @@ export class AppMetricsService {
   private readonly routeStats = new Map<string, RouteStats>();
   private readonly jobStats = new Map<string, JobStats>();
   private readonly counters = new Map<string, number>();
+  private readonly gauges = new Map<string, number>();
   private readonly dbOperationStats = new Map<string, DbOperationStats>();
   private readonly slowDbQueries: SlowDbQuery[] = [];
   private readonly requestQueryCounters = new Map<string, RequestQueryCounter>();
@@ -144,6 +145,13 @@ export class AppMetricsService {
 
   incrementCounter(name: string, by = 1) {
     this.counters.set(name, (this.counters.get(name) ?? 0) + by);
+  }
+
+  setGauge(name: string, value: number) {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    this.gauges.set(name, value);
   }
 
   recordCacheHit(key?: string) {
@@ -262,6 +270,10 @@ export class AppMetricsService {
       acc[key] = value;
       return acc;
     }, {});
+    const gauges = [...this.gauges.entries()].reduce<Record<string, number>>((acc, [key, value]) => {
+      acc[key] = value;
+      return acc;
+    }, {});
 
     return {
       routes: this.getRoutesSnapshot(),
@@ -269,6 +281,7 @@ export class AppMetricsService {
       cache: this.getCacheSnapshot(),
       db: this.getDbSnapshot(),
       counters,
+      gauges,
       system: this.getSystemSnapshot(),
     };
   }

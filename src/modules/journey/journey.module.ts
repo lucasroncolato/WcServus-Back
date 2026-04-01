@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SchedulerLockModule } from 'src/common/scheduler-lock/scheduler-lock.module';
 import { JourneyCheckpointService } from './journey-checkpoint.service';
 import { JourneyController } from './journey.controller';
 import { JourneyOpsController } from './journey-ops.controller';
@@ -8,6 +9,7 @@ import { JourneyReconcileService } from './journey-reconcile.service';
 import { JourneyService } from './journey.service';
 
 @Module({
+  imports: [SchedulerLockModule],
   controllers: [JourneyController, JourneyOpsController],
   providers: [
     JourneyService,
@@ -16,6 +18,6 @@ import { JourneyService } from './journey.service';
     JourneyReconcileService,
     JourneyReconcileScheduler,
   ],
-  exports: [JourneyService, JourneyReconcileService],
+  exports: [JourneyService, JourneyReconcileService, JourneyReconcileScheduler],
 })
 export class JourneyModule {}

@@ -219,6 +219,7 @@ export class PastoralAlertEngineService implements OnModuleInit {
     });
 
     this.metrics.incrementCounter('pastoral.alerts.created', 1);
+    this.metrics.incrementCounter('pastoral_alerts_created_total', 1);
     this.logService.event({
       level: 'info',
       module: 'pastoral-alert-engine',
@@ -301,6 +302,7 @@ export class PastoralAlertEngineService implements OnModuleInit {
       },
     });
     this.metrics.incrementCounter('pastoral.alerts.auto_followup_created', 1);
+    this.metrics.incrementCounter('pastoral_followups_created_total', 1);
   }
 
   async runRecurringRules(input?: { churchId?: string | null; now?: Date }) {

@@ -1,1856 +1,943 @@
-import {
-  Aptitude,
-  AlertStatus,
-  AttendanceStatus,
-  Gender,
-  MinistryTaskAssigneeMode,
-  MinistryTaskOccurrenceCriticality,
-  MinistryTaskOccurrencePriority,
-  MinistryTaskOccurrenceStatus,
-  MinistryTaskRecurrenceType,
-  MinistryTaskReallocationMode,
-  PastoralVisitStatus,
-  PrismaClient,
-  Role,
-  ScheduleResponseStatus,
-  ScheduleSlotStatus,
-  ScheduleStatus,
-  ServantApprovalStatus,
-  ServantStatus,
-  TeamStatus,
-  TimelineEntryType,
-  TimelineScope,
-  TrainingStatus,
-  UserScope,
-  UserStatus,
-  WorshipServiceStatus,
-  WorshipServiceType,
-  AuditAction,
-  NotificationChannel,
-} from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 const DEFAULT_PASSWORD = '123456';
+const SEED_VERSION = '2026-03-31-rich';
 
-type ResponsibilitySeed = {
-  title: string;
-  functionName: string;
-  description: string;
-  requiredTraining?: boolean;
-  requiredAptitude?: Aptitude;
+type Ctx = {
+  summary: Record<string, number>;
+  hash: string;
+  plans: Record<string, string>;
+  churches: Record<string, string>;
+  users: Record<string, string>;
+  ministries: Record<string, string>;
+  teams: Record<string, string>;
+  servants: Record<string, string>;
+  responsibilities: Record<string, string>;
+  templates: Record<string, string>;
+  services: Record<string, string>;
+  scheduleVersions: Record<string, string>;
+  schedules: Record<string, string>;
+  scheduleSlots: Record<string, string>;
+  taskTemplates: Record<string, string>;
+  taskOccurrences: Record<string, string>;
+  growthTracks: Record<string, string>;
+  growthSteps: Record<string, string>;
+  milestones: Record<string, string>;
+  automationRules: Record<string, string>;
+  notificationTemplates: Record<string, string>;
 };
 
-type ServantSeed = {
-  name: string;
-  email?: string;
-  phone: string;
-  gender: Gender;
-  aptitude: Aptitude;
-  status?: ServantStatus;
-  trainingStatus?: TrainingStatus;
-  joinedAt: Date;
-  notes?: string;
-  birthDate?: Date;
-  createUser?: boolean;
+const ctx: Ctx = {
+  summary: {},
+  hash: '',
+  plans: {},
+  churches: {},
+  users: {},
+  ministries: {},
+  teams: {},
+  servants: {},
+  responsibilities: {},
+  templates: {},
+  services: {},
+  scheduleVersions: {},
+  schedules: {},
+  scheduleSlots: {},
+  taskTemplates: {},
+  taskOccurrences: {},
+  growthTracks: {},
+  growthSteps: {},
+  milestones: {},
+  automationRules: {},
+  notificationTemplates: {},
 };
 
-type MinistrySeed = {
-  name: string;
-  color: string;
-  icon: string;
-  popText: string;
-  description: string;
-  coordinator: {
-    name: string;
-    email: string;
-    phone: string;
-  };
-  team: {
-    name: string;
-    slug: string;
-    description: string;
-  };
-  responsibilities: ResponsibilitySeed[];
-  servants: ServantSeed[];
+const add = (k: string, n = 1) => {
+  ctx.summary[k] = (ctx.summary[k] ?? 0) + n;
 };
 
-type CreatedService = {
-  id: string;
-  title: string;
-  churchId: string;
-  type: WorshipServiceType;
-  serviceDate: Date;
-  startTime: string;
-  status: WorshipServiceStatus;
-  createdAt: Date;
-  updatedAt: Date;
-  deletedAt: Date | null;
-  deletedBy: string | null;
+const days = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d;
+};
+const months = (n: number) => {
+  const d = new Date();
+  d.setMonth(d.getMonth() + n);
+  return d;
+};
+const yearsAgo = (n: number) => {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - n);
+  return d;
+};
+const monthStart = () => {
+  const d = new Date();
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0));
 };
 
-function normalizeEmail(name: string) {
-  return (
-    name
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '.') + '@servos.local'
-  );
+async function seedPlans() {
+  const plans = [
+    { code: 'START_MONTHLY', name: 'Start Mensal', interval: 'MONTHLY', priceCents: 9900, maxServants: 80, maxUsers: 20, maxMinistries: 8, modules: { TASKS: true, SCHEDULES: true }, active: true },
+    { code: 'PRO_MONTHLY', name: 'Pro Mensal', interval: 'MONTHLY', priceCents: 24900, maxServants: 300, maxUsers: 70, maxMinistries: 25, modules: { TASKS: true, SCHEDULES: true, AUTOMATIONS: true, JOURNEY: true }, active: true },
+    { code: 'PRO_YEARLY', name: 'Pro Anual', interval: 'YEARLY', priceCents: 249000, maxServants: 500, maxUsers: 120, maxMinistries: 50, modules: { TASKS: true, SCHEDULES: true, AUTOMATIONS: true, JOURNEY: true, TIMELINE: true, ANALYTICS: true }, active: true },
+  ] as const;
+  for (const p of plans) {
+    const out = await prisma.plan.upsert({ where: { code: p.code }, update: p, create: p });
+    ctx.plans[p.code] = out.id;
+  }
+  add('plans', plans.length);
 }
 
-async function upsertChurch() {
-  return prisma.church.upsert({
-    where: { id: 'church_seed_central' },
-    update: {
-      name: 'Igreja Central Servos',
-      city: 'Goiânia',
-      state: 'GO',
-      active: true,
-    },
-    create: {
-      id: 'church_seed_central',
-      name: 'Igreja Central Servos',
-      city: 'Goiânia',
-      state: 'GO',
-      active: true,
-    },
+async function seedChurches() {
+  const churches = [
+    { id: 'seed_church_central', name: 'Igreja Central da Esperança', city: 'Goiânia', state: 'GO', active: true },
+    { id: 'seed_church_zs', name: 'Comunidade Vida Zona Sul', city: 'São Paulo', state: 'SP', active: true },
+    { id: 'seed_church_interior', name: 'Igreja Fonte Interior', city: 'Uberlândia', state: 'MG', active: true },
+  ] as const;
+  for (const c of churches) {
+    await prisma.church.upsert({ where: { id: c.id }, update: c, create: c });
+    ctx.churches[c.id] = c.id;
+  }
+  add('churches', churches.length);
+
+  await prisma.churchSettings.upsert({
+    where: { churchId: churches[0].id },
+    update: { id: 'seed_church_settings_1', churchId: churches[0].id, timezone: 'America/Sao_Paulo', locale: 'pt-BR', operationalWeekStartsOn: 1, defaultJourneyEnabled: true, requireScheduleConfirmation: true },
+    create: { id: 'seed_church_settings_1', churchId: churches[0].id, timezone: 'America/Sao_Paulo', locale: 'pt-BR', operationalWeekStartsOn: 1, defaultJourneyEnabled: true, requireScheduleConfirmation: true },
   });
-}
+  await prisma.churchSettings.upsert({
+    where: { churchId: churches[1].id },
+    update: { id: 'seed_church_settings_2', churchId: churches[1].id, timezone: 'America/Sao_Paulo', locale: 'pt-BR', operationalWeekStartsOn: 0, defaultJourneyEnabled: true, requireScheduleConfirmation: true },
+    create: { id: 'seed_church_settings_2', churchId: churches[1].id, timezone: 'America/Sao_Paulo', locale: 'pt-BR', operationalWeekStartsOn: 0, defaultJourneyEnabled: true, requireScheduleConfirmation: true },
+  });
+  await prisma.churchSettings.upsert({
+    where: { churchId: churches[2].id },
+    update: { id: 'seed_church_settings_3', churchId: churches[2].id, timezone: 'America/Sao_Paulo', locale: 'pt-BR', operationalWeekStartsOn: 1, defaultJourneyEnabled: false, requireScheduleConfirmation: false },
+    create: { id: 'seed_church_settings_3', churchId: churches[2].id, timezone: 'America/Sao_Paulo', locale: 'pt-BR', operationalWeekStartsOn: 1, defaultJourneyEnabled: false, requireScheduleConfirmation: false },
+  });
+  add('churchSettings', 3);
 
-async function upsertUser(params: {
-  name: string;
-  email: string;
-  passwordHash: string;
-  role: Role;
-  churchId: string;
-  scope?: UserScope;
-  status?: UserStatus;
-  phone?: string | null;
-  servantId?: string | null;
-}) {
-  return prisma.$transaction(async (tx) => {
-    if (params.servantId) {
-      await tx.user.updateMany({
-        where: {
-          servantId: params.servantId,
-          email: { not: params.email },
-        },
-        data: {
-          servantId: null,
-        },
+  const modules = ['ANALYTICS', 'AUTOMATIONS', 'TIMELINE', 'REPORTS', 'NOTIFICATIONS', 'TASKS', 'SCHEDULES', 'JOURNEY'] as const;
+  for (const church of churches) {
+    for (const moduleKey of modules) {
+      const enabled = church.id !== churches[2].id || !['ANALYTICS', 'AUTOMATIONS'].includes(moduleKey);
+      await prisma.churchModule.upsert({
+        where: { churchId_moduleKey: { churchId: church.id, moduleKey } },
+        update: { enabled },
+        create: { id: `seed_mod_${church.id}_${moduleKey}`, churchId: church.id, moduleKey, enabled },
       });
     }
+  }
+  add('churchModules', churches.length * modules.length);
 
-    return tx.user.upsert({
-      where: { email: params.email },
-      update: {
-        name: params.name,
-        passwordHash: params.passwordHash,
-        role: params.role,
-        churchId: params.churchId,
-        scope: params.scope ?? UserScope.GLOBAL,
-        status: params.status ?? UserStatus.ACTIVE,
-        phone: params.phone ?? null,
-        servantId: params.servantId ?? null,
-        deletedAt: null,
-        deletedBy: null,
-      },
-      create: {
-        name: params.name,
-        email: params.email,
-        passwordHash: params.passwordHash,
-        role: params.role,
-        churchId: params.churchId,
-        scope: params.scope ?? UserScope.GLOBAL,
-        status: params.status ?? UserStatus.ACTIVE,
-        phone: params.phone ?? null,
-        servantId: params.servantId ?? null,
-      },
-    });
-  });
-}
-
-async function upsertMinistry(params: {
-  churchId: string;
-  name: string;
-  description: string;
-  color: string;
-  icon: string;
-  popText: string;
-  coordinatorUserId?: string | null;
-}) {
-  return prisma.ministry.upsert({
-    where: { name: params.name },
-    update: {
-      churchId: params.churchId,
-      description: params.description,
-      color: params.color,
-      icon: params.icon,
-      popText: params.popText,
-      coordinatorUserId: params.coordinatorUserId ?? null,
-      deletedAt: null,
-      deletedBy: null,
-    },
-    create: {
-      churchId: params.churchId,
-      name: params.name,
-      description: params.description,
-      color: params.color,
-      icon: params.icon,
-      popText: params.popText,
-      coordinatorUserId: params.coordinatorUserId ?? null,
-    },
-  });
-}
-
-async function upsertTeam(params: {
-  churchId: string;
-  ministryId: string;
-  name: string;
-  slug: string;
-  description: string;
-  leaderUserId?: string | null;
-}) {
-  return prisma.team.upsert({
-    where: {
-      ministryId_name: {
-        ministryId: params.ministryId,
-        name: params.name,
-      },
-    },
-    update: {
-      churchId: params.churchId,
-      slug: params.slug,
-      description: params.description,
-      leaderUserId: params.leaderUserId ?? null,
-      status: TeamStatus.ACTIVE,
-      deletedAt: null,
-      deletedBy: null,
-    },
-    create: {
-      churchId: params.churchId,
-      ministryId: params.ministryId,
-      name: params.name,
-      slug: params.slug,
-      description: params.description,
-      leaderUserId: params.leaderUserId ?? null,
-      status: TeamStatus.ACTIVE,
-    },
-  });
-}
-
-async function upsertServant(params: {
-  churchId: string;
-  name: string;
-  phone: string;
-  gender: Gender;
-  aptitude: Aptitude;
-  mainMinistryId: string;
-  teamId?: string | null;
-  status?: ServantStatus;
-  trainingStatus?: TrainingStatus;
-  joinedAt: Date;
-  notes?: string;
-  birthDate?: Date;
-}) {
-  const existing = await prisma.servant.findFirst({
-    where: {
-      churchId: params.churchId,
-      name: params.name,
-    },
-    select: { id: true },
-  });
-
-  if (existing) {
-    return prisma.servant.update({
-      where: { id: existing.id },
-      data: {
-        churchId: params.churchId,
-        phone: params.phone,
-        gender: params.gender,
-        aptitude: params.aptitude,
-        mainMinistryId: params.mainMinistryId,
-        teamId: params.teamId ?? null,
-        status: params.status ?? ServantStatus.ATIVO,
-        trainingStatus: params.trainingStatus ?? TrainingStatus.COMPLETED,
-        approvalStatus: ServantApprovalStatus.APPROVED,
-        joinedAt: params.joinedAt,
-        notes: params.notes,
-        birthDate: params.birthDate,
-        deletedAt: null,
-        deletedBy: null,
-      },
+  for (const [i, c] of churches.entries()) {
+    await prisma.churchAutomationPreference.upsert({
+      where: { churchId: c.id },
+      update: { id: `seed_autopref_${i}`, churchId: c.id, enabled: i !== 2, overdueGraceDays: i + 1, stalledTrackDays: 20 + i * 10, noServiceAlertDays: 35 + i * 10, incompleteScheduleWindowHrs: 36 + i * 12 },
+      create: { id: `seed_autopref_${i}`, churchId: c.id, enabled: i !== 2, overdueGraceDays: i + 1, stalledTrackDays: 20 + i * 10, noServiceAlertDays: 35 + i * 10, incompleteScheduleWindowHrs: 36 + i * 12 },
     });
   }
-
-  return prisma.servant.create({
-    data: {
-      churchId: params.churchId,
-      name: params.name,
-      phone: params.phone,
-      gender: params.gender,
-      aptitude: params.aptitude,
-      mainMinistryId: params.mainMinistryId,
-      teamId: params.teamId ?? null,
-      status: params.status ?? ServantStatus.ATIVO,
-      trainingStatus: params.trainingStatus ?? TrainingStatus.COMPLETED,
-      approvalStatus: ServantApprovalStatus.APPROVED,
-      joinedAt: params.joinedAt,
-      notes: params.notes,
-      birthDate: params.birthDate,
-    },
-  });
+  add('churchAutomationPreferences', 3);
 }
 
-async function upsertResponsibility(params: {
-  ministryId: string;
-  title: string;
-  functionName: string;
-  description: string;
-  requiredTraining?: boolean;
-  requiredAptitude?: Aptitude;
-}) {
-  const existing = await prisma.ministryResponsibility.findFirst({
-    where: {
-      ministryId: params.ministryId,
-      title: params.title,
-      deletedAt: null,
-    },
-    select: { id: true },
-  });
+async function seedUsers() {
+  const users = [
+    { id: 'seed_user_super_admin', churchId: ctx.churches.seed_church_central, name: 'Rafael Mendes', email: 'superadmin@servos.local', role: 'SUPER_ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5562991110001', avatarUrl: 'https://i.pravatar.cc/150?img=1', lastLoginAt: days(-1) },
+    { id: 'seed_user_admin_central', churchId: ctx.churches.seed_church_central, name: 'Juliana Prado', email: 'admin.central@servos.local', role: 'ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: true, phone: '+5562992220002', avatarUrl: 'https://i.pravatar.cc/150?img=2', lastLoginAt: days(-2) },
+    { id: 'seed_user_pastor_central', churchId: ctx.churches.seed_church_central, name: 'Pr. Leonardo Brito', email: 'pastor.central@servos.local', role: 'PASTOR', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5562993330003', avatarUrl: 'https://i.pravatar.cc/150?img=3', lastLoginAt: days(-1) },
+    { id: 'seed_user_coord_louvor', churchId: ctx.churches.seed_church_central, name: 'Camila Tavares', email: 'coord.louvor@servos.local', role: 'COORDENADOR', scope: 'MINISTRY', status: 'ACTIVE', mustChangePassword: false, phone: '+5562994440004', avatarUrl: 'https://i.pravatar.cc/150?img=4', lastLoginAt: days(-2) },
+    { id: 'seed_user_coord_midia', churchId: ctx.churches.seed_church_central, name: 'Rogério Alves', email: 'coord.midia@servos.local', role: 'COORDENADOR', scope: 'EQUIPE', status: 'ACTIVE', mustChangePassword: false, phone: '+5562995550005', avatarUrl: 'https://i.pravatar.cc/150?img=5', lastLoginAt: days(-3) },
+    { id: 'seed_user_admin_zs', churchId: ctx.churches.seed_church_zs, name: 'Marta Ribeiro', email: 'admin.zs@servos.local', role: 'ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5511998881010', avatarUrl: 'https://i.pravatar.cc/150?img=8', lastLoginAt: days(-1) },
+    { id: 'seed_user_pastor_zs', churchId: ctx.churches.seed_church_zs, name: 'Pr. Marcelo Vianna', email: 'pastor.zs@servos.local', role: 'PASTOR', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5511997771011', avatarUrl: 'https://i.pravatar.cc/150?img=9', lastLoginAt: days(-2) },
+    { id: 'seed_user_admin_interior', churchId: ctx.churches.seed_church_interior, name: 'Sérgio Arantes', email: 'admin.interior@servos.local', role: 'ADMIN', scope: 'GLOBAL', status: 'ACTIVE', mustChangePassword: false, phone: '+5534999112020', avatarUrl: 'https://i.pravatar.cc/150?img=10', lastLoginAt: days(-6) },
+  ] as const;
+  for (const u of users) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: { ...u, passwordHash: ctx.hash, deletedAt: null, deletedBy: null },
+      create: { ...u, passwordHash: ctx.hash },
+    });
+    ctx.users[u.id] = u.id;
+  }
+  add('users', users.length);
+}
 
-  if (existing) {
-    return prisma.ministryResponsibility.update({
-      where: { id: existing.id },
-      data: {
-        functionName: params.functionName,
-        description: params.description,
-        requiredTraining: params.requiredTraining ?? false,
-        requiredAptitude: params.requiredAptitude ?? null,
-        active: true,
-        deletedAt: null,
-        deletedBy: null,
-      },
+async function seedPlansAndSubscriptions() {
+  const relations = [
+    { churchId: ctx.churches.seed_church_central, planId: ctx.plans.PRO_YEARLY, status: 'ACTIVE' },
+    { churchId: ctx.churches.seed_church_zs, planId: ctx.plans.PRO_MONTHLY, status: 'PAST_DUE' },
+    { churchId: ctx.churches.seed_church_interior, planId: ctx.plans.START_MONTHLY, status: 'TRIAL' },
+  ] as const;
+  let i = 0;
+  for (const r of relations) {
+    i += 1;
+    await prisma.churchPlan.upsert({
+      where: { churchId: r.churchId },
+      update: { id: `seed_church_plan_${i}`, ...r, startsAt: months(-2), endsAt: months(2), limitsSnapshot: { tag: `seed-${i}` } },
+      create: { id: `seed_church_plan_${i}`, ...r, startsAt: months(-2), endsAt: months(2), limitsSnapshot: { tag: `seed-${i}` } },
+    });
+    await prisma.subscription.upsert({
+      where: { id: `seed_sub_${i}` },
+      update: { churchId: r.churchId, planId: r.planId, status: r.status, trialEndsAt: r.status === 'TRIAL' ? months(1) : null, startsAt: months(-2), endsAt: months(2), createdBy: ctx.users.seed_user_super_admin, metadata: { cycle: r.status } },
+      create: { id: `seed_sub_${i}`, churchId: r.churchId, planId: r.planId, status: r.status, trialEndsAt: r.status === 'TRIAL' ? months(1) : null, startsAt: months(-2), endsAt: months(2), createdBy: ctx.users.seed_user_super_admin, metadata: { cycle: r.status } },
     });
   }
-
-  return prisma.ministryResponsibility.create({
-    data: {
-      ministryId: params.ministryId,
-      title: params.title,
-      functionName: params.functionName,
-      description: params.description,
-      requiredTraining: params.requiredTraining ?? false,
-      requiredAptitude: params.requiredAptitude ?? null,
-      active: true,
-    },
-  });
+  add('churchPlans', relations.length);
+  add('subscriptions', relations.length);
 }
 
-async function createBaseChurchData(churchId: string) {
-  await prisma.churchSettings.upsert({
-    where: { churchId },
-    update: {
-      timezone: 'America/Sao_Paulo',
-      locale: 'pt-BR',
-      operationalWeekStartsOn: 1,
-      defaultJourneyEnabled: true,
-      requireScheduleConfirmation: true,
-    },
-    create: {
-      churchId,
-      timezone: 'America/Sao_Paulo',
-      locale: 'pt-BR',
-      operationalWeekStartsOn: 1,
-      defaultJourneyEnabled: true,
-      requireScheduleConfirmation: true,
-    },
-  });
+// remaining functions appended in next patch chunk
+async function seedMinistries() {
+  const defs = [
+    ['seed_church_central', 'Louvor - Central'],
+    ['seed_church_central', 'Recepção - Central'],
+    ['seed_church_central', 'Mídia - Central'],
+    ['seed_church_central', 'Intercessão - Central'],
+    ['seed_church_central', 'Infantil - Central'],
+    ['seed_church_central', 'Acolhimento - Central'],
+    ['seed_church_central', 'Produção - Central'],
+    ['seed_church_central', 'Limpeza - Central'],
+    ['seed_church_central', 'Segurança - Central'],
+    ['seed_church_central', 'Pastoral - Central'],
+    ['seed_church_zs', 'Louvor - Zona Sul'],
+    ['seed_church_zs', 'Mídia - Zona Sul'],
+    ['seed_church_interior', 'Louvor - Interior'],
+    ['seed_church_interior', 'Pastoral - Interior'],
+  ] as const;
+  for (const [churchKey, name] of defs) {
+    const id = `seed_ministry_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+    await prisma.ministry.upsert({
+      where: { name },
+      update: { id, churchId: ctx.churches[churchKey], description: `Ministério ${name}`, color: '#2563eb', icon: 'layers', popText: `Servindo em ${name}`, deletedAt: null, deletedBy: null },
+      create: { id, churchId: ctx.churches[churchKey], name, description: `Ministério ${name}`, color: '#2563eb', icon: 'layers', popText: `Servindo em ${name}` },
+    });
+    ctx.ministries[id] = id;
+  }
+  add('ministries', defs.length);
+}
 
-  await prisma.churchBranding.upsert({
-    where: { churchId },
-    update: {
-      primaryColor: '#1D4ED8',
-      secondaryColor: '#0F172A',
-      accentColor: '#16A34A',
-      welcomeMessage: 'Bem-vindo ao painel de servos',
-    },
-    create: {
-      churchId,
-      primaryColor: '#1D4ED8',
-      secondaryColor: '#0F172A',
-      accentColor: '#16A34A',
-      welcomeMessage: 'Bem-vindo ao painel de servos',
-    },
-  });
+async function seedTeamsAndServants() {
+  const teams = [
+    ['seed_team_louvor_vocal', 'seed_ministry_louvor_central', 'Louvor Vocal'],
+    ['seed_team_louvor_instr', 'seed_ministry_louvor_central', 'Louvor Instrumental'],
+    ['seed_team_midia_proj', 'seed_ministry_m_dia_central', 'Mídia Projeção'],
+    ['seed_team_midia_trans', 'seed_ministry_m_dia_central', 'Mídia Transmissão'],
+    ['seed_team_recep_entrada', 'seed_ministry_recep_o_central', 'Recepção Entrada'],
+    ['seed_team_recep_aud', 'seed_ministry_recep_o_central', 'Recepção Auditório'],
+    ['seed_team_infantil_berc', 'seed_ministry_infantil_central', 'Infantil Berçário'],
+    ['seed_team_infantil_kids', 'seed_ministry_infantil_central', 'Infantil Kids'],
+    ['seed_team_prod_palco', 'seed_ministry_produ_o_central', 'Produção Palco'],
+    ['seed_team_inter_dom', 'seed_ministry_intercess_o_central', 'Intercessão Domingo'],
+  ] as const;
+  for (const t of teams) {
+    const ministryId = ctx.ministries[t[1]];
+    const churchId = (await prisma.ministry.findUniqueOrThrow({ where: { id: ministryId }, select: { churchId: true } })).churchId;
+    await prisma.team.upsert({
+      where: { ministryId_name: { ministryId, name: t[2] } },
+      update: { id: t[0], churchId, slug: t[2].toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: t[2], leaderUserId: ctx.users.seed_user_admin_central, status: 'ACTIVE', deletedAt: null, deletedBy: null },
+      create: { id: t[0], ministryId, churchId, name: t[2], slug: t[2].toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: t[2], leaderUserId: ctx.users.seed_user_admin_central, status: 'ACTIVE' },
+    });
+    ctx.teams[t[0]] = t[0];
+  }
+  add('teams', teams.length);
 
-  const modules = [
-    'ANALYTICS',
-    'AUTOMATIONS',
-    'TIMELINE',
-    'REPORTS',
-    'NOTIFICATIONS',
-    'TASKS',
-    'SCHEDULES',
-    'JOURNEY',
+  const servants = [
+    ['seed_servant_ana', 'Ana Beatriz Souza', 'FEMININO', 'ATIVO', 'COMPLETED', 'APPROVED', 'SOCIAL', 'seed_ministry_recep_o_central', 'seed_team_recep_entrada', 0, 0],
+    ['seed_servant_lucas', 'Lucas Nascimento', 'MASCULINO', 'AFASTADO', 'PENDING', 'APPROVED', 'TECNICO', 'seed_ministry_m_dia_central', 'seed_team_midia_trans', 4, 5],
+    ['seed_servant_carla', 'Carla Menezes', 'FEMININO', 'ATIVO', 'COMPLETED', 'APPROVED', 'LIDERANCA', 'seed_ministry_louvor_central', 'seed_team_louvor_vocal', 0, 0],
+    ['seed_servant_daniel', 'Daniel Furtado', 'MASCULINO', 'RECICLAGEM', 'PENDING', 'PENDING', 'TECNICO', 'seed_ministry_m_dia_central', 'seed_team_midia_proj', 1, 2],
+    ['seed_servant_felipe', 'Felipe Cunha', 'MASCULINO', 'ATIVO', 'COMPLETED', 'APPROVED', 'TECNICO', 'seed_ministry_louvor_central', 'seed_team_louvor_instr', 0, 0],
+    ['seed_servant_gabriela', 'Gabriela Lemos', 'FEMININO', 'RECRUTAMENTO', 'PENDING', 'PENDING', 'APOIO', 'seed_ministry_recep_o_central', '', 0, 0],
+    ['seed_servant_olivia', 'Olívia Freitas', 'FEMININO', 'RECICLAGEM', 'PENDING', 'REJECTED', 'OPERACIONAL', 'seed_ministry_louvor_zona_sul', '', 2, 3],
+  ] as const;
+  let i = 0;
+  for (const s of servants) {
+    i += 1;
+    const ministryId = ctx.ministries[s[7]];
+    const churchId = (await prisma.ministry.findUniqueOrThrow({ where: { id: ministryId }, select: { churchId: true } })).churchId;
+    await prisma.servant.upsert({
+      where: { id: s[0] },
+      update: { id: s[0], churchId, name: s[1], phone: `+550000${i}`, gender: s[2], birthDate: yearsAgo(20 + i), status: s[3], trainingStatus: s[4], approvalStatus: s[5], aptitude: s[6], mainMinistryId: ministryId, teamId: s[8] ? ctx.teams[s[8]] : null, notes: 'seed', joinedAt: months(-i), consecutiveAbsences: s[9], monthlyAbsences: s[10], deletedAt: null, deletedBy: null },
+      create: { id: s[0], churchId, name: s[1], phone: `+550000${i}`, gender: s[2], birthDate: yearsAgo(20 + i), status: s[3], trainingStatus: s[4], approvalStatus: s[5], aptitude: s[6], mainMinistryId: ministryId, teamId: s[8] ? ctx.teams[s[8]] : null, notes: 'seed', joinedAt: months(-i), consecutiveAbsences: s[9], monthlyAbsences: s[10] },
+    });
+    ctx.servants[s[0]] = s[0];
+  }
+  add('servants', servants.length);
+}
+
+async function seedServantUsers() {
+  const servantUsers = [
+    {
+      id: 'seed_user_servo_ana',
+      servantKey: 'seed_servant_ana',
+      name: 'Ana Beatriz Souza',
+      email: 'ana.souza@servos.local',
+      status: 'ACTIVE',
+      mustChangePassword: true,
+      phone: '+5562996660006',
+      avatarUrl: 'https://i.pravatar.cc/150?img=6',
+      lastLoginAt: days(-5),
+    },
+    {
+      id: 'seed_user_servo_lucas',
+      servantKey: 'seed_servant_lucas',
+      name: 'Lucas Nascimento',
+      email: 'lucas.nascimento@servos.local',
+      status: 'INACTIVE',
+      mustChangePassword: false,
+      phone: '+5562997770007',
+      avatarUrl: 'https://i.pravatar.cc/150?img=7',
+      lastLoginAt: days(-40),
+    },
   ] as const;
 
-  for (const moduleKey of modules) {
-    await prisma.churchModule.upsert({
-      where: { churchId_moduleKey: { churchId, moduleKey } },
-      update: { enabled: true },
-      create: { churchId, moduleKey, enabled: true },
+  for (const user of servantUsers) {
+    const servantId = ctx.servants[user.servantKey];
+    const servant = await prisma.servant.findUniqueOrThrow({
+      where: { id: servantId },
+      select: { churchId: true },
     });
-  }
-
-  await prisma.churchAutomationPreference.upsert({
-    where: { churchId },
-    update: {
-      enabled: true,
-      overdueGraceDays: 0,
-      stalledTrackDays: 30,
-      noServiceAlertDays: 45,
-      incompleteScheduleWindowHrs: 48,
-    },
-    create: {
-      churchId,
-      enabled: true,
-      overdueGraceDays: 0,
-      stalledTrackDays: 30,
-      noServiceAlertDays: 45,
-      incompleteScheduleWindowHrs: 48,
-    },
-  });
-}
-
-async function clearOperationalData() {
-  await prisma.scheduleSwapHistory.deleteMany();
-  await prisma.scheduleResponseHistory.deleteMany();
-  await prisma.attendance.deleteMany();
-  await prisma.scheduleSlotChange.deleteMany();
-  await prisma.scheduleSlot.deleteMany();
-  await prisma.schedule.deleteMany();
-
-  await prisma.ministryTaskOccurrenceChecklistItem.deleteMany();
-  await prisma.ministryTaskOccurrenceAssignmentHistory.deleteMany();
-  await prisma.ministryTaskOccurrenceAssignee.deleteMany();
-  await prisma.ministryTaskOccurrence.deleteMany();
-  await prisma.ministryTaskTemplateChecklistItem.deleteMany();
-  await prisma.ministryTaskTemplate.deleteMany();
-
-  await prisma.pastoralVisit.deleteMany();
-  await prisma.pastoralAlert.deleteMany();
-  await prisma.timelineEntry.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.servantAvailability.deleteMany();
-  await prisma.servantMinistry.deleteMany();
-  await prisma.userMinistryBinding.deleteMany();
-
-  await prisma.automationExecutionLog.deleteMany();
-  await prisma.automationRule.deleteMany();
-
-  await prisma.servantMilestone.deleteMany();
-  await prisma.journeyLog.deleteMany();
-  await prisma.servantJourney.deleteMany();
-  await prisma.journeyMilestone.deleteMany();
-
-  await prisma.passwordResetToken.deleteMany();
-  await prisma.refreshToken.deleteMany();
-  await prisma.notification.deleteMany();
-}
-
-async function main() {
-  console.log('Starting seed...');
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
-
-  const church = await upsertChurch();
-  await createBaseChurchData(church.id);
-
-  const superAdmin = await upsertUser({
-    name: 'Super Admin',
-    email: 'superadmin@servos.local',
-    passwordHash,
-    role: Role.SUPER_ADMIN,
-    churchId: church.id,
-    scope: UserScope.GLOBAL,
-    phone: '62990000001',
-  });
-
-  const admin = await upsertUser({
-    name: 'Admin Geral',
-    email: 'admin@servos.local',
-    passwordHash,
-    role: Role.ADMIN,
-    churchId: church.id,
-    scope: UserScope.GLOBAL,
-    phone: '62990000002',
-  });
-
-  const pastor = await upsertUser({
-    name: 'Pr. Elias Ribeiro',
-    email: 'pastor@servos.local',
-    passwordHash,
-    role: Role.PASTOR,
-    churchId: church.id,
-    scope: UserScope.GLOBAL,
-    phone: '62990000003',
-  });
-
-  await clearOperationalData();
-
-  const ministriesSeed: MinistrySeed[] = [
-    {
-      name: 'Recepção',
-      color: '#2563EB',
-      icon: 'door-open',
-      popText: 'Acolhimento com excelência',
-      description: 'Primeiro contato com visitantes e organização de entrada.',
-      coordinator: {
-        name: 'Caíque Martins',
-        email: 'caique@servos.local',
-        phone: '62991110001',
-      },
-      team: {
-        name: 'Equipe A',
-        slug: 'equipe-a',
-        description: 'Recepção principal',
-      },
-      responsibilities: [
-        {
-          title: 'Boas-vindas',
-          functionName: 'Recepcionar visitantes',
-          description: 'Receber visitantes na entrada principal.',
-          requiredTraining: false,
-          requiredAptitude: Aptitude.SOCIAL,
-        },
-        {
-          title: 'Organização da Entrada',
-          functionName: 'Controlar fluxo',
-          description: 'Organizar entrada, apoio e circulação.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.OPERACIONAL,
-        },
-      ],
-      servants: [
-        { name: 'Ruan Souza', phone: '62991111001', gender: Gender.MASCULINO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-01-10'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Lucas Ferreira', phone: '62991111002', gender: Gender.MASCULINO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-02-10'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Ana Clara Lima', phone: '62991111003', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-03-05'), trainingStatus: TrainingStatus.PENDING, status: ServantStatus.RECICLAGEM },
-        { name: 'João Pedro Alves', phone: '62991111004', gender: Gender.MASCULINO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-04-15'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Mariana Costa', phone: '62991111005', gender: Gender.FEMININO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-05-08'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Gabriel Rocha', phone: '62991111006', gender: Gender.MASCULINO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-06-01'), trainingStatus: TrainingStatus.COMPLETED },
-      ],
-    },
-    {
-      name: 'Mídia',
-      color: '#0F766E',
-      icon: 'monitor',
-      popText: 'Suporte técnico e transmissão',
-      description: 'Som, projeção, transmissão e operação técnica.',
-      coordinator: {
-        name: 'Maria Eduarda Gomes',
-        email: 'maria.eduarda@servos.local',
-        phone: '62992220001',
-      },
-      team: {
-        name: 'Equipe Técnica',
-        slug: 'equipe-tecnica',
-        description: 'Operação de som e transmissão',
-      },
-      responsibilities: [
-        {
-          title: 'Operador de Som',
-          functionName: 'Som do culto',
-          description: 'Responsável pela mesa de som.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.TECNICO,
-        },
-        {
-          title: 'Projeção',
-          functionName: 'Slides e letras',
-          description: 'Responsável pela projeção e apoio visual.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.TECNICO,
-        },
-      ],
-      servants: [
-        { name: 'Thiago Ruan Silva', phone: '62992221001', gender: Gender.MASCULINO, aptitude: Aptitude.TECNICO, joinedAt: new Date('2024-01-20'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Larissa Mendes', phone: '62992221002', gender: Gender.FEMININO, aptitude: Aptitude.TECNICO, joinedAt: new Date('2024-02-18'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Caio Henrique', phone: '62992221003', gender: Gender.MASCULINO, aptitude: Aptitude.TECNICO, joinedAt: new Date('2024-03-22'), trainingStatus: TrainingStatus.PENDING, status: ServantStatus.RECICLAGEM },
-        { name: 'Bianca Nunes', phone: '62992221004', gender: Gender.FEMININO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-04-10'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Pedro Lucas', phone: '62992221005', gender: Gender.MASCULINO, aptitude: Aptitude.OPERACIONAL, joinedAt: new Date('2024-05-16'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Rafael Castro', phone: '62992221006', gender: Gender.MASCULINO, aptitude: Aptitude.TECNICO, joinedAt: new Date('2024-06-12'), trainingStatus: TrainingStatus.COMPLETED, status: ServantStatus.AFASTADO, notes: 'Afastado temporariamente para ajuste pessoal.' },
-      ],
-    },
-    {
-      name: 'Intercessão',
-      color: '#B45309',
-      icon: 'hands-praying',
-      popText: 'Cobertura espiritual',
-      description: 'Base de oração, apoio espiritual e intercessão.',
-      coordinator: {
-        name: 'Ruan Oliveira',
-        email: 'ruan.oliveira@servos.local',
-        phone: '62993330001',
-      },
-      team: {
-        name: 'Equipe de Oração',
-        slug: 'equipe-oracao',
-        description: 'Intercessão antes e durante os cultos',
-      },
-      responsibilities: [
-        {
-          title: 'Intercessão Pré-Culto',
-          functionName: 'Oração inicial',
-          description: 'Cobertura espiritual antes do culto.',
-          requiredTraining: false,
-          requiredAptitude: Aptitude.APOIO,
-        },
-        {
-          title: 'Apoio Pastoral',
-          functionName: 'Apoio durante o culto',
-          description: 'Apoio ao pastor em momentos de oração.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.LIDERANCA,
-        },
-      ],
-      servants: [
-        { name: 'Débora Martins', phone: '62993331001', gender: Gender.FEMININO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-01-03'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Samuel Fernandes', phone: '62993331002', gender: Gender.MASCULINO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-02-14'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Aline Ribeiro', phone: '62993331003', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-03-27'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Daniel Carvalho', phone: '62993331004', gender: Gender.MASCULINO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-04-21'), trainingStatus: TrainingStatus.PENDING },
-        { name: 'Priscila Moraes', phone: '62993331005', gender: Gender.FEMININO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-05-11'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Emanuel Costa', phone: '62993331006', gender: Gender.MASCULINO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-06-09'), trainingStatus: TrainingStatus.COMPLETED },
-      ],
-    },
-    {
-      name: 'Louvor',
-      color: '#7C3AED',
-      icon: 'music',
-      popText: 'Adoração e sensibilidade',
-      description: 'Equipe de músicos e apoio ao louvor.',
-      coordinator: {
-        name: 'Ana Paula Rocha',
-        email: 'ana.paula@servos.local',
-        phone: '62994440001',
-      },
-      team: {
-        name: 'Banda Base',
-        slug: 'banda-base',
-        description: 'Ministração principal',
-      },
-      responsibilities: [
-        {
-          title: 'Vocal de Apoio',
-          functionName: 'Apoio vocal',
-          description: 'Apoio ao time principal de louvor.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.SOCIAL,
-        },
-        {
-          title: 'Instrumentista',
-          functionName: 'Execução musical',
-          description: 'Instrumentação do culto.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.TECNICO,
-        },
-      ],
-      servants: [
-        { name: 'Caíque Ruan', phone: '62994441001', gender: Gender.MASCULINO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-01-18'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Juliana Freitas', phone: '62994441002', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-02-09'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Vinícius Melo', phone: '62994441003', gender: Gender.MASCULINO, aptitude: Aptitude.TECNICO, joinedAt: new Date('2024-03-01'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Letícia Souza', phone: '62994441004', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-04-07'), trainingStatus: TrainingStatus.PENDING, status: ServantStatus.RECICLAGEM },
-        { name: 'João Vitor Lima', phone: '62994441005', gender: Gender.MASCULINO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-05-19'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Esther Nascimento', phone: '62994441006', gender: Gender.FEMININO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-06-25'), trainingStatus: TrainingStatus.COMPLETED },
-      ],
-    },
-    {
-      name: 'Infantil',
-      color: '#DB2777',
-      icon: 'baby',
-      popText: 'Cuidado e ensino às crianças',
-      description: 'Acolhimento, ensino e apoio às crianças.',
-      coordinator: {
-        name: 'Fernanda Alves',
-        email: 'fernanda@servos.local',
-        phone: '62995550001',
-      },
-      team: {
-        name: 'Kids Base',
-        slug: 'kids-base',
-        description: 'Equipe principal do infantil',
-      },
-      responsibilities: [
-        {
-          title: 'Recepção Infantil',
-          functionName: 'Receber crianças',
-          description: 'Receber e direcionar crianças com segurança.',
-          requiredTraining: false,
-          requiredAptitude: Aptitude.SOCIAL,
-        },
-        {
-          title: 'Apoio de Sala',
-          functionName: 'Suporte às atividades',
-          description: 'Auxiliar nas atividades e organização das salas.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.APOIO,
-        },
-      ],
-      servants: [
-        { name: 'Patrícia Gomes', phone: '62995551001', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-01-12'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Ruan Gabriel', phone: '62995551002', gender: Gender.MASCULINO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-02-23'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Camila Tavares', phone: '62995551003', gender: Gender.FEMININO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-03-19'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Nicole Martins', phone: '62995551004', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-04-13'), trainingStatus: TrainingStatus.PENDING },
-        { name: 'Mateus Fernandes', phone: '62995551005', gender: Gender.MASCULINO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-05-02'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Beatriz Campos', phone: '62995551006', gender: Gender.FEMININO, aptitude: Aptitude.SOCIAL, joinedAt: new Date('2024-06-17'), trainingStatus: TrainingStatus.COMPLETED },
-      ],
-    },
-    {
-      name: 'Apoio',
-      color: '#475569',
-      icon: 'shield',
-      popText: 'Organização e suporte operacional',
-      description: 'Apoio logístico, ordem e organização do culto.',
-      coordinator: {
-        name: 'João Marcos',
-        email: 'joao.marcos@servos.local',
-        phone: '62996660001',
-      },
-      team: {
-        name: 'Equipe Operacional',
-        slug: 'equipe-operacional',
-        description: 'Logística e apoio geral',
-      },
-      responsibilities: [
-        {
-          title: 'Organização do Espaço',
-          functionName: 'Preparar ambiente',
-          description: 'Preparar cadeiras, circulação e apoio geral.',
-          requiredTraining: false,
-          requiredAptitude: Aptitude.OPERACIONAL,
-        },
-        {
-          title: 'Suporte Operacional',
-          functionName: 'Responder demandas',
-          description: 'Atender necessidades operacionais durante o culto.',
-          requiredTraining: true,
-          requiredAptitude: Aptitude.APOIO,
-        },
-      ],
-      servants: [
-        { name: 'Carlos Eduardo', phone: '62996661001', gender: Gender.MASCULINO, aptitude: Aptitude.OPERACIONAL, joinedAt: new Date('2024-01-05'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Bruno Henrique', phone: '62996661002', gender: Gender.MASCULINO, aptitude: Aptitude.OPERACIONAL, joinedAt: new Date('2024-02-11'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Ana Beatriz', phone: '62996661003', gender: Gender.FEMININO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-03-29'), trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Lucas Mendes', phone: '62996661004', gender: Gender.MASCULINO, aptitude: Aptitude.LIDERANCA, joinedAt: new Date('2024-04-18'), createUser: true, trainingStatus: TrainingStatus.COMPLETED },
-        { name: 'Ruan Victor', phone: '62996661005', gender: Gender.MASCULINO, aptitude: Aptitude.OPERACIONAL, joinedAt: new Date('2024-05-27'), trainingStatus: TrainingStatus.PENDING, status: ServantStatus.RECICLAGEM },
-        { name: 'Karina Lopes', phone: '62996661006', gender: Gender.FEMININO, aptitude: Aptitude.APOIO, joinedAt: new Date('2024-06-08'), trainingStatus: TrainingStatus.COMPLETED },
-      ],
-    },
-  ];
-
-  const createdMinistries: Array<{
-    ministry: any;
-    coordinatorUser: any;
-    team: any;
-    servants: any[];
-    servantUsers: any[];
-    responsibilities: any[];
-  }> = [];
-
-  for (const item of ministriesSeed) {
-    const coordinatorUser = await upsertUser({
-      name: item.coordinator.name,
-      email: item.coordinator.email,
-      passwordHash,
-      role: Role.COORDENADOR,
-      churchId: church.id,
-      scope: UserScope.MINISTRY,
-      phone: item.coordinator.phone,
-    });
-
-    const ministry = await upsertMinistry({
-      churchId: church.id,
-      name: item.name,
-      description: item.description,
-      color: item.color,
-      icon: item.icon,
-      popText: item.popText,
-      coordinatorUserId: coordinatorUser.id,
-    });
-
-    const team = await upsertTeam({
-      churchId: church.id,
-      ministryId: ministry.id,
-      name: item.team.name,
-      slug: item.team.slug,
-      description: item.team.description,
-      leaderUserId: coordinatorUser.id,
-    });
-
-    const servants: any[] = [];
-    const servantUsers: any[] = [];
-    const responsibilities: any[] = [];
-
-    for (const servantSeed of item.servants) {
-      const servant = await upsertServant({
-        churchId: church.id,
-        name: servantSeed.name,
-        phone: servantSeed.phone,
-        gender: servantSeed.gender,
-        aptitude: servantSeed.aptitude,
-        mainMinistryId: ministry.id,
-        teamId: team.id,
-        status: servantSeed.status ?? ServantStatus.ATIVO,
-        trainingStatus: servantSeed.trainingStatus ?? TrainingStatus.COMPLETED,
-        joinedAt: servantSeed.joinedAt,
-        notes: servantSeed.notes ?? `Servo do ministério ${item.name}`,
-        birthDate: servantSeed.birthDate,
-      });
-
-      servants.push(servant);
-
-      await prisma.servantMinistry.upsert({
-        where: {
-          servantId_ministryId: {
-            servantId: servant.id,
-            ministryId: ministry.id,
-          },
-        },
-        update: {
-          trainingStatus: servant.trainingStatus,
-          trainingCompletedAt:
-            servant.trainingStatus === TrainingStatus.COMPLETED ? servant.joinedAt : null,
-        },
-        create: {
-          servantId: servant.id,
-          ministryId: ministry.id,
-          trainingStatus: servant.trainingStatus,
-          trainingCompletedAt:
-            servant.trainingStatus === TrainingStatus.COMPLETED ? servant.joinedAt : null,
-        },
-      });
-
-      await prisma.servantAvailability.upsert({
-        where: {
-          servantId_dayOfWeek_shift: {
-            servantId: servant.id,
-            dayOfWeek: 0,
-            shift: 'EVENING',
-          },
-        },
-        update: { available: true },
-        create: {
-          servantId: servant.id,
-          dayOfWeek: 0,
-          shift: 'EVENING',
-          available: true,
-        },
-      });
-
-      await prisma.servantAvailability.upsert({
-        where: {
-          servantId_dayOfWeek_shift: {
-            servantId: servant.id,
-            dayOfWeek: 4,
-            shift: 'EVENING',
-          },
-        },
-        update: { available: true },
-        create: {
-          servantId: servant.id,
-          dayOfWeek: 4,
-          shift: 'EVENING',
-          available: true,
-        },
-      });
-
-      if (servantSeed.createUser) {
-        const servantUser = await upsertUser({
-          name: servantSeed.name,
-          email: servantSeed.email ?? normalizeEmail(servantSeed.name),
-          passwordHash,
-          role: Role.SERVO,
-          churchId: church.id,
-          scope: UserScope.SELF,
-          phone: servantSeed.phone,
-          servantId: servant.id,
-        });
-        servantUsers.push(servantUser);
-      }
-    }
-
-    for (const responsibilitySeed of item.responsibilities) {
-      const responsibility = await upsertResponsibility({
-        ministryId: ministry.id,
-        title: responsibilitySeed.title,
-        functionName: responsibilitySeed.functionName,
-        description: responsibilitySeed.description,
-        requiredTraining: responsibilitySeed.requiredTraining,
-        requiredAptitude: responsibilitySeed.requiredAptitude,
-      });
-      responsibilities.push(responsibility);
-    }
-
-    const existingBinding = await prisma.userMinistryBinding.findFirst({
-      where: {
-        userId: coordinatorUser.id,
-        ministryId: ministry.id,
-        teamId: null,
-      },
-      select: { id: true },
-    });
-
-    if (!existingBinding) {
-      await prisma.userMinistryBinding.create({
-        data: {
-          userId: coordinatorUser.id,
-          ministryId: ministry.id,
-        },
-      });
-    }
-
-    await prisma.servantStatusHistory.createMany({
-      data: servants.map((servant) => ({
-        servantId: servant.id,
-        fromStatus: null,
-        toStatus: servant.status,
-        reason: 'Carga inicial do seed',
-      })),
-      skipDuplicates: true,
-    });
-
-    createdMinistries.push({
-      ministry,
-      coordinatorUser,
-      team,
-      servants,
-      servantUsers,
-      responsibilities,
-    });
-  }
-
-  const allServants = createdMinistries.flatMap((m) => m.servants);
-
-  const servicesData = [
-    {
-      title: 'Culto Domingo Manhã 1',
-      type: WorshipServiceType.DOMINGO,
-      serviceDate: new Date('2026-03-08T10:00:00.000Z'),
-      startTime: '10:00',
-      status: WorshipServiceStatus.FINALIZADO,
-    },
-    {
-      title: 'Culto Quinta 1',
-      type: WorshipServiceType.QUINTA,
-      serviceDate: new Date('2026-03-12T22:30:00.000Z'),
-      startTime: '19:30',
-      status: WorshipServiceStatus.FINALIZADO,
-    },
-    {
-      title: 'Culto Domingo Noite 1',
-      type: WorshipServiceType.DOMINGO,
-      serviceDate: new Date('2026-03-15T22:30:00.000Z'),
-      startTime: '19:30',
-      status: WorshipServiceStatus.CONFIRMADO,
-    },
-    {
-      title: 'Culto Domingo Manhã 2',
-      type: WorshipServiceType.DOMINGO,
-      serviceDate: new Date('2026-03-22T10:00:00.000Z'),
-      startTime: '10:00',
-      status: WorshipServiceStatus.CONFIRMADO,
-    },
-    {
-      title: 'Culto Quinta 2',
-      type: WorshipServiceType.QUINTA,
-      serviceDate: new Date('2026-03-26T22:30:00.000Z'),
-      startTime: '19:30',
-      status: WorshipServiceStatus.CONFIRMADO,
-    },
-  ];
-
-  const createdServices: CreatedService[] = [];
-  for (const item of servicesData) {
-    const service = await prisma.worshipService.upsert({
-      where: {
-        serviceDate_startTime_title: {
-          serviceDate: item.serviceDate,
-          startTime: item.startTime,
-          title: item.title,
-        },
-      },
+    await prisma.user.upsert({
+      where: { email: user.email },
       update: {
-        churchId: church.id,
-        type: item.type,
-        status: item.status,
+        id: user.id,
+        churchId: servant.churchId,
+        servantId,
+        name: user.name,
+        role: 'SERVO',
+        scope: 'SELF',
+        status: user.status,
+        mustChangePassword: user.mustChangePassword,
+        phone: user.phone,
+        avatarUrl: user.avatarUrl,
+        lastLoginAt: user.lastLoginAt,
+        passwordHash: ctx.hash,
         deletedAt: null,
         deletedBy: null,
       },
       create: {
-        churchId: church.id,
-        type: item.type,
-        title: item.title,
-        serviceDate: item.serviceDate,
-        startTime: item.startTime,
-        status: item.status,
+        id: user.id,
+        churchId: servant.churchId,
+        servantId,
+        name: user.name,
+        email: user.email,
+        role: 'SERVO',
+        scope: 'SELF',
+        status: user.status,
+        mustChangePassword: user.mustChangePassword,
+        phone: user.phone,
+        avatarUrl: user.avatarUrl,
+        lastLoginAt: user.lastLoginAt,
+        passwordHash: ctx.hash,
       },
     });
-    createdServices.push(service as CreatedService);
+    ctx.users[user.id] = user.id;
   }
 
-  for (const service of createdServices) {
-    const version = await prisma.scheduleVersion.upsert({
-      where: {
-        worshipServiceId_versionNumber: {
-          worshipServiceId: service.id,
-          versionNumber: 1,
-        },
-      },
-      update: {
-        churchId: church.id,
-        createdBy: admin.id,
-      },
-      create: {
-        worshipServiceId: service.id,
-        churchId: church.id,
-        versionNumber: 1,
-        status: service.status === WorshipServiceStatus.FINALIZADO ? 'PUBLISHED' : 'DRAFT',
-        createdBy: admin.id,
-      },
-    });
-
-    for (const [index, item] of createdMinistries.entries()) {
-      await prisma.scheduleVersionSlot.create({
-        data: {
-          scheduleVersionId: version.id,
-          ministryId: item.ministry.id,
-          responsibilityId: item.responsibilities[0]?.id ?? null,
-          assignedServantId: item.servants[index % item.servants.length]?.id,
-          status: service.status === WorshipServiceStatus.FINALIZADO ? ScheduleSlotStatus.CONFIRMED : ScheduleSlotStatus.OPEN,
-          position: 1,
-        },
-      }).catch(() => null);
-
-      await prisma.scheduleVersionSlot.create({
-        data: {
-          scheduleVersionId: version.id,
-          ministryId: item.ministry.id,
-          responsibilityId: item.responsibilities[1]?.id ?? null,
-          assignedServantId: item.servants[(index + 1) % item.servants.length]?.id ?? null,
-          status: service.status === WorshipServiceStatus.FINALIZADO ? ScheduleSlotStatus.CONFIRMED : ScheduleSlotStatus.OPEN,
-          position: 2,
-        },
-      }).catch(() => null);
-    }
-  }
-
-  const createdSchedules: any[] = [];
-
-  for (const [serviceIndex, service] of createdServices.entries()) {
-    for (const [index, item] of createdMinistries.entries()) {
-      const assignedServant = item.servants[index % item.servants.length];
-      const backupServant = item.servants[(index + 1) % item.servants.length];
-
-      const schedule = await prisma.schedule.upsert({
-        where: {
-          serviceId_servantId_ministryId: {
-            serviceId: service.id,
-            servantId: assignedServant.id,
-            ministryId: item.ministry.id,
-          },
-        },
-        update: {
-          churchId: church.id,
-          assignedByUserId: admin.id,
-          status:
-            service.title === 'Culto Domingo Noite 1' && item.ministry.name === 'Recepção'
-              ? ScheduleStatus.SWAPPED
-              : ScheduleStatus.ASSIGNED,
-          responseStatus:
-            service.status === WorshipServiceStatus.CONFIRMADO
-              ? ScheduleResponseStatus.PENDING
-              : ScheduleResponseStatus.CONFIRMED,
-          responseAt:
-            service.status === WorshipServiceStatus.CONFIRMADO ? null : new Date(),
-          declineReason: null,
-          deletedAt: null,
-          deletedBy: null,
-        },
-        create: {
-          churchId: church.id,
-          serviceId: service.id,
-          servantId: assignedServant.id,
-          ministryId: item.ministry.id,
-          assignedByUserId: admin.id,
-          status:
-            service.title === 'Culto Domingo Noite 1' && item.ministry.name === 'Recepção'
-              ? ScheduleStatus.SWAPPED
-              : ScheduleStatus.ASSIGNED,
-          responseStatus:
-            service.status === WorshipServiceStatus.CONFIRMADO
-              ? ScheduleResponseStatus.PENDING
-              : ScheduleResponseStatus.CONFIRMED,
-          responseAt:
-            service.status === WorshipServiceStatus.CONFIRMADO ? null : new Date(),
-        },
-      });
-
-      createdSchedules.push(schedule);
-
-      await prisma.scheduleSlot.create({
-        data: {
-          churchId: church.id,
-          serviceId: service.id,
-          ministryId: item.ministry.id,
-          scheduleId: schedule.id,
-          responsibilityId: item.responsibilities[0]?.id ?? null,
-          functionName: item.responsibilities[0]?.functionName ?? `Principal ${item.ministry.name}`,
-          slotLabel: `Principal - ${item.ministry.name}`,
-          position: 1,
-          status:
-            service.status === WorshipServiceStatus.CONFIRMADO
-              ? ScheduleSlotStatus.PENDING_CONFIRMATION
-              : ScheduleSlotStatus.CONFIRMED,
-          assignedServantId: assignedServant.id,
-          assignedByUserId: admin.id,
-          required: true,
-          requiredTraining: item.responsibilities[0]?.requiredTraining ?? true,
-        },
-      }).catch(() => null);
-
-      await prisma.scheduleSlot.create({
-        data: {
-          churchId: church.id,
-          serviceId: service.id,
-          ministryId: item.ministry.id,
-          scheduleId: schedule.id,
-          responsibilityId: item.responsibilities[1]?.id ?? null,
-          functionName: item.responsibilities[1]?.functionName ?? `Apoio ${item.ministry.name}`,
-          slotLabel: `Apoio - ${item.ministry.name}`,
-          position: 2,
-          status:
-            serviceIndex <= 1
-              ? ScheduleSlotStatus.CONFIRMED
-              : ScheduleSlotStatus.OPEN,
-          assignedServantId: serviceIndex <= 1 ? backupServant.id : null,
-          assignedByUserId: serviceIndex <= 1 ? admin.id : null,
-          required: false,
-          requiredTraining: item.responsibilities[1]?.requiredTraining ?? false,
-        },
-      }).catch(() => null);
-
-      if (service.status !== WorshipServiceStatus.CONFIRMADO) {
-        await prisma.attendance.upsert({
-          where: {
-            serviceId_servantId: {
-              serviceId: service.id,
-              servantId: assignedServant.id,
-            },
-          },
-          update: {
-            churchId: church.id,
-            status:
-              service.title === 'Culto Quinta 1' && item.ministry.name === 'Mídia'
-                ? AttendanceStatus.FALTA
-                : service.title === 'Culto Domingo Manhã 1' && item.ministry.name === 'Intercessão'
-                ? AttendanceStatus.FALTA_JUSTIFICADA
-                : AttendanceStatus.PRESENTE,
-            justification:
-              service.title === 'Culto Quinta 1' && item.ministry.name === 'Mídia'
-                ? 'Imprevisto no trabalho'
-                : service.title === 'Culto Domingo Manhã 1' && item.ministry.name === 'Intercessão'
-                ? 'Consulta médica'
-                : null,
-            registeredByUserId: admin.id,
-          },
-          create: {
-            churchId: church.id,
-            serviceId: service.id,
-            servantId: assignedServant.id,
-            status:
-              service.title === 'Culto Quinta 1' && item.ministry.name === 'Mídia'
-                ? AttendanceStatus.FALTA
-                : service.title === 'Culto Domingo Manhã 1' && item.ministry.name === 'Intercessão'
-                ? AttendanceStatus.FALTA_JUSTIFICADA
-                : AttendanceStatus.PRESENTE,
-            justification:
-              service.title === 'Culto Quinta 1' && item.ministry.name === 'Mídia'
-                ? 'Imprevisto no trabalho'
-                : service.title === 'Culto Domingo Manhã 1' && item.ministry.name === 'Intercessão'
-                ? 'Consulta médica'
-                : null,
-            registeredByUserId: admin.id,
-          },
-        });
-      }
-    }
-  }
-
-  const cultoDomingoNoite1 = createdServices.find(
-    (svc) => svc.title === 'Culto Domingo Noite 1',
-  );
-
-  const recepcaoMinistry = createdMinistries.find(
-    (m) => m.ministry.name === 'Recepção',
-  );
-
-  const receptionSchedule = createdSchedules.find(
-    (s) =>
-      s.serviceId === cultoDomingoNoite1?.id &&
-      s.ministryId === recepcaoMinistry?.ministry.id,
-  );
-
-  const mediaMinistry = createdMinistries.find((m) => m.ministry.name === 'Mídia')!;
-  if (receptionSchedule) {
-    const swappedTo = await prisma.schedule.create({
-      data: {
-        churchId: church.id,
-        serviceId: receptionSchedule.serviceId,
-        servantId: mediaMinistry.servants[1].id,
-        ministryId: mediaMinistry.ministry.id,
-        assignedByUserId: admin.id,
-        status: ScheduleStatus.SWAPPED,
-        responseStatus: ScheduleResponseStatus.CONFIRMED,
-        responseAt: new Date('2026-03-14T14:30:00.000Z'),
-      },
-    });
-
-    await prisma.scheduleSwapHistory.create({
-      data: {
-        fromScheduleId: receptionSchedule.id,
-        toScheduleId: swappedTo.id,
-        reason: 'Troca aprovada por indisponibilidade de última hora',
-        swappedByUserId: createdMinistries[0].coordinatorUser.id,
-      },
-    });
-
-    await prisma.scheduleResponseHistory.createMany({
-      data: [
-        {
-          scheduleId: receptionSchedule.id,
-          responseStatus: ScheduleResponseStatus.DECLINED,
-          declineReason: 'Imprevisto familiar',
-          respondedByUserId: createdMinistries[0].coordinatorUser.id,
-          respondedAt: new Date('2026-03-14T12:00:00.000Z'),
-        },
-        {
-          scheduleId: swappedTo.id,
-          responseStatus: ScheduleResponseStatus.CONFIRMED,
-          respondedByUserId: mediaMinistry.coordinatorUser.id,
-          respondedAt: new Date('2026-03-14T14:30:00.000Z'),
-        },
-      ],
-    });
-  }
-
-  for (const item of createdMinistries) {
-    const template = await prisma.ministryTaskTemplate.create({
-      data: {
-        churchId: church.id,
-        ministryId: item.ministry.id,
-        name: `Checklist Pré-Culto - ${item.ministry.name}`,
-        description: `Checklist principal do ministério ${item.ministry.name}`,
-        recurrenceType: MinistryTaskRecurrenceType.EVERY_SERVICE,
-        assigneeMode: MinistryTaskAssigneeMode.REQUIRED,
-        reallocationMode: MinistryTaskReallocationMode.MANUAL,
-        createdBy: item.coordinatorUser.id,
-        active: true,
-      },
-    });
-
-    await prisma.ministryTaskTemplateChecklistItem.createMany({
-      data: [
-        {
-          templateId: template.id,
-          label: 'Checar presença da equipe',
-          position: 1,
-          required: true,
-        },
-        {
-          templateId: template.id,
-          label: 'Organizar área de atuação',
-          position: 2,
-          required: true,
-        },
-        {
-          templateId: template.id,
-          label: 'Alinhar com coordenação',
-          position: 3,
-          required: true,
-        },
-      ],
-      skipDuplicates: true,
-    });
-
-    for (const [serviceIndex, service] of createdServices.entries()) {
-      const assignedServant = item.servants[(serviceIndex + 1) % item.servants.length];
-      const occurrenceStatus =
-        serviceIndex === 0
-          ? MinistryTaskOccurrenceStatus.COMPLETED
-          : serviceIndex === 1
-          ? MinistryTaskOccurrenceStatus.OVERDUE
-          : serviceIndex === 2
-          ? MinistryTaskOccurrenceStatus.ASSIGNED
-          : serviceIndex === 3
-          ? MinistryTaskOccurrenceStatus.PENDING
-          : MinistryTaskOccurrenceStatus.IN_PROGRESS;
-
-      const occurrence = await prisma.ministryTaskOccurrence.create({
-        data: {
-          churchId: church.id,
-          templateId: template.id,
-          ministryId: item.ministry.id,
-          serviceId: service.id,
-          scheduledFor: service.serviceDate,
-          assignedServantId: assignedServant?.id,
-          originAssignedServantId: assignedServant?.id,
-          status: occurrenceStatus,
-          reallocationMode: MinistryTaskReallocationMode.MANUAL,
-          reallocationStatus: 'NONE',
-          priority:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE
-              ? MinistryTaskOccurrencePriority.HIGH
-              : MinistryTaskOccurrencePriority.MEDIUM,
-          criticality:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE
-              ? MinistryTaskOccurrenceCriticality.HIGH
-              : MinistryTaskOccurrenceCriticality.MEDIUM,
-          progressPercent:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED
-              ? 100
-              : occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE
-              ? 60
-              : occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS
-              ? 40
-              : 0,
-          dueAt: new Date(service.serviceDate.getTime() - 60 * 60 * 1000),
-          startedAt:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED ||
-            occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE ||
-            occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS
-              ? new Date(service.serviceDate.getTime() - 90 * 60 * 1000)
-              : null,
-          completedAt:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED
-              ? new Date(service.serviceDate.getTime() - 10 * 60 * 1000)
-              : null,
-          completedBy:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED
-              ? item.coordinatorUser.id
-              : null,
-          lastProgressAt:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE ||
-            occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS
-              ? new Date(service.serviceDate.getTime() - 30 * 60 * 1000)
-              : null,
-          notes:
-            occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE
-              ? 'Tarefa atrasou por ausência parcial da equipe.'
-              : occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS
-              ? 'Execução em andamento.'
-              : null,
-        },
-      });
-
-      await prisma.ministryTaskOccurrenceAssignee.create({
-        data: {
-          occurrenceId: occurrence.id,
-          servantId: assignedServant.id,
-          role: 'PRIMARY',
-          active: true,
-          createdBy: item.coordinatorUser.id,
-        },
-      }).catch(() => null);
-
-      const supportServant = item.servants[(serviceIndex + 2) % item.servants.length];
-      await prisma.ministryTaskOccurrenceAssignee.create({
-        data: {
-          occurrenceId: occurrence.id,
-          servantId: supportServant.id,
-          role: 'SUPPORT',
-          active: occurrenceStatus !== MinistryTaskOccurrenceStatus.PENDING,
-          createdBy: item.coordinatorUser.id,
-        },
-      }).catch(() => null);
-
-      const templateItems = await prisma.ministryTaskTemplateChecklistItem.findMany({
-        where: { templateId: template.id },
-        orderBy: { position: 'asc' },
-      });
-
-      for (const checklistItem of templateItems) {
-        await prisma.ministryTaskOccurrenceChecklistItem.create({
-          data: {
-            occurrenceId: occurrence.id,
-            templateChecklistItemId: checklistItem.id,
-            label: checklistItem.label,
-            description: checklistItem.description,
-            position: checklistItem.position,
-            required: checklistItem.required,
-            status:
-              occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED
-                ? 'DONE'
-                : occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE && checklistItem.position === 1
-                ? 'DONE'
-                : occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS && checklistItem.position <= 2
-                ? 'DONE'
-                : 'PENDING',
-            checkedAt:
-              occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED
-                ? new Date()
-                : occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE && checklistItem.position === 1
-                ? new Date()
-                : occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS && checklistItem.position <= 2
-                ? new Date()
-                : null,
-            checkedBy:
-              occurrenceStatus === MinistryTaskOccurrenceStatus.COMPLETED
-                ? item.coordinatorUser.id
-                : occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE && checklistItem.position === 1
-                ? item.coordinatorUser.id
-                : occurrenceStatus === MinistryTaskOccurrenceStatus.IN_PROGRESS && checklistItem.position <= 2
-                ? item.coordinatorUser.id
-                : null,
-            notes:
-              occurrenceStatus === MinistryTaskOccurrenceStatus.OVERDUE &&
-              checklistItem.position > 1
-                ? 'Item ainda pendente.'
-                : null,
-          },
-        }).catch(() => null);
-      }
-    }
-  }
-
-  const receptionMinistry = createdMinistries[0];
-  const intercessionMinistry = createdMinistries[2];
-
-  await prisma.pastoralVisit.createMany({
-    data: [
-      {
-        churchId: church.id,
-        servantId: receptionMinistry.servants[2].id,
-        reason: 'Acompanhamento por adaptação no ministério',
-        status: PastoralVisitStatus.ABERTA,
-        createdByUserId: pastor.id,
-      },
-      {
-        churchId: church.id,
-        servantId: mediaMinistry.servants[3].id,
-        reason: 'Conversa pastoral após sequência de atrasos',
-        status: PastoralVisitStatus.EM_ANDAMENTO,
-        createdByUserId: pastor.id,
-      },
-      {
-        churchId: church.id,
-        servantId: intercessionMinistry.servants[1].id,
-        reason: 'Retorno após período de ausência',
-        status: PastoralVisitStatus.RESOLVIDA,
-        createdByUserId: pastor.id,
-        resolvedByUserId: pastor.id,
-        resolvedAt: new Date('2026-03-16T18:00:00.000Z'),
-        notes: 'Acompanhamento concluído com sucesso.',
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.pastoralAlert.createMany({
-    data: [
-      {
-        churchId: church.id,
-        servantId: intercessionMinistry.servants[1].id,
-        trigger: 'FOLLOW_UP',
-        message: 'Servo precisa de acompanhamento pastoral nas próximas semanas.',
-        status: AlertStatus.OPEN,
-        createdByUserId: pastor.id,
-      },
-      {
-        churchId: church.id,
-        servantId: mediaMinistry.servants[0].id,
-        trigger: 'TASK_OVERLOAD',
-        message: 'Servo acumulando muitas responsabilidades técnicas.',
-        status: AlertStatus.OPEN,
-        createdByUserId: pastor.id,
-      },
-      {
-        churchId: church.id,
-        servantId: receptionMinistry.servants[5].id,
-        trigger: 'RECENT_ABSENCE',
-        message: 'Acompanhar faltas recentes.',
-        status: AlertStatus.RESOLVED,
-        createdByUserId: pastor.id,
-        resolvedByUserId: pastor.id,
-        resolvedAt: new Date('2026-03-18T12:00:00.000Z'),
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  for (const servant of allServants) {
-    await prisma.servantJourney.upsert({
-      where: { servantId: servant.id },
-      update: {
-        churchId: church.id,
-        startedAt: servant.joinedAt ?? servant.createdAt,
-        totalServices: 4,
-        totalTasksCompleted: 3,
-        totalTrainingsCompleted:
-          servant.trainingStatus === TrainingStatus.COMPLETED ? 1 : 0,
-        totalEventsServed: 2,
-        monthsServing: 12,
-        lastActivityAt: new Date('2026-03-22T21:00:00.000Z'),
-      },
-      create: {
-        servantId: servant.id,
-        churchId: church.id,
-        startedAt: servant.joinedAt ?? servant.createdAt,
-        totalServices: 4,
-        totalTasksCompleted: 3,
-        totalTrainingsCompleted:
-          servant.trainingStatus === TrainingStatus.COMPLETED ? 1 : 0,
-        totalEventsServed: 2,
-        monthsServing: 12,
-        lastActivityAt: new Date('2026-03-22T21:00:00.000Z'),
-      },
-    });
-  }
-
-  const milestoneWelcome = await prisma.journeyMilestone.upsert({
-    where: { code: 'primeiro_culto_servido' },
-    update: {
-      churchId: church.id,
-      name: 'Primeiro Culto Servido',
-      description: 'Participou do primeiro culto em escala.',
-      category: 'INÍCIO',
-    },
-    create: {
-      churchId: church.id,
-      code: 'primeiro_culto_servido',
-      name: 'Primeiro Culto Servido',
-      description: 'Participou do primeiro culto em escala.',
-      category: 'INÍCIO',
-    },
-  });
-
-  const milestoneTraining = await prisma.journeyMilestone.upsert({
-    where: { code: 'treinamento_concluido' },
-    update: {
-      churchId: church.id,
-      name: 'Treinamento Concluído',
-      description: 'Concluiu treinamento ministerial.',
-      category: 'FORMAÇÃO',
-    },
-    create: {
-      churchId: church.id,
-      code: 'treinamento_concluido',
-      name: 'Treinamento Concluído',
-      description: 'Concluiu treinamento ministerial.',
-      category: 'FORMAÇÃO',
-    },
-  });
-
-  await prisma.servantMilestone.createMany({
-    data: allServants.slice(0, 12).flatMap((servant, index) => {
-      const rows = [
-        {
-          churchId: church.id,
-          servantId: servant.id,
-          milestoneId: milestoneWelcome.id,
-        },
-      ];
-      if (index % 2 === 0 && servant.trainingStatus === TrainingStatus.COMPLETED) {
-        rows.push({
-          churchId: church.id,
-          servantId: servant.id,
-          milestoneId: milestoneTraining.id,
-        });
-      }
-      return rows;
-    }),
-    skipDuplicates: true,
-  });
-
-  await prisma.journeyLog.createMany({
-    data: [
-      {
-        churchId: church.id,
-        servantId: receptionMinistry.servants[0].id,
-        type: 'SERVICE',
-        title: 'Serviu no Culto Domingo Manhã',
-        description: 'Atuou na recepção principal.',
-        occurredAt: new Date('2026-03-08T10:00:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        servantId: mediaMinistry.servants[0].id,
-        type: 'TASK',
-        title: 'Concluiu checklist técnico',
-        description: 'Finalizou checklist da mídia antes do culto.',
-        occurredAt: new Date('2026-03-12T19:00:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        servantId: intercessionMinistry.servants[2].id,
-        type: 'TRAINING',
-        title: 'Treinamento de intercessão concluído',
-        description: 'Finalizou a trilha inicial do ministério.',
-        occurredAt: new Date('2026-03-10T20:00:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        servantId: createdMinistries[3].servants[0].id,
-        type: 'EVENT',
-        title: 'Participou de evento especial',
-        description: 'Atuação em culto especial de domingo à noite.',
-        occurredAt: new Date('2026-03-15T22:00:00.000Z'),
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.timelineEntry.createMany({
-    data: [
-      {
-        churchId: church.id,
-        scope: TimelineScope.CHURCH,
-        type: TimelineEntryType.SCHEDULE_PUBLISHED,
-        title: 'Escalas publicadas',
-        description: 'Escalas principais da semana foram publicadas.',
-        actorUserId: admin.id,
-        occurredAt: new Date('2026-03-07T15:00:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        ministryId: receptionMinistry.ministry.id,
-        scope: TimelineScope.MINISTRY,
-        type: TimelineEntryType.TASK_COMPLETED,
-        title: 'Checklist da Recepção concluído',
-        description: 'Checklist pré-culto concluído com sucesso.',
-        servantId: receptionMinistry.servants[1].id,
-        actorUserId: receptionMinistry.coordinatorUser.id,
-        occurredAt: new Date('2026-03-08T09:20:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        servantId: intercessionMinistry.servants[2].id,
-        scope: TimelineScope.SERVANT,
-        type: TimelineEntryType.TRAINING_COMPLETED,
-        title: 'Treinamento concluído',
-        description: 'Servo concluiu treinamento ministerial.',
-        actorUserId: intercessionMinistry.coordinatorUser.id,
-        occurredAt: new Date('2026-03-10T20:00:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        ministryId: mediaMinistry.ministry.id,
-        scope: TimelineScope.MINISTRY,
-        type: TimelineEntryType.TASK_OVERDUE,
-        title: 'Tarefa atrasada na mídia',
-        description: 'Ocorrência ultrapassou o horário previsto.',
-        actorUserId: mediaMinistry.coordinatorUser.id,
-        occurredAt: new Date('2026-03-12T19:40:00.000Z'),
-      },
-      {
-        churchId: church.id,
-        scope: TimelineScope.CHURCH,
-        type: TimelineEntryType.PASTORAL_ALERT,
-        title: 'Alerta pastoral registrado',
-        description: 'Novo alerta pastoral aberto para acompanhamento.',
-        actorUserId: pastor.id,
-        occurredAt: new Date('2026-03-16T18:10:00.000Z'),
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.automationRule.createMany({
-    data: [
-      {
-        churchId: church.id,
-        name: 'Notificar tarefas próximas do vencimento',
-        description: 'Dispara alerta para tarefas perto do horário limite.',
-        triggerType: 'TIME',
-        triggerConfig: { everyMinutes: 30 },
-        actionType: 'TASK_NOTIFY_DUE_SOON',
-        actionConfig: { notifyCoordinator: true },
-        enabled: true,
-        createdBy: admin.id,
-      },
-      {
-        churchId: church.id,
-        name: 'Marcar tarefa atrasada',
-        description: 'Marca ocorrências em atraso automaticamente.',
-        triggerType: 'CONDITION',
-        triggerConfig: { field: 'dueAt', operator: 'lt_now' },
-        actionType: 'TASK_MARK_OVERDUE',
-        actionConfig: { updateStatus: 'OVERDUE' },
-        enabled: true,
-        createdBy: admin.id,
-      },
-      {
-        churchId: church.id,
-        name: 'Alertar escala incompleta',
-        description: 'Dispara aviso para ministérios com escala incompleta.',
-        triggerType: 'EVENT',
-        triggerConfig: { event: 'schedule_incomplete' },
-        actionType: 'SCHEDULE_ALERT_INCOMPLETE',
-        actionConfig: { notifyCoordinator: true },
-        enabled: true,
-        createdBy: admin.id,
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  const automationRules = await prisma.automationRule.findMany({
-    where: { churchId: church.id },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  for (const [index, rule] of automationRules.entries()) {
-    await prisma.automationExecutionLog.create({
-      data: {
-        churchId: church.id,
-        ruleId: rule.id,
-        dedupeKey: `seed-rule-${index + 1}`,
-        status: index === 1 ? 'SUCCESS_WITH_ALERT' : 'SUCCESS',
-        message: 'Execução simulada criada pelo seed.',
-        processed: index + 1,
-        metadata: { source: 'seed', rule: rule.name },
-      },
-    }).catch(() => null);
-  }
-
-  await prisma.auditLog.createMany({
-    data: [
-      {
-        churchId: church.id,
-        action: AuditAction.CREATE_MINISTRY,
-        entity: 'Ministry',
-        entityId: createdMinistries[0].ministry.id,
-        metadata: { source: 'seed', name: createdMinistries[0].ministry.name },
-        userId: admin.id,
-      },
-      {
-        churchId: church.id,
-        action: AuditAction.GENERATE_SCHEDULE,
-        entity: 'WorshipService',
-        entityId: createdServices[0].id,
-        metadata: { source: 'seed', service: createdServices[0].title },
-        userId: admin.id,
-      },
-      {
-        churchId: church.id,
-        action: AuditAction.SCHEDULE_SWAP,
-        entity: 'Schedule',
-        entityId: receptionSchedule?.id ?? createdServices[2].id,
-        metadata: { source: 'seed', reason: 'Troca simulada para teste' },
-        userId: receptionMinistry.coordinatorUser.id,
-      },
-      {
-        churchId: church.id,
-        action: AuditAction.MINISTRY_TASK_OCCURRENCE_CREATED,
-        entity: 'MinistryTaskOccurrence',
-        entityId: createdMinistries[0].ministry.id,
-        metadata: { source: 'seed' },
-        userId: createdMinistries[0].coordinatorUser.id,
-      },
-      {
-        churchId: church.id,
-        action: AuditAction.PASTORAL_ACTION,
-        entity: 'PastoralVisit',
-        entityId: receptionMinistry.servants[2].id,
-        metadata: { source: 'seed', action: 'follow_up_opened' },
-        userId: pastor.id,
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.notification.createMany({
-    data: [
-      {
-        churchId: church.id,
-        userId: admin.id,
-        type: 'SYSTEM',
-        title: 'Seed executado',
-        message: 'Base de testes carregada com sucesso.',
-      },
-      {
-        churchId: church.id,
-        userId: pastor.id,
-        type: 'PASTORAL',
-        title: 'Acompanhamentos pendentes',
-        message: 'Existem acompanhamentos pastorais em aberto para revisão.',
-      },
-      {
-        churchId: church.id,
-        userId: receptionMinistry.coordinatorUser.id,
-        type: 'TASK',
-        title: 'Tarefas do ministério',
-        message: 'Existem tarefas próximas do vencimento no seu ministério.',
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.notificationPreference.createMany({
-    data: [
-      {
-        userId: admin.id,
-        channel: NotificationChannel.IN_APP,
-        enabled: true,
-      },
-      {
-        userId: pastor.id,
-        channel: NotificationChannel.IN_APP,
-        enabled: true,
-      },
-      {
-        userId: receptionMinistry.coordinatorUser.id,
-        channel: NotificationChannel.WHATSAPP,
-        enabled: true,
-      },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.refreshToken.create({
-    data: {
-      userId: admin.id,
-      tokenHash: await bcrypt.hash('seed-refresh-admin', 10),
-      expiresAt: new Date('2026-04-01T00:00:00.000Z'),
-    },
-  });
-
-  await prisma.passwordResetToken.create({
-    data: {
-      userId: pastor.id,
-      tokenHash: await bcrypt.hash('seed-reset-pastor', 10),
-      expiresAt: new Date('2026-04-02T00:00:00.000Z'),
-    },
-  });
-
-  console.log('Seed completed successfully.');
-  console.log(`Senha padrão: ${DEFAULT_PASSWORD}`);
-  console.log('Logins principais:');
-  console.log('- superadmin@servos.local');
-  console.log('- admin@servos.local');
-  console.log('- pastor@servos.local');
-  console.log('- caique@servos.local');
-  console.log('- maria.eduarda@servos.local');
-  console.log('- ruan.oliveira@servos.local');
-  console.log('- ana.paula@servos.local');
-  console.log('- fernanda@servos.local');
-  console.log('- joao.marcos@servos.local');
-  console.log(`Super admin id: ${superAdmin.id}`);
+  add('users', servantUsers.length);
 }
 
-main()
-  .catch((error) => {
-    console.error('Seed failed:', error);
-    process.exit(1);
+async function seedCoreModules() {
+  // responsibilities
+  const resp = [
+    ['seed_resp_1', 'seed_ministry_louvor_central', 'VOCAL_PRINCIPAL', 'Vocal principal'],
+    ['seed_resp_2', 'seed_ministry_m_dia_central', 'OPERADOR_PROJECAO', 'Operador de projeção'],
+    ['seed_resp_3', 'seed_ministry_m_dia_central', 'OPERADOR_STREAMING', 'Operador de streaming'],
+    ['seed_resp_4', 'seed_ministry_recep_o_central', 'RECEPCIONISTA', 'Recepcionista'],
+    ['seed_resp_5', 'seed_ministry_produ_o_central', 'APOIO_PALCO', 'Apoio de palco'],
+    ['seed_resp_6', 'seed_ministry_intercess_o_central', 'INTERCESSOR', 'Intercessor'],
+  ] as const;
+  for (const r of resp) {
+    await prisma.ministryResponsibility.upsert({
+      where: { id: r[0] },
+      update: { id: r[0], ministryId: ctx.ministries[r[1]], name: r[3], title: r[3], functionName: r[2], activity: r[2], description: r[3], requiredTraining: true, requiredAptitude: 'TECNICO', active: true, deletedAt: null, deletedBy: null },
+      create: { id: r[0], ministryId: ctx.ministries[r[1]], name: r[3], title: r[3], functionName: r[2], activity: r[2], description: r[3], requiredTraining: true, requiredAptitude: 'TECNICO', active: true },
+    });
+    ctx.responsibilities[r[0]] = r[0];
+  }
+  add('ministryResponsibilities', resp.length);
+
+  // templates + services
+  await prisma.serviceTemplate.upsert({ where: { id: 'seed_tpl_1' }, update: { id: 'seed_tpl_1', churchId: ctx.churches.seed_church_central, name: 'Culto Domingo Manhã', type: 'DOMINGO', recurrenceType: 'WEEKLY', weekday: 0, startTime: '09:00', duration: 110, active: true, generateAheadDays: 30 }, create: { id: 'seed_tpl_1', churchId: ctx.churches.seed_church_central, name: 'Culto Domingo Manhã', type: 'DOMINGO', recurrenceType: 'WEEKLY', weekday: 0, startTime: '09:00', duration: 110, active: true, generateAheadDays: 30 } });
+  await prisma.serviceTemplate.upsert({ where: { id: 'seed_tpl_2' }, update: { id: 'seed_tpl_2', churchId: ctx.churches.seed_church_central, name: 'Culto Domingo Noite', type: 'DOMINGO', recurrenceType: 'WEEKLY', weekday: 0, startTime: '19:00', duration: 130, active: true, generateAheadDays: 30 }, create: { id: 'seed_tpl_2', churchId: ctx.churches.seed_church_central, name: 'Culto Domingo Noite', type: 'DOMINGO', recurrenceType: 'WEEKLY', weekday: 0, startTime: '19:00', duration: 130, active: true, generateAheadDays: 30 } });
+  ctx.templates.seed_tpl_1 = 'seed_tpl_1';
+  ctx.templates.seed_tpl_2 = 'seed_tpl_2';
+  add('serviceTemplates', 2);
+
+  await prisma.worshipService.upsert({ where: { id: 'seed_service_past' }, update: { id: 'seed_service_past', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_2', type: 'DOMINGO', title: 'Culto Passado', serviceDate: days(-14), startTime: '19:00', locked: true, canceled: false, notes: 'seed', status: 'FINALIZADO', deletedAt: null, deletedBy: null }, create: { id: 'seed_service_past', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_2', type: 'DOMINGO', title: 'Culto Passado', serviceDate: days(-14), startTime: '19:00', locked: true, canceled: false, notes: 'seed', status: 'FINALIZADO' } });
+  await prisma.worshipService.upsert({ where: { id: 'seed_service_next' }, update: { id: 'seed_service_next', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Próximo', serviceDate: days(4), startTime: '09:00', locked: false, canceled: false, notes: 'seed', status: 'CONFIRMADO', deletedAt: null, deletedBy: null }, create: { id: 'seed_service_next', churchId: ctx.churches.seed_church_central, templateId: 'seed_tpl_1', type: 'DOMINGO', title: 'Culto Próximo', serviceDate: days(4), startTime: '09:00', locked: false, canceled: false, notes: 'seed', status: 'CONFIRMADO' } });
+  ctx.services.seed_service_past = 'seed_service_past';
+  ctx.services.seed_service_next = 'seed_service_next';
+  add('worshipServices', 2);
+
+  // minimal schedule/version/slots
+  await prisma.scheduleVersion.upsert({ where: { id: 'seed_sv_1' }, update: { id: 'seed_sv_1', worshipServiceId: 'seed_service_next', churchId: ctx.churches.seed_church_central, versionNumber: 1, status: 'PUBLISHED', createdBy: ctx.users.seed_user_admin_central }, create: { id: 'seed_sv_1', worshipServiceId: 'seed_service_next', churchId: ctx.churches.seed_church_central, versionNumber: 1, status: 'PUBLISHED', createdBy: ctx.users.seed_user_admin_central } });
+  ctx.scheduleVersions.seed_sv_1 = 'seed_sv_1';
+  add('scheduleVersions', 1);
+
+  await prisma.schedule.upsert({ where: { id: 'seed_schedule_1' }, update: { id: 'seed_schedule_1', serviceId: 'seed_service_next', servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'CONFIRMED', responseAt: days(-1), declineReason: null, deletedAt: null, deletedBy: null }, create: { id: 'seed_schedule_1', serviceId: 'seed_service_next', servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central, churchId: ctx.churches.seed_church_central, assignedByUserId: ctx.users.seed_user_admin_central, status: 'ASSIGNED', responseStatus: 'CONFIRMED', responseAt: days(-1), declineReason: null } });
+  ctx.schedules.seed_schedule_1 = 'seed_schedule_1';
+  add('schedules', 1);
+
+  await prisma.scheduleSlot.upsert({ where: { id: 'seed_slot_1' }, update: { id: 'seed_slot_1', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_1', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'CONFIRMED', confirmationStatus: 'CONFIRMED', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed', deletedAt: null, deletedBy: null }, create: { id: 'seed_slot_1', serviceId: 'seed_service_next', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_1', templateSlotId: null, responsibilityId: ctx.responsibilities.seed_resp_4, functionName: 'RECEPCIONISTA', slotLabel: 'Recepção', position: 1, required: true, requiredTraining: false, blocked: false, blockedReason: null, status: 'CONFIRMED', confirmationStatus: 'CONFIRMED', assignedServantId: ctx.servants.seed_servant_ana, assignedByUserId: ctx.users.seed_user_admin_central, notes: 'seed' } });
+  ctx.scheduleSlots.seed_slot_1 = 'seed_slot_1';
+  add('scheduleSlots', 1);
+}
+
+async function seedCoverageExtras() {
+  await prisma.churchBranding.upsert({
+    where: { churchId: ctx.churches.seed_church_central },
+    update: { id: 'seed_brand_1', churchId: ctx.churches.seed_church_central, logoUrl: 'https://cdn.example.com/seed.png', primaryColor: '#1D4ED8', secondaryColor: '#0F172A', accentColor: '#16A34A', welcomeMessage: 'Bem-vindo' },
+    create: { id: 'seed_brand_1', churchId: ctx.churches.seed_church_central, logoUrl: 'https://cdn.example.com/seed.png', primaryColor: '#1D4ED8', secondaryColor: '#0F172A', accentColor: '#16A34A', welcomeMessage: 'Bem-vindo' },
+  });
+
+  await prisma.refreshToken.upsert({
+    where: { id: 'seed_rt_1' },
+    update: { id: 'seed_rt_1', userId: ctx.users.seed_user_admin_central, tokenHash: 'seed-rt-hash', expiresAt: days(30), revokedAt: null },
+    create: { id: 'seed_rt_1', userId: ctx.users.seed_user_admin_central, tokenHash: 'seed-rt-hash', expiresAt: days(30), revokedAt: null },
+  });
+  await prisma.passwordResetToken.upsert({
+    where: { id: 'seed_prt_1' },
+    update: { id: 'seed_prt_1', userId: ctx.users.seed_user_servo_ana, tokenHash: 'seed-prt-hash', expiresAt: days(2), usedAt: null },
+    create: { id: 'seed_prt_1', userId: ctx.users.seed_user_servo_ana, tokenHash: 'seed-prt-hash', expiresAt: days(2), usedAt: null },
+  });
+  await prisma.servantStatusHistory.upsert({
+    where: { id: 'seed_ssh_1' },
+    update: { id: 'seed_ssh_1', servantId: ctx.servants.seed_servant_lucas, fromStatus: 'ATIVO', toStatus: 'AFASTADO', reason: 'Seed', createdAt: days(-7) },
+    create: { id: 'seed_ssh_1', servantId: ctx.servants.seed_servant_lucas, fromStatus: 'ATIVO', toStatus: 'AFASTADO', reason: 'Seed', createdAt: days(-7) },
+  });
+
+  await prisma.serviceTemplateSlot.upsert({
+    where: { id: 'seed_sts_1' },
+    update: { id: 'seed_sts_1', templateId: 'seed_tpl_1', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, responsibilityId: ctx.responsibilities.seed_resp_4, quantity: 2, requiredTalentId: null },
+    create: { id: 'seed_sts_1', templateId: 'seed_tpl_1', ministryId: ctx.ministries.seed_ministry_recep_o_central, teamId: ctx.teams.seed_team_recep_entrada, responsibilityId: ctx.responsibilities.seed_resp_4, quantity: 2, requiredTalentId: null },
+  });
+  await prisma.scheduleVersionSlot.upsert({
+    where: { id: 'seed_svs_1' },
+    update: { id: 'seed_svs_1', scheduleVersionId: 'seed_sv_1', ministryId: ctx.ministries.seed_ministry_recep_o_central, responsibilityId: ctx.responsibilities.seed_resp_4, assignedServantId: ctx.servants.seed_servant_ana, status: 'CONFIRMED', position: 1 },
+    create: { id: 'seed_svs_1', scheduleVersionId: 'seed_sv_1', ministryId: ctx.ministries.seed_ministry_recep_o_central, responsibilityId: ctx.responsibilities.seed_resp_4, assignedServantId: ctx.servants.seed_servant_ana, status: 'CONFIRMED', position: 1 },
+  });
+  await prisma.scheduleResponseHistory.upsert({
+    where: { id: 'seed_srh_1' },
+    update: { id: 'seed_srh_1', scheduleId: 'seed_schedule_1', responseStatus: 'CONFIRMED', declineReason: null, respondedByUserId: ctx.users.seed_user_servo_ana, respondedAt: days(-1) },
+    create: { id: 'seed_srh_1', scheduleId: 'seed_schedule_1', responseStatus: 'CONFIRMED', declineReason: null, respondedByUserId: ctx.users.seed_user_servo_ana, respondedAt: days(-1) },
+  });
+  await prisma.servantAvailability.upsert({
+    where: { servantId_dayOfWeek_shift: { servantId: ctx.servants.seed_servant_ana, dayOfWeek: 0, shift: 'MORNING' } },
+    update: { id: 'seed_sa_1', servantId: ctx.servants.seed_servant_ana, dayOfWeek: 0, shift: 'MORNING', available: true, notes: 'Seed' },
+    create: { id: 'seed_sa_1', servantId: ctx.servants.seed_servant_ana, dayOfWeek: 0, shift: 'MORNING', available: true, notes: 'Seed' },
+  });
+  await prisma.scheduleSwapHistory.upsert({
+    where: { id: 'seed_sshist_1' },
+    update: { id: 'seed_sshist_1', fromScheduleId: 'seed_schedule_1', toScheduleId: 'seed_schedule_1', reason: 'Seed', swappedByUserId: ctx.users.seed_user_admin_central, createdAt: days(-1) },
+    create: { id: 'seed_sshist_1', fromScheduleId: 'seed_schedule_1', toScheduleId: 'seed_schedule_1', reason: 'Seed', swappedByUserId: ctx.users.seed_user_admin_central, createdAt: days(-1) },
+  });
+  await prisma.scheduleSlotChange.upsert({
+    where: { id: 'seed_ssc_1' },
+    update: { id: 'seed_ssc_1', slotId: 'seed_slot_1', changeType: 'STATUS_UPDATE', fromServantId: ctx.servants.seed_servant_ana, toServantId: ctx.servants.seed_servant_ana, reason: 'Seed', metadata: { seed: true }, performedByUserId: ctx.users.seed_user_admin_central, createdAt: days(-1) },
+    create: { id: 'seed_ssc_1', slotId: 'seed_slot_1', changeType: 'STATUS_UPDATE', fromServantId: ctx.servants.seed_servant_ana, toServantId: ctx.servants.seed_servant_ana, reason: 'Seed', metadata: { seed: true }, performedByUserId: ctx.users.seed_user_admin_central, createdAt: days(-1) },
+  });
+
+  await prisma.attendance.upsert({
+    where: { serviceId_servantId: { serviceId: 'seed_service_past', servantId: ctx.servants.seed_servant_ana } },
+    update: { id: 'seed_att_1', serviceId: 'seed_service_past', servantId: ctx.servants.seed_servant_ana, churchId: ctx.churches.seed_church_central, status: 'PRESENTE', justification: null, notes: 'Seed', registeredByUserId: ctx.users.seed_user_admin_central, deletedAt: null, deletedBy: null },
+    create: { id: 'seed_att_1', serviceId: 'seed_service_past', servantId: ctx.servants.seed_servant_ana, churchId: ctx.churches.seed_church_central, status: 'PRESENTE', justification: null, notes: 'Seed', registeredByUserId: ctx.users.seed_user_admin_central },
+  });
+  await prisma.pastoralVisit.upsert({
+    where: { id: 'seed_pv_1' },
+    update: { id: 'seed_pv_1', servantId: ctx.servants.seed_servant_lucas, churchId: ctx.churches.seed_church_central, title: 'Acompanhamento', reason: 'Ausencias', reasonType: 'ABSENCE', priority: 'HIGH', assignedToUserId: ctx.users.seed_user_pastor_central, status: 'EM_ANDAMENTO', openedAt: days(-10), nextFollowUpAt: days(2), resolvedAt: null, notes: 'Seed', createdByUserId: ctx.users.seed_user_admin_central, resolvedByUserId: null, deletedAt: null, deletedBy: null },
+    create: { id: 'seed_pv_1', servantId: ctx.servants.seed_servant_lucas, churchId: ctx.churches.seed_church_central, title: 'Acompanhamento', reason: 'Ausencias', reasonType: 'ABSENCE', priority: 'HIGH', assignedToUserId: ctx.users.seed_user_pastor_central, status: 'EM_ANDAMENTO', openedAt: days(-10), nextFollowUpAt: days(2), resolvedAt: null, notes: 'Seed', createdByUserId: ctx.users.seed_user_admin_central, resolvedByUserId: null },
+  });
+  await prisma.pastoralNote.upsert({
+    where: { id: 'seed_pn_1' },
+    update: { id: 'seed_pn_1', pastoralVisitId: 'seed_pv_1', churchId: ctx.churches.seed_church_central, authorUserId: ctx.users.seed_user_pastor_central, visibility: 'LEADERS_ONLY', note: 'Seed note', deletedAt: null, deletedBy: null },
+    create: { id: 'seed_pn_1', pastoralVisitId: 'seed_pv_1', churchId: ctx.churches.seed_church_central, authorUserId: ctx.users.seed_user_pastor_central, visibility: 'LEADERS_ONLY', note: 'Seed note' },
+  });
+  await prisma.pastoralFollowUp.upsert({
+    where: { id: 'seed_pf_1' },
+    update: { id: 'seed_pf_1', pastoralVisitId: 'seed_pv_1', churchId: ctx.churches.seed_church_central, scheduledAt: days(2), completedAt: null, status: 'OPEN', notes: 'Seed', createdByUserId: ctx.users.seed_user_pastor_central, completedByUserId: null, deletedAt: null, deletedBy: null },
+    create: { id: 'seed_pf_1', pastoralVisitId: 'seed_pv_1', churchId: ctx.churches.seed_church_central, scheduledAt: days(2), completedAt: null, status: 'OPEN', notes: 'Seed', createdByUserId: ctx.users.seed_user_pastor_central, completedByUserId: null },
+  });
+  await prisma.pastoralWeeklyFollowUp.upsert({
+    where: { id: 'seed_pwf_1' },
+    update: { id: 'seed_pwf_1', servantId: ctx.servants.seed_servant_lucas, ministryId: ctx.ministries.seed_ministry_m_dia_central, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_1', weekStartDate: days(-7), contactedAt: days(-6), notes: 'Seed', responsibleUserId: ctx.users.seed_user_pastor_central, deletedAt: null, deletedBy: null },
+    create: { id: 'seed_pwf_1', servantId: ctx.servants.seed_servant_lucas, ministryId: ctx.ministries.seed_ministry_m_dia_central, churchId: ctx.churches.seed_church_central, scheduleId: 'seed_schedule_1', weekStartDate: days(-7), contactedAt: days(-6), notes: 'Seed', responsibleUserId: ctx.users.seed_user_pastor_central },
+  });
+  await prisma.pastoralAlert.upsert({
+    where: { id: 'seed_pa_1' },
+    update: { id: 'seed_pa_1', servantId: ctx.servants.seed_servant_lucas, churchId: ctx.churches.seed_church_central, alertType: 'GENERIC', severity: 'HIGH', source: 'ATTENDANCE', sourceRefId: null, dedupeKey: 'seed_pa_1', message: 'Seed pastoral alert', metadata: { seed: true }, status: 'OPEN', trigger: 'seed', createdAt: days(-2), resolvedAt: null, createdByUserId: ctx.users.seed_user_admin_central, resolvedByUserId: null, deletedAt: null, deletedBy: null },
+    create: { id: 'seed_pa_1', servantId: ctx.servants.seed_servant_lucas, churchId: ctx.churches.seed_church_central, alertType: 'GENERIC', severity: 'HIGH', source: 'ATTENDANCE', sourceRefId: null, dedupeKey: 'seed_pa_1', message: 'Seed pastoral alert', metadata: { seed: true }, status: 'OPEN', trigger: 'seed', createdAt: days(-2), resolvedAt: null, createdByUserId: ctx.users.seed_user_admin_central, resolvedByUserId: null },
+  });
+
+  add('coverageExtras', 18);
+}
+
+async function seedAdvancedModules() {
+  await prisma.ministryTaskTemplate.upsert({
+    where: { id: 'seed_mtt_1' },
+    update: { id: 'seed_mtt_1', churchId: ctx.churches.seed_church_central, ministryId: ctx.ministries.seed_ministry_produ_o_central, name: 'Checklist palco', description: 'Seed', recurrenceType: 'EVERY_SERVICE', recurrenceConfig: { seed: true }, linkedToServiceType: 'DOMINGO', active: true, assigneeMode: 'REQUIRED', reallocationMode: 'MANUAL', maxAssignmentsPerServantPerMonth: 6, createdBy: ctx.users.seed_user_admin_central, deletedAt: null, deletedBy: null },
+    create: { id: 'seed_mtt_1', churchId: ctx.churches.seed_church_central, ministryId: ctx.ministries.seed_ministry_produ_o_central, name: 'Checklist palco', description: 'Seed', recurrenceType: 'EVERY_SERVICE', recurrenceConfig: { seed: true }, linkedToServiceType: 'DOMINGO', active: true, assigneeMode: 'REQUIRED', reallocationMode: 'MANUAL', maxAssignmentsPerServantPerMonth: 6, createdBy: ctx.users.seed_user_admin_central },
+  });
+  await prisma.ministryTaskTemplateChecklistItem.upsert({
+    where: { id: 'seed_mttci_1' },
+    update: { id: 'seed_mttci_1', templateId: 'seed_mtt_1', label: 'Conferir cabos', description: 'Seed', position: 1, required: true },
+    create: { id: 'seed_mttci_1', templateId: 'seed_mtt_1', label: 'Conferir cabos', description: 'Seed', position: 1, required: true },
+  });
+  await prisma.ministryTaskOccurrence.upsert({
+    where: { id: 'seed_mto_1' },
+    update: { id: 'seed_mto_1', churchId: ctx.churches.seed_church_central, templateId: 'seed_mtt_1', ministryId: ctx.ministries.seed_ministry_produ_o_central, serviceId: 'seed_service_next', scheduledFor: days(3), assignedServantId: ctx.servants.seed_servant_ana, originAssignedServantId: ctx.servants.seed_servant_ana, status: 'ASSIGNED', reallocationMode: 'MANUAL', reallocationStatus: 'NONE', lastReassignedAt: null, lastReassignedBy: null, dueAt: days(3), startedAt: null, slaMinutes: 60, priority: 'HIGH', criticality: 'HIGH', lastProgressAt: days(-1), progressPercent: 25, completedAt: null, completedBy: null, notes: 'Seed', deletedAt: null, deletedBy: null },
+    create: { id: 'seed_mto_1', churchId: ctx.churches.seed_church_central, templateId: 'seed_mtt_1', ministryId: ctx.ministries.seed_ministry_produ_o_central, serviceId: 'seed_service_next', scheduledFor: days(3), assignedServantId: ctx.servants.seed_servant_ana, originAssignedServantId: ctx.servants.seed_servant_ana, status: 'ASSIGNED', reallocationMode: 'MANUAL', reallocationStatus: 'NONE', lastReassignedAt: null, lastReassignedBy: null, dueAt: days(3), startedAt: null, slaMinutes: 60, priority: 'HIGH', criticality: 'HIGH', lastProgressAt: days(-1), progressPercent: 25, completedAt: null, completedBy: null, notes: 'Seed' },
+  });
+  await prisma.ministryTaskOccurrenceChecklistItem.upsert({
+    where: { id: 'seed_mtoci_1' },
+    update: { id: 'seed_mtoci_1', occurrenceId: 'seed_mto_1', templateChecklistItemId: 'seed_mttci_1', label: 'Conferir cabos', description: null, position: 1, required: true, status: 'PENDING', checkedAt: null, checkedBy: null, notes: null },
+    create: { id: 'seed_mtoci_1', occurrenceId: 'seed_mto_1', templateChecklistItemId: 'seed_mttci_1', label: 'Conferir cabos', description: null, position: 1, required: true, status: 'PENDING', checkedAt: null, checkedBy: null, notes: null },
+  });
+  await prisma.ministryTaskOccurrenceAssignee.upsert({
+    where: { occurrenceId_servantId_role: { occurrenceId: 'seed_mto_1', servantId: ctx.servants.seed_servant_ana, role: 'PRIMARY' } },
+    update: { id: 'seed_mtoa_1', occurrenceId: 'seed_mto_1', servantId: ctx.servants.seed_servant_ana, role: 'PRIMARY', active: true, createdBy: ctx.users.seed_user_admin_central, removedAt: null, removedBy: null },
+    create: { id: 'seed_mtoa_1', occurrenceId: 'seed_mto_1', servantId: ctx.servants.seed_servant_ana, role: 'PRIMARY', active: true, createdBy: ctx.users.seed_user_admin_central, removedAt: null, removedBy: null },
+  });
+  await prisma.ministryTaskOccurrenceAssignmentHistory.upsert({
+    where: { id: 'seed_mtoh_1' },
+    update: { id: 'seed_mtoh_1', occurrenceId: 'seed_mto_1', fromServantId: null, toServantId: ctx.servants.seed_servant_ana, changedBy: ctx.users.seed_user_admin_central, changeType: 'ASSIGN', preserveProgress: true, reason: 'Seed', metadata: { seed: true }, createdAt: days(-1) },
+    create: { id: 'seed_mtoh_1', occurrenceId: 'seed_mto_1', fromServantId: null, toServantId: ctx.servants.seed_servant_ana, changedBy: ctx.users.seed_user_admin_central, changeType: 'ASSIGN', preserveProgress: true, reason: 'Seed', metadata: { seed: true }, createdAt: days(-1) },
+  });
+
+  await prisma.servantJourney.upsert({
+    where: { servantId: ctx.servants.seed_servant_ana },
+    update: { id: 'seed_sj_1', servantId: ctx.servants.seed_servant_ana, churchId: ctx.churches.seed_church_central, startedAt: months(-12), totalServices: 20, totalTasksCompleted: 8, totalTrainingsCompleted: 2, totalEventsServed: 3, monthsServing: 12, lastActivityAt: days(-1) },
+    create: { id: 'seed_sj_1', servantId: ctx.servants.seed_servant_ana, churchId: ctx.churches.seed_church_central, startedAt: months(-12), totalServices: 20, totalTasksCompleted: 8, totalTrainingsCompleted: 2, totalEventsServed: 3, monthsServing: 12, lastActivityAt: days(-1) },
+  });
+  await prisma.journeyMilestone.upsert({
+    where: { code: 'SEED_MS_1' },
+    update: { id: 'seed_jm_1', churchId: ctx.churches.seed_church_central, code: 'SEED_MS_1', name: 'Primeiro culto', description: 'Seed', icon: 'star', category: 'SERVICO' },
+    create: { id: 'seed_jm_1', churchId: ctx.churches.seed_church_central, code: 'SEED_MS_1', name: 'Primeiro culto', description: 'Seed', icon: 'star', category: 'SERVICO' },
+  });
+  await prisma.servantMilestone.upsert({
+    where: { servantId_milestoneId: { servantId: ctx.servants.seed_servant_ana, milestoneId: 'seed_jm_1' } },
+    update: { id: 'seed_sm_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, milestoneId: 'seed_jm_1', achievedAt: months(-10) },
+    create: { id: 'seed_sm_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, milestoneId: 'seed_jm_1', achievedAt: months(-10) },
+  });
+  await prisma.journeyLog.upsert({
+    where: { id: 'seed_jl_1' },
+    update: { id: 'seed_jl_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, type: 'SERVICE', title: 'Servico concluido', description: 'Seed', referenceId: 'seed_service_past', occurredAt: days(-14) },
+    create: { id: 'seed_jl_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, type: 'SERVICE', title: 'Servico concluido', description: 'Seed', referenceId: 'seed_service_past', occurredAt: days(-14) },
+  });
+  await prisma.journeyIndicatorSnapshot.upsert({
+    where: { servantId_windowDays: { servantId: ctx.servants.seed_servant_ana, windowDays: 30 } },
+    update: { id: 'seed_jis_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, windowDays: 30, constancyScore: 80, readinessScore: 80, responsivenessScore: 80, punctualityScore: 80, engagementScore: 80, continuityScore: 80, formationScore: 80 },
+    create: { id: 'seed_jis_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, windowDays: 30, constancyScore: 80, readinessScore: 80, responsivenessScore: 80, punctualityScore: 80, engagementScore: 80, continuityScore: 80, formationScore: 80 },
+  });
+  await prisma.journeyNextStep.upsert({
+    where: { id: 'seed_jns_1' },
+    update: { id: 'seed_jns_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_lucas, type: 'RETURN', priority: 'HIGH', title: 'Plano de retorno', description: 'Seed', status: 'OPEN', source: 'seed', metadata: { seed: true }, resolvedAt: null },
+    create: { id: 'seed_jns_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_lucas, type: 'RETURN', priority: 'HIGH', title: 'Plano de retorno', description: 'Seed', status: 'OPEN', source: 'seed', metadata: { seed: true }, resolvedAt: null },
+  });
+  await prisma.journeyProjectionCheckpoint.upsert({
+    where: { id: 'seed_jpc_1' },
+    update: { id: 'seed_jpc_1', churchId: ctx.churches.seed_church_central, servantId: null, projectorName: 'seed-projector', lastProcessedAt: days(-1), lastProcessedEventKey: 'seed:1', lastReconciledAt: days(-1), status: 'OK', details: { seed: true } },
+    create: { id: 'seed_jpc_1', churchId: ctx.churches.seed_church_central, servantId: null, projectorName: 'seed-projector', lastProcessedAt: days(-1), lastProcessedEventKey: 'seed:1', lastReconciledAt: days(-1), status: 'OK', details: { seed: true } },
+  });
+
+  await prisma.growthTrack.upsert({
+    where: { id: 'seed_gt_1' },
+    update: { id: 'seed_gt_1', churchId: ctx.churches.seed_church_central, ministryId: null, name: 'Base de servico', description: 'Seed', active: true, createdBy: ctx.users.seed_user_admin_central },
+    create: { id: 'seed_gt_1', churchId: ctx.churches.seed_church_central, ministryId: null, name: 'Base de servico', description: 'Seed', active: true, createdBy: ctx.users.seed_user_admin_central },
+  });
+  await prisma.growthTrackStep.upsert({
+    where: { growthTrackId_stepOrder: { growthTrackId: 'seed_gt_1', stepOrder: 1 } },
+    update: { id: 'seed_gts_1', growthTrackId: 'seed_gt_1', title: 'Integracao', description: 'Seed', stepOrder: 1, criteria: { seed: true }, manualReview: false, createdBy: ctx.users.seed_user_admin_central },
+    create: { id: 'seed_gts_1', growthTrackId: 'seed_gt_1', title: 'Integracao', description: 'Seed', stepOrder: 1, criteria: { seed: true }, manualReview: false, createdBy: ctx.users.seed_user_admin_central },
+  });
+  await prisma.servantGrowthProgress.upsert({
+    where: { servantId_stepId: { servantId: ctx.servants.seed_servant_ana, stepId: 'seed_gts_1' } },
+    update: { id: 'seed_sgp_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, growthTrackId: 'seed_gt_1', stepId: 'seed_gts_1', completed: true, completedAt: months(-5), progressValue: 100, notes: 'Seed', verifiedBy: ctx.users.seed_user_admin_central },
+    create: { id: 'seed_sgp_1', churchId: ctx.churches.seed_church_central, servantId: ctx.servants.seed_servant_ana, growthTrackId: 'seed_gt_1', stepId: 'seed_gts_1', completed: true, completedAt: months(-5), progressValue: 100, notes: 'Seed', verifiedBy: ctx.users.seed_user_admin_central },
+  });
+
+  await prisma.notificationTemplate.upsert({
+    where: { eventKey_channel: { eventKey: 'TASK_OVERDUE', channel: 'IN_APP' } },
+    update: { id: 'seed_nt_2', eventKey: 'TASK_OVERDUE', channel: 'IN_APP', provider: 'MOCK', name: 'Tarefa atrasada', content: 'Seed', variables: ['task'], status: 'ACTIVE' },
+    create: { id: 'seed_nt_2', eventKey: 'TASK_OVERDUE', channel: 'IN_APP', provider: 'MOCK', name: 'Tarefa atrasada', content: 'Seed', variables: ['task'], status: 'ACTIVE' },
+  });
+  await prisma.notificationQueue.upsert({
+    where: { id: 'seed_nq_2' },
+    update: { id: 'seed_nq_2', eventKey: 'TASK_OVERDUE', channel: 'IN_APP', provider: 'MOCK', status: 'SENT', userId: ctx.users.seed_user_admin_central, servantId: null, recipientPhone: '+550000', recipientName: 'Admin', templateId: 'seed_nt_2', payload: { seed: true }, renderedMessage: 'Seed', attemptCount: 1, maxAttempts: 3, nextRetryAt: days(1), lockedAt: null, processedAt: days(-1), providerMessageId: 'seed-msg', lastError: null },
+    create: { id: 'seed_nq_2', eventKey: 'TASK_OVERDUE', channel: 'IN_APP', provider: 'MOCK', status: 'SENT', userId: ctx.users.seed_user_admin_central, servantId: null, recipientPhone: '+550000', recipientName: 'Admin', templateId: 'seed_nt_2', payload: { seed: true }, renderedMessage: 'Seed', attemptCount: 1, maxAttempts: 3, nextRetryAt: days(1), lockedAt: null, processedAt: days(-1), providerMessageId: 'seed-msg', lastError: null },
+  });
+  await prisma.notificationLog.upsert({
+    where: { id: 'seed_nl_2' },
+    update: { id: 'seed_nl_2', queueId: 'seed_nq_2', eventKey: 'TASK_OVERDUE', channel: 'IN_APP', provider: 'MOCK', status: 'SUCCESS', userId: ctx.users.seed_user_admin_central, servantId: null, recipientPhone: '+550000', templateId: 'seed_nt_2', payload: { seed: true }, providerMessageId: 'seed-msg', error: null, attempt: 1, sentAt: days(-1) },
+    create: { id: 'seed_nl_2', queueId: 'seed_nq_2', eventKey: 'TASK_OVERDUE', channel: 'IN_APP', provider: 'MOCK', status: 'SUCCESS', userId: ctx.users.seed_user_admin_central, servantId: null, recipientPhone: '+550000', templateId: 'seed_nt_2', payload: { seed: true }, providerMessageId: 'seed-msg', error: null, attempt: 1, sentAt: days(-1) },
+  });
+
+  await prisma.automationRule.upsert({
+    where: { id: 'seed_ar_2' },
+    update: { id: 'seed_ar_2', churchId: ctx.churches.seed_church_central, name: 'Seed unconfirmed', description: 'Seed', triggerType: 'THRESHOLD', triggerKey: '48h', triggerConfig: { seed: true }, conditionConfig: { seed: true }, actionType: 'SCHEDULE_ALERT_UNCONFIRMED', actionConfig: { seed: true }, cooldownMinutes: 120, dedupeStrategy: 'BY_ENTITY_WINDOW', severity: 'MEDIUM', enabled: true, createdBy: ctx.users.seed_user_admin_central, updatedBy: ctx.users.seed_user_admin_central, lastRunAt: days(-1), deletedAt: null },
+    create: { id: 'seed_ar_2', churchId: ctx.churches.seed_church_central, name: 'Seed unconfirmed', description: 'Seed', triggerType: 'THRESHOLD', triggerKey: '48h', triggerConfig: { seed: true }, conditionConfig: { seed: true }, actionType: 'SCHEDULE_ALERT_UNCONFIRMED', actionConfig: { seed: true }, cooldownMinutes: 120, dedupeStrategy: 'BY_ENTITY_WINDOW', severity: 'MEDIUM', enabled: true, createdBy: ctx.users.seed_user_admin_central, updatedBy: ctx.users.seed_user_admin_central, lastRunAt: days(-1), deletedAt: null },
+  });
+  await prisma.automationExecutionLog.upsert({
+    where: { churchId_dedupeKey: { churchId: ctx.churches.seed_church_central, dedupeKey: 'seed_exec_2' } },
+    update: { id: 'seed_ael_2', churchId: ctx.churches.seed_church_central, ruleId: 'seed_ar_2', triggerType: 'THRESHOLD', triggerKey: '48h', sourceModule: 'SCHEDULE', sourceRefId: 'seed_slot_1', dedupeKey: 'seed_exec_2', status: 'PARTIAL_SUCCESS', skipReason: null, summary: 'Seed partial', details: { success: 1, failed: 1 }, durationMs: 200, executedAt: days(-1), message: 'partial', processed: 2, metadata: { seed: true } },
+    create: { id: 'seed_ael_2', churchId: ctx.churches.seed_church_central, ruleId: 'seed_ar_2', triggerType: 'THRESHOLD', triggerKey: '48h', sourceModule: 'SCHEDULE', sourceRefId: 'seed_slot_1', dedupeKey: 'seed_exec_2', status: 'PARTIAL_SUCCESS', skipReason: null, summary: 'Seed partial', details: { success: 1, failed: 1 }, durationMs: 200, executedAt: days(-1), message: 'partial', processed: 2, metadata: { seed: true } },
+  });
+  await prisma.automationCheckpoint.upsert({
+    where: { churchId_schedulerName: { churchId: ctx.churches.seed_church_central, schedulerName: 'seed-hourly' } },
+    update: { id: 'seed_ac_2', churchId: ctx.churches.seed_church_central, schedulerName: 'seed-hourly', lastProcessedAt: days(-1), lastProcessedCursor: 'seed2', status: 'WARNING', details: { seed: true } },
+    create: { id: 'seed_ac_2', churchId: ctx.churches.seed_church_central, schedulerName: 'seed-hourly', lastProcessedAt: days(-1), lastProcessedCursor: 'seed2', status: 'WARNING', details: { seed: true } },
+  });
+
+  const p0 = monthStart();
+  const p1 = new Date(Date.UTC(p0.getUTCFullYear(), p0.getUTCMonth() + 1, 0, 23, 59, 59));
+  await prisma.churchAnalyticsSnapshot.upsert({
+    where: { churchId_windowKey_periodStart_periodEnd: { churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1 } },
+    update: { id: 'seed_cas_2', churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1, summary: { seed: true }, generatedAt: days(-1) },
+    create: { id: 'seed_cas_2', churchId: ctx.churches.seed_church_zs, windowKey: 'MONTH', periodStart: p0, periodEnd: p1, summary: { seed: true }, generatedAt: days(-1) },
+  });
+  await prisma.timelineEntry.upsert({
+    where: { id: 'seed_tl_2' },
+    update: { id: 'seed_tl_2', churchId: ctx.churches.seed_church_central, ministryId: ctx.ministries.seed_ministry_produ_o_central, servantId: ctx.servants.seed_servant_ana, actorUserId: null, actorType: 'AUTOMATION', actorName: 'Seed Automation', scope: 'MINISTRY', type: 'AUTOMATION_TRIGGERED', category: 'AUTOMATION', eventType: 'SEED_AUTO_EVT', severity: 'WARNING', title: 'Automacao disparada', message: 'Seed', description: 'Seed', link: '/automation', subjectType: 'AutomationExecutionLog', subjectId: 'seed_ael_2', relatedEntityType: 'AutomationRule', relatedEntityId: 'seed_ar_2', dedupeKey: 'seed_tl_2', metadata: { seed: true }, occurredAt: days(-1) },
+    create: { id: 'seed_tl_2', churchId: ctx.churches.seed_church_central, ministryId: ctx.ministries.seed_ministry_produ_o_central, servantId: ctx.servants.seed_servant_ana, actorUserId: null, actorType: 'AUTOMATION', actorName: 'Seed Automation', scope: 'MINISTRY', type: 'AUTOMATION_TRIGGERED', category: 'AUTOMATION', eventType: 'SEED_AUTO_EVT', severity: 'WARNING', title: 'Automacao disparada', message: 'Seed', description: 'Seed', link: '/automation', subjectType: 'AutomationExecutionLog', subjectId: 'seed_ael_2', relatedEntityType: 'AutomationRule', relatedEntityId: 'seed_ar_2', dedupeKey: 'seed_tl_2', metadata: { seed: true }, occurredAt: days(-1) },
+  });
+  await prisma.supportRequest.upsert({
+    where: { id: 'seed_sr_2' },
+    update: { id: 'seed_sr_2', type: 'DADOS', subject: 'Seed dashboard', description: 'Inconsistencia seed', reference: 'SR-2', status: 'EM_ANALISE', authorUserId: ctx.users.seed_user_admin_zs, handledByUserId: ctx.users.seed_user_super_admin, handledAt: null },
+    create: { id: 'seed_sr_2', type: 'DADOS', subject: 'Seed dashboard', description: 'Inconsistencia seed', reference: 'SR-2', status: 'EM_ANALISE', authorUserId: ctx.users.seed_user_admin_zs, handledByUserId: ctx.users.seed_user_super_admin, handledAt: null },
+  });
+  await prisma.userMinistryBinding.upsert({
+    where: { userId_ministryId_teamId: { userId: ctx.users.seed_user_coord_midia, ministryId: ctx.ministries.seed_ministry_m_dia_central, teamId: ctx.teams.seed_team_midia_proj } },
+    update: { id: 'seed_umb_2', userId: ctx.users.seed_user_coord_midia, ministryId: ctx.ministries.seed_ministry_m_dia_central, teamId: ctx.teams.seed_team_midia_proj },
+    create: { id: 'seed_umb_2', userId: ctx.users.seed_user_coord_midia, ministryId: ctx.ministries.seed_ministry_m_dia_central, teamId: ctx.teams.seed_team_midia_proj },
+  });
+  await prisma.userPermissionOverride.upsert({
+    where: { userId_permissionKey: { userId: ctx.users.seed_user_servo_lucas, permissionKey: 'schedule.respond' } },
+    update: { id: 'seed_upo_2', userId: ctx.users.seed_user_servo_lucas, permissionKey: 'schedule.respond', effect: 'DENY', reason: 'Conta inativa' },
+    create: { id: 'seed_upo_2', userId: ctx.users.seed_user_servo_lucas, permissionKey: 'schedule.respond', effect: 'DENY', reason: 'Conta inativa' },
+  });
+  await prisma.auditLog.upsert({
+    where: { id: 'seed_audit_2' },
+    update: { id: 'seed_audit_2', churchId: ctx.churches.seed_church_central, action: 'MINISTRY_TASK_ASSIGNED', entity: 'MinistryTaskOccurrence', entityId: 'seed_mto_1', before: Prisma.JsonNull, after: { assignedServantId: ctx.servants.seed_servant_ana }, metadata: { seed: true }, userId: ctx.users.seed_user_admin_central, createdAt: days(-1) },
+    create: { id: 'seed_audit_2', churchId: ctx.churches.seed_church_central, action: 'MINISTRY_TASK_ASSIGNED', entity: 'MinistryTaskOccurrence', entityId: 'seed_mto_1', before: Prisma.JsonNull, after: { assignedServantId: ctx.servants.seed_servant_ana }, metadata: { seed: true }, userId: ctx.users.seed_user_admin_central, createdAt: days(-1) },
+  });
+
+  add('advancedModules', 28);
+}
+
+async function seedRemainingCoverage() {
+  const devotionalDate = days(-2);
+  const fastingReferenceMonth = monthStart();
+  const servantStatsMonth = monthStart();
+
+  await prisma.servantMinistry.upsert({
+    where: { servantId_ministryId: { servantId: ctx.servants.seed_servant_ana, ministryId: ctx.ministries.seed_ministry_recep_o_central } },
+    update: {
+      id: 'seed_smx_1',
+      servantId: ctx.servants.seed_servant_ana,
+      ministryId: ctx.ministries.seed_ministry_recep_o_central,
+      trainingStatus: 'COMPLETED',
+      trainingCompletedAt: months(-6),
+      trainingReviewedByUserId: ctx.users.seed_user_coord_louvor,
+      trainingNotes: 'Seed training completed',
+      createdAt: months(-7),
+    },
+    create: {
+      id: 'seed_smx_1',
+      servantId: ctx.servants.seed_servant_ana,
+      ministryId: ctx.ministries.seed_ministry_recep_o_central,
+      trainingStatus: 'COMPLETED',
+      trainingCompletedAt: months(-6),
+      trainingReviewedByUserId: ctx.users.seed_user_coord_louvor,
+      trainingNotes: 'Seed training completed',
+      createdAt: months(-7),
+    },
+  });
+
+  await prisma.dailyDevotional.upsert({
+    where: { id: 'seed_dd_1' },
+    update: {
+      id: 'seed_dd_1',
+      servantId: ctx.servants.seed_servant_ana,
+      devotionalDate,
+      status: 'DONE',
+      notes: 'Seed devotional',
+      registeredByUserId: ctx.users.seed_user_admin_central,
+    },
+    create: {
+      id: 'seed_dd_1',
+      servantId: ctx.servants.seed_servant_ana,
+      devotionalDate,
+      status: 'DONE',
+      notes: 'Seed devotional',
+      registeredByUserId: ctx.users.seed_user_admin_central,
+    },
+  });
+
+  await prisma.monthlyFasting.upsert({
+    where: { id: 'seed_mf_1' },
+    update: {
+      id: 'seed_mf_1',
+      servantId: ctx.servants.seed_servant_ana,
+      referenceMonth: fastingReferenceMonth,
+      status: 'COMPLETED',
+      completedAt: days(-3),
+      notes: 'Seed fasting',
+      registeredByUserId: ctx.users.seed_user_admin_central,
+    },
+    create: {
+      id: 'seed_mf_1',
+      servantId: ctx.servants.seed_servant_ana,
+      referenceMonth: fastingReferenceMonth,
+      status: 'COMPLETED',
+      completedAt: days(-3),
+      notes: 'Seed fasting',
+      registeredByUserId: ctx.users.seed_user_admin_central,
+    },
+  });
+
+  await prisma.talent.upsert({
+    where: { id: 'seed_talent_1' },
+    update: {
+      id: 'seed_talent_1',
+      servantId: ctx.servants.seed_servant_gabriela,
+      stage: 'EM_AVALIACAO',
+      reviewStatus: 'PENDING_ADMIN_REVIEW',
+      rejectionReason: null,
+      rejectedByUserId: null,
+      rejectedAt: null,
+      reviewedByUserId: null,
+      reviewedAt: null,
+      reviewNotes: 'Seed talent em avaliacao',
+      notes: 'Seed',
+      approvedAt: null,
+    },
+    create: {
+      id: 'seed_talent_1',
+      servantId: ctx.servants.seed_servant_gabriela,
+      stage: 'EM_AVALIACAO',
+      reviewStatus: 'PENDING_ADMIN_REVIEW',
+      rejectionReason: null,
+      rejectedByUserId: null,
+      rejectedAt: null,
+      reviewedByUserId: null,
+      reviewedAt: null,
+      reviewNotes: 'Seed talent em avaliacao',
+      notes: 'Seed',
+      approvedAt: null,
+    },
+  });
+
+  const periodStart = monthStart();
+  const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0, 23, 59, 59));
+
+  await prisma.ministryAnalyticsSnapshot.upsert({
+    where: {
+      churchId_ministryId_windowKey_periodStart_periodEnd: {
+        churchId: ctx.churches.seed_church_central,
+        ministryId: ctx.ministries.seed_ministry_recep_o_central,
+        windowKey: 'MONTH',
+        periodStart,
+        periodEnd,
+      },
+    },
+    update: {
+      id: 'seed_mas_1',
+      churchId: ctx.churches.seed_church_central,
+      ministryId: ctx.ministries.seed_ministry_recep_o_central,
+      windowKey: 'MONTH',
+      periodStart,
+      periodEnd,
+      summary: { assigned: 12, confirmed: 10 },
+      generatedAt: days(-1),
+    },
+    create: {
+      id: 'seed_mas_1',
+      churchId: ctx.churches.seed_church_central,
+      ministryId: ctx.ministries.seed_ministry_recep_o_central,
+      windowKey: 'MONTH',
+      periodStart,
+      periodEnd,
+      summary: { assigned: 12, confirmed: 10 },
+      generatedAt: days(-1),
+    },
+  });
+
+  await prisma.teamAnalyticsSnapshot.upsert({
+    where: {
+      churchId_teamId_windowKey_periodStart_periodEnd: {
+        churchId: ctx.churches.seed_church_central,
+        teamId: ctx.teams.seed_team_recep_entrada,
+        windowKey: 'MONTH',
+        periodStart,
+        periodEnd,
+      },
+    },
+    update: {
+      id: 'seed_tas_1',
+      churchId: ctx.churches.seed_church_central,
+      teamId: ctx.teams.seed_team_recep_entrada,
+      windowKey: 'MONTH',
+      periodStart,
+      periodEnd,
+      summary: { health: 'good' },
+      generatedAt: days(-1),
+    },
+    create: {
+      id: 'seed_tas_1',
+      churchId: ctx.churches.seed_church_central,
+      teamId: ctx.teams.seed_team_recep_entrada,
+      windowKey: 'MONTH',
+      periodStart,
+      periodEnd,
+      summary: { health: 'good' },
+      generatedAt: days(-1),
+    },
+  });
+
+  await prisma.servantOperationalSnapshot.upsert({
+    where: {
+      churchId_servantId_windowKey_periodStart_periodEnd: {
+        churchId: ctx.churches.seed_church_central,
+        servantId: ctx.servants.seed_servant_ana,
+        windowKey: 'MONTH',
+        periodStart,
+        periodEnd,
+      },
+    },
+    update: {
+      id: 'seed_sos_1',
+      churchId: ctx.churches.seed_church_central,
+      servantId: ctx.servants.seed_servant_ana,
+      windowKey: 'MONTH',
+      periodStart,
+      periodEnd,
+      summary: { presenceRate: 0.92, tasksDone: 8 },
+      generatedAt: days(-1),
+    },
+    create: {
+      id: 'seed_sos_1',
+      churchId: ctx.churches.seed_church_central,
+      servantId: ctx.servants.seed_servant_ana,
+      windowKey: 'MONTH',
+      periodStart,
+      periodEnd,
+      summary: { presenceRate: 0.92, tasksDone: 8 },
+      generatedAt: days(-1),
+    },
+  });
+
+  await prisma.servantMonthlyStats.upsert({
+    where: { id: 'seed_sms_1' },
+    update: {
+      id: 'seed_sms_1',
+      churchId: ctx.churches.seed_church_central,
+      ministryId: ctx.ministries.seed_ministry_recep_o_central,
+      servantId: ctx.servants.seed_servant_ana,
+      referenceMonth: servantStatsMonth,
+      attendanceConfirmed: 4,
+      absences: 0,
+      tasksCompleted: 3,
+      tasksOverdue: 0,
+      checklistPerfect: 2,
+      pointsEarned: 120,
+    },
+    create: {
+      id: 'seed_sms_1',
+      churchId: ctx.churches.seed_church_central,
+      ministryId: ctx.ministries.seed_ministry_recep_o_central,
+      servantId: ctx.servants.seed_servant_ana,
+      referenceMonth: servantStatsMonth,
+      attendanceConfirmed: 4,
+      absences: 0,
+      tasksCompleted: 3,
+      tasksOverdue: 0,
+      checklistPerfect: 2,
+      pointsEarned: 120,
+    },
+  });
+
+  await prisma.notification.upsert({
+    where: { id: 'seed_notif_1' },
+    update: {
+      id: 'seed_notif_1',
+      userId: ctx.users.seed_user_admin_central,
+      churchId: ctx.churches.seed_church_central,
+      type: 'TASK_DUE_SOON',
+      title: 'Tarefa vencendo',
+      message: 'Uma tarefa vence em breve.',
+      link: '/tasks/seed_mto_1',
+      metadata: { seed: true },
+      readAt: null,
+      createdAt: days(-1),
+    },
+    create: {
+      id: 'seed_notif_1',
+      userId: ctx.users.seed_user_admin_central,
+      churchId: ctx.churches.seed_church_central,
+      type: 'TASK_DUE_SOON',
+      title: 'Tarefa vencendo',
+      message: 'Uma tarefa vence em breve.',
+      link: '/tasks/seed_mto_1',
+      metadata: { seed: true },
+      readAt: null,
+      createdAt: days(-1),
+    },
+  });
+
+  await prisma.notificationPreference.upsert({
+    where: { userId_channel: { userId: ctx.users.seed_user_admin_central, channel: 'IN_APP' } },
+    update: {
+      id: 'seed_np_1',
+      userId: ctx.users.seed_user_admin_central,
+      servantId: null,
+      channel: 'IN_APP',
+      enabled: true,
+    },
+    create: {
+      id: 'seed_np_1',
+      userId: ctx.users.seed_user_admin_central,
+      servantId: null,
+      channel: 'IN_APP',
+      enabled: true,
+    },
+  });
+
+  await prisma.notificationSystemSetting.upsert({
+    where: { key: 'seed.notification.throttle' },
+    update: { id: 'seed_nss_1', key: 'seed.notification.throttle', value: { perMinute: 30, burst: 10 } },
+    create: { id: 'seed_nss_1', key: 'seed.notification.throttle', value: { perMinute: 30, burst: 10 } },
+  });
+
+  add('remainingCoverage', 11);
+}
+
+async function run() {
+  ctx.hash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  await seedPlans();
+  await seedChurches();
+  await seedUsers();
+  await seedPlansAndSubscriptions();
+  await seedMinistries();
+  await seedTeamsAndServants();
+  await seedServantUsers();
+  await seedCoreModules();
+  await seedCoverageExtras();
+  await seedAdvancedModules();
+  await seedRemainingCoverage();
+  console.log('\n=== Seed concluído ===');
+  console.log(`Versão: ${SEED_VERSION}`);
+  console.log(`Senha padrão: ${DEFAULT_PASSWORD}`);
+  for (const [k, v] of Object.entries(ctx.summary).sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`- ${k}: ${v}`);
+  }
+}
+
+run()
+  .catch((err) => {
+    console.error('Erro no seed:', err);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

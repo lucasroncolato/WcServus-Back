@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -13,7 +14,12 @@ import {
 } from '@prisma/client';
 import { AUTOMATION_ACTION_CATALOG } from 'src/common/automations/automation-action-catalog';
 import { AUTOMATION_CONDITION_CATALOG } from 'src/common/automations/automation-condition-catalog';
-import { normalizeActionKeys, normalizeConditionKeys, validateAutomationRuleShape } from 'src/common/automations/automation-policy';
+import {
+  normalizeActionKeys,
+  normalizeAutomationActionConfig,
+  normalizeConditionKeys,
+  validateAutomationRuleShape,
+} from 'src/common/automations/automation-policy';
 import { AUTOMATION_TRIGGER_CATALOG } from 'src/common/automations/automation-trigger-catalog';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -143,10 +149,12 @@ export class AutomationRulesService {
     this.assertWriteAccess(actor);
     const churchId = this.resolveChurchId(actor, dto.churchId);
 
-    validateAutomationRuleShape({
+    const normalizedActionConfig = this.normalizeActionConfigOrThrow(dto.actionConfig, dto.actionType);
+    this.validateRuleShapeOrThrow({
       triggerKey: dto.triggerKey,
       conditionConfig: dto.conditionConfig,
-      actionConfig: dto.actionConfig,
+      actionConfig: normalizedActionConfig,
+      actionType: dto.actionType,
       cooldownMinutes: dto.cooldownMinutes,
       dedupeStrategy: dto.dedupeStrategy,
     });
@@ -160,7 +168,7 @@ export class AutomationRulesService {
         triggerKey: dto.triggerKey,
         triggerConfig: dto.triggerConfig as Prisma.InputJsonValue | undefined,
         conditionConfig: dto.conditionConfig as Prisma.InputJsonValue | undefined,
-        actionConfig: dto.actionConfig as Prisma.InputJsonValue,
+        actionConfig: normalizedActionConfig as Prisma.InputJsonValue,
         actionType: this.resolveLegacyActionType(dto),
         cooldownMinutes: dto.cooldownMinutes ?? 0,
         dedupeStrategy: dto.dedupeStrategy ?? AutomationDedupeStrategy.BY_EVENT,
@@ -207,16 +215,21 @@ export class AutomationRulesService {
 
     const triggerKey = dto.triggerKey ?? existing.triggerKey;
     const conditionConfig = dto.conditionConfig ?? existing.conditionConfig;
-    const actionConfig = dto.actionConfig ?? (existing.actionConfig as unknown);
+    const actionConfigRaw = dto.actionConfig ?? (existing.actionConfig as unknown);
+    const normalizedActionConfig = this.normalizeActionConfigOrThrow(
+      actionConfigRaw,
+      dto.actionType ?? existing.actionType,
+    );
     const cooldownMinutes = dto.cooldownMinutes ?? existing.cooldownMinutes;
     const dedupeStrategy = dto.dedupeStrategy ?? existing.dedupeStrategy;
 
-    validateAutomationRuleShape({
+    this.validateRuleShapeOrThrow({
       triggerKey,
       conditionConfig,
-      actionConfig,
+      actionConfig: normalizedActionConfig,
       cooldownMinutes,
       dedupeStrategy,
+      actionType: dto.actionType ?? existing.actionType,
     });
 
     const data = await this.prisma.automationRule.update({
@@ -228,7 +241,7 @@ export class AutomationRulesService {
         triggerKey: dto.triggerKey,
         triggerConfig: dto.triggerConfig as Prisma.InputJsonValue | undefined,
         conditionConfig: dto.conditionConfig as Prisma.InputJsonValue | undefined,
-        actionConfig: dto.actionConfig as Prisma.InputJsonValue | undefined,
+        actionConfig: normalizedActionConfig as Prisma.InputJsonValue,
         actionType: dto.actionType ?? this.resolveLegacyActionType(dto, existing.actionType),
         cooldownMinutes: dto.cooldownMinutes,
         dedupeStrategy: dto.dedupeStrategy,
@@ -325,7 +338,13 @@ export class AutomationRulesService {
       throw new NotFoundException('Automation rule not found');
     }
 
-    return this.engine.runRuleTest(rule, {
+    const normalizedActionConfig = this.normalizeActionConfigOrThrow(rule.actionConfig, rule.actionType);
+    const validatedRule = {
+      ...rule,
+      actionConfig: normalizedActionConfig as Prisma.JsonValue,
+    };
+
+    return this.engine.runRuleTest(validatedRule, {
       churchId: rule.churchId,
       payload: dto.payload ?? {},
       sourceRefId: dto.sourceRefId,
@@ -472,6 +491,43 @@ export class AutomationRulesService {
         return AutomationActionType.TASK_NOTIFY_COORDINATOR_OVERDUE;
       default:
         return fallback ?? AutomationActionType.JOURNEY_REGISTER_EVENT;
+    }
+  }
+
+  private normalizeActionConfigOrThrow(
+    actionConfig: unknown,
+    actionType?: AutomationActionType | null,
+  ) {
+    const normalizedActionConfig = normalizeAutomationActionConfig(actionConfig, actionType);
+    if (!Array.isArray(normalizedActionConfig) || normalizedActionConfig.length === 0) {
+      throw new BadRequestException('At least one action is required');
+    }
+    try {
+      validateAutomationRuleShape({
+        triggerKey: 'daily',
+        actionConfig: normalizedActionConfig,
+        actionType: actionType ?? null,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid automation action configuration',
+      );
+    }
+    return normalizedActionConfig;
+  }
+
+  private validateRuleShapeOrThrow(input: {
+    triggerKey: string;
+    conditionConfig?: unknown;
+    actionConfig?: unknown;
+    actionType?: AutomationActionType | null;
+    cooldownMinutes?: number;
+    dedupeStrategy?: AutomationDedupeStrategy;
+  }) {
+    try {
+      validateAutomationRuleShape(input);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Invalid automation rule shape');
     }
   }
 }

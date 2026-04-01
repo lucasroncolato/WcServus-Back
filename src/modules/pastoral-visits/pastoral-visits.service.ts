@@ -16,6 +16,7 @@ import {
 import { TenantIntegrityService } from 'src/common/tenant/tenant-integrity.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { EventBusService } from 'src/common/events/event-bus.service';
+import { AppMetricsService } from 'src/common/observability/app-metrics.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -37,6 +38,7 @@ export class PastoralVisitsService {
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
     private readonly eventBus: EventBusService,
+    private readonly metrics?: AppMetricsService,
   ) {}
 
   private actorChurch(actor: JwtPayload) {
@@ -165,6 +167,7 @@ export class PastoralVisitsService {
       churchId: visit.churchId,
       payload: { pastoralVisitId: visit.id, servantId: visit.servantId },
     });
+    this.metrics?.incrementCounter('pastoral_cases_opened_total', 1);
 
     return visit;
   }
@@ -315,6 +318,7 @@ export class PastoralVisitsService {
       userId: actor.sub,
       metadata: { pastoralVisitId: recordId },
     });
+    this.metrics?.incrementCounter('pastoral_followups_created_total', 1);
 
     return followUp;
   }
@@ -475,6 +479,7 @@ export class PastoralVisitsService {
         alertType: alert.alertType,
       },
     });
+    this.metrics?.incrementCounter('pastoral_cases_opened_total', 1);
 
     return created;
   }

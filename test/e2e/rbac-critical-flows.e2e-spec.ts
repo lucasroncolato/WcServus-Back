@@ -85,7 +85,7 @@ describe('E2E RBAC critical flows', () => {
     await request(app.getHttpServer()).get('/journey/me').set('x-test-role', Role.SUPER_ADMIN).expect(403);
   });
 
-  it('Pastoral resolve accepts PASTOR and blocks COORDENADOR', async () => {
+  it('Pastoral resolve accepts PASTOR and COORDENADOR', async () => {
     await request(app.getHttpServer())
       .patch('/pastoral-visits/pv-1/resolve')
       .set('x-test-role', Role.PASTOR)
@@ -96,7 +96,7 @@ describe('E2E RBAC critical flows', () => {
       .patch('/pastoral-visits/pv-1/resolve')
       .set('x-test-role', Role.COORDENADOR)
       .send({ notes: 'ok' })
-      .expect(403);
+      .expect(200);
   });
 
   it('Worship services write endpoints remain admin-only', async () => {

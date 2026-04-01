@@ -21,6 +21,8 @@ import {
   isJustifiedAbsenceAttendanceStatus,
   isPositiveAttendanceStatus,
 } from 'src/common/attendance/attendance-status.utils';
+import { LogService } from 'src/common/log/log.service';
+import { AppMetricsService } from 'src/common/observability/app-metrics.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AuditService } from '../audit/audit.service';
@@ -41,6 +43,12 @@ export class AttendancesService {
     private readonly notificationsService: NotificationsService,
     private readonly eventBus: EventBusService,
     private readonly pastoralAlertEngine: PastoralAlertEngineService,
+    private readonly metrics: AppMetricsService = {
+      incrementCounter: () => undefined,
+    } as unknown as AppMetricsService,
+    private readonly logService: LogService = {
+      event: () => undefined,
+    } as unknown as LogService,
   ) {}
 
   async findAll(query: ListAttendancesQueryDto, actor: JwtPayload) {
@@ -281,6 +289,23 @@ export class AttendancesService {
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
+    this.trackAttendanceMetrics(attendance.status);
+    this.logService.event({
+      level: 'info',
+      module: 'attendance',
+      action: 'attendance.recorded',
+      status: 'success',
+      message: 'Attendance registered successfully',
+      churchId,
+      userId: actor.sub,
+      role: actor.role,
+      entityId: attendance.id,
+      metadata: {
+        serviceId: attendance.serviceId,
+        servantId: attendance.servantId,
+        status: attendance.status,
+      },
+    });
 
     return attendance;
   }
@@ -354,6 +379,23 @@ export class AttendancesService {
     });
 
     await this.notifyAttendanceChange(attendance.servantId, attendance.id, attendance.status);
+    this.trackAttendanceMetrics(attendance.status);
+    this.logService.event({
+      level: 'info',
+      module: 'attendance',
+      action: 'attendance.updated',
+      status: 'success',
+      message: 'Attendance updated successfully',
+      churchId,
+      userId: actor.sub,
+      role: actor.role,
+      entityId: attendance.id,
+      metadata: {
+        serviceId: attendance.serviceId,
+        servantId: attendance.servantId,
+        status: attendance.status,
+      },
+    });
 
     return attendance;
   }
@@ -583,6 +625,16 @@ export class AttendancesService {
         status,
       },
     });
+  }
+
+  private trackAttendanceMetrics(status: AttendanceStatus) {
+    this.metrics.incrementCounter('attendance_records_total', 1);
+    if (status === AttendanceStatus.NO_SHOW || status === AttendanceStatus.FALTA) {
+      this.metrics.incrementCounter('attendance_no_show_total', 1);
+    }
+    if (status === AttendanceStatus.LATE) {
+      this.metrics.incrementCounter('attendance_late_total', 1);
+    }
   }
 
 }

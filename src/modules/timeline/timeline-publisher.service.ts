@@ -59,22 +59,44 @@ export class TimelinePublisherService {
     const dedupeResolution = await this.resolveDedupe(event);
     if (dedupeResolution.type === 'skip') {
       this.metrics.incrementCounter('timeline_publish_deduped_total', 1);
+      this.metrics.incrementCounter('timeline_deduped_total', 1);
       return { published: false, reason: 'dedupe', entryId: dedupeResolution.entryId };
     }
 
     if (dedupeResolution.type === 'aggregated') {
       this.metrics.incrementCounter('timeline_publish_aggregated_total', 1);
+      this.metrics.incrementCounter('timeline_aggregated_total', 1);
       return { published: true, aggregated: true, entryId: dedupeResolution.entryId };
     }
 
-    const created = await this.persistTimelineEntry(event);
-    this.metrics.incrementCounter('timeline_publish_total', 1);
+    try {
+      const created = await this.persistTimelineEntry(event);
+      this.metrics.incrementCounter('timeline_publish_total', 1);
+      this.metrics.incrementCounter('timeline_published_total', 1);
 
-    return {
-      published: true,
-      aggregated: false,
-      entryId: created.id,
-    };
+      return {
+        published: true,
+        aggregated: false,
+        entryId: created.id,
+      };
+    } catch (error) {
+      this.metrics.incrementCounter('timeline_publish_failed_total', 1);
+      this.logService.event({
+        level: 'error',
+        module: 'timeline',
+        action: 'timeline.publish.failed',
+        status: 'error',
+        message: 'Timeline event publish failed',
+        churchId: event.churchId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: {
+          eventType: event.eventType,
+          dedupeKey: event.dedupeKey ?? null,
+          subjectId: event.subjectId ?? null,
+        },
+      });
+      throw error;
+    }
   }
 
   async publishBatch(events: TimelinePublishEvent[]) {
@@ -205,6 +227,7 @@ export class TimelinePublisherService {
       level: 'info',
       module: 'timeline',
       action: 'timeline.publish',
+      status: 'success',
       message: 'Timeline event published',
       churchId: event.churchId,
       metadata: {

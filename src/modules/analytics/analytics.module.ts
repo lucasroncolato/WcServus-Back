@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AppCacheModule } from 'src/common/cache/cache.module';
+import { SchedulerLockModule } from 'src/common/scheduler-lock/scheduler-lock.module';
 import { AnalyticsAggregatorService } from './analytics-aggregator.service';
 import { AnalyticsCacheFacade } from './analytics-cache.facade';
 import { AnalyticsOpsController } from './analytics-ops.controller';
@@ -9,7 +10,7 @@ import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 
 @Module({
-  imports: [AppCacheModule],
+  imports: [AppCacheModule, SchedulerLockModule],
   controllers: [AnalyticsController, AnalyticsOpsController],
   providers: [
     AnalyticsService,
@@ -18,6 +19,6 @@ import { AnalyticsService } from './analytics.service';
     AnalyticsSnapshotService,
     AnalyticsSnapshotScheduler,
   ],
-  exports: [AnalyticsService],
+  exports: [AnalyticsService, AnalyticsSnapshotScheduler],
 })
 export class AnalyticsModule {}

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { capabilities } from 'src/common/auth/capabilities';
@@ -11,24 +11,15 @@ import { TimelineService } from './timeline.service';
 
 @ApiTags('Timeline')
 @ApiBearerAuth()
-@Controller('timeline')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PASTOR, Role.COORDENADOR)
-@RequireCapabilities(capabilities.timelineReadChurch)
-export class TimelineController {
+@Controller('timeline/me')
+export class TimelineMeController {
   constructor(private readonly timelineService: TimelineService) {}
 
   @Get()
+  @Roles(Role.SERVO)
+  @RequireCapabilities(capabilities.timelineReadOwn)
   list(@CurrentUser() actor: JwtPayload, @Query() query: TimelineQueryDto) {
-    return this.timelineService.list(actor, query);
-  }
-
-  @Get('summary')
-  summary(@CurrentUser() actor: JwtPayload, @Query() query: TimelineQueryDto) {
-    return this.timelineService.summary(actor, query);
-  }
-
-  @Get(':id([A-Za-z0-9_-]{8,})')
-  detail(@CurrentUser() actor: JwtPayload, @Param('id') id: string) {
-    return this.timelineService.detail(actor, id);
+    return this.timelineService.listOwn(actor, query);
   }
 }
+

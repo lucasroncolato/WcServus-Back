@@ -6,9 +6,18 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AuditAction, PasswordResetToken, Role, ServantStatus, UserScope, UserStatus } from '@prisma/client';
+import {
+  AuditAction,
+  PasswordResetToken,
+  PermissionEffect,
+  Role,
+  ServantStatus,
+  UserScope,
+  UserStatus,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+import { capabilitiesForRole } from 'src/common/auth/role-capabilities';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -355,6 +364,7 @@ export class AuthService {
           .filter((value): value is string => Boolean(value)),
       ),
     ];
+    const capabilities = await this.resolveUserCapabilities(account.id, account.role);
 
     return {
       id: account.id,
@@ -389,8 +399,26 @@ export class AuthService {
         : null,
       linkedSector,
       permissions: this.resolvePermissions(account.role, account.scope),
+      capabilities,
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
+    };
+  }
+
+  async capabilities(userId: string) {
+    const account = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+    if (!account) {
+      throw new UnauthorizedException('Invalid user');
+    }
+
+    const capabilities = await this.resolveUserCapabilities(account.id, account.role);
+    return {
+      role: account.role,
+      capabilities,
+      capabilityVersion: '2026-03-rbac-unified',
     };
   }
 
@@ -515,6 +543,28 @@ export class AuthService {
       canViewReports: false,
       canViewPastoralData: false,
     };
+  }
+
+  private async resolveUserCapabilities(userId: string, role: Role) {
+    const base = new Set(capabilitiesForRole(role));
+    const overrides = await this.prisma.userPermissionOverride.findMany({
+      where: { userId },
+      select: {
+        permissionKey: true,
+        effect: true,
+      },
+    });
+
+    for (const override of overrides) {
+      const key = override.permissionKey as string;
+      if (override.effect === PermissionEffect.ALLOW) {
+        base.add(key as any);
+      } else {
+        base.delete(key as any);
+      }
+    }
+
+    return [...base.values()];
   }
 
   private getRefreshExpirationMillis(raw: string): number {

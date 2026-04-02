@@ -339,14 +339,12 @@ export class ServantsService {
               ? ServantStatus.RECRUTAMENTO
               : this.mapDtoStatus(dto.status ?? ServantActiveStatusDto.ACTIVE),
             trainingStatus: TrainingStatus.PENDING,
-            approvalStatus: isCoordinatorRequest
-              ? ServantApprovalStatus.PENDING
-              : ServantApprovalStatus.APPROVED,
-            approvalRequestedByUserId: isCoordinatorRequest ? actor.sub : null,
-            approvedByUserId: isCoordinatorRequest ? null : actor.sub,
+            approvalStatus: ServantApprovalStatus.APPROVED,
+            approvalRequestedByUserId: null,
+            approvedByUserId: actor.sub,
             approvalUpdatedAt: new Date(),
             approvalNotes: isCoordinatorRequest
-              ? 'Solicitacao criada por coordenador. Pendente de aprovacao administrativa.'
+              ? 'Aprovado automaticamente na criacao por coordenador.'
               : 'Aprovado na criacao por perfil administrativo.',
             aptitude: dto.aptitude,
             teamId,
@@ -375,7 +373,7 @@ export class ServantsService {
             passwordHash,
             role: targetRole,
             scope: UserScope.SELF,
-            status: isCoordinatorRequest ? UserStatus.INACTIVE : dto.user.status ?? UserStatus.ACTIVE,
+            status: dto.user.status ?? UserStatus.ACTIVE,
             phone: dto.user.phone ?? createdServant.phone ?? null,
             servantId: createdServant.id,
             churchId: actorChurchId,
@@ -408,13 +406,13 @@ export class ServantsService {
       entity: 'ServantWithUser',
       entityId: servant.id,
       userId: actor.sub,
-      metadata: {
-        ministryIds,
-        teamId,
-        userRole: targetRole,
-        approvalStatus: isCoordinatorRequest ? ServantApprovalStatus.PENDING : ServantApprovalStatus.APPROVED,
-      },
-    });
+        metadata: {
+          ministryIds,
+          teamId,
+          userRole: targetRole,
+          approvalStatus: ServantApprovalStatus.APPROVED,
+        },
+      });
 
     await this.eventBus.emit({
       name: 'SERVANT_CREATED',
@@ -836,10 +834,6 @@ export class ServantsService {
     if (!existing) {
       throw new NotFoundException('Servant not found');
     }
-    if (existing.approvalStatus !== ServantApprovalStatus.APPROVED) {
-      throw new ForbiddenException('Only approved servants can complete training');
-    }
-
     const availableSectorIds = existing.servantMinistries.map((item) => item.ministryId);
     const targetMinistryId =
       dto.ministryId ??
